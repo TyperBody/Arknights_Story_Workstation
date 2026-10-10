@@ -2654,7 +2654,7 @@ export default function StoryEditorPage() {
       >
         {body}
       </InspectorWindow>
-      </div>
+    </div>
     );
   };
 
