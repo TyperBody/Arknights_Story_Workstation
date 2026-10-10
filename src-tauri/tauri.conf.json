@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://code.jquery.com asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost; img-src 'self' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost data: blob:; media-src 'self' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost blob: data:; font-src 'self' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost prts-cdn: http://prts-cdn.localhost blob: data: https://data.jsdelivr.com https://cdn.jsdelivr.net https://api.github.com https://raw.githubusercontent.com",
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://code.jquery.com asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost https://static.prts.wiki https://torappu.prts.wiki https://media.prts.wiki data:; worker-src 'self' blob: data:; style-src 'self' 'unsafe-inline' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost https://static.prts.wiki https://torappu.prts.wiki https://media.prts.wiki; img-src 'self' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost data: blob: https://static.prts.wiki https://torappu.prts.wiki https://media.prts.wiki; media-src 'self' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost blob: data: https://static.prts.wiki https://torappu.prts.wiki https://media.prts.wiki; font-src 'self' asset: http://asset.localhost prts-cdn: http://prts-cdn.localhost data: blob: https://static.prts.wiki https://torappu.prts.wiki https://media.prts.wiki; connect-src 'self' ipc: http://ipc.localhost prts-cdn: http://prts-cdn.localhost blob: data: https://data.jsdelivr.com https://cdn.jsdelivr.net https://api.github.com https://raw.githubusercontent.com https://static.prts.wiki https://torappu.prts.wiki https://media.prts.wiki",
       "assetProtocol": {
         "enable": true,
         "scope": {
@@ -49,6 +49,10 @@
         "languages": [
           "SimpChinese"
         ]
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
       }
     },
     "icon": [

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useStoryIndex } from "../hooks/useStoryIndex";
+import { listLocalStories, mergeLocalStories, resetLocalStories, type LocalStoryMeta } from "../lib/localStories";
 import { useDownload } from "../lib/DownloadContext";
 import { useCompression } from "../lib/CompressionContext";
 import { buildShelves } from "../lib/bookshelf";
@@ -25,6 +26,12 @@ export default function StoryBrowserPage() {
   const [cachedStories, setCachedStories] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
+  const [localStories, setLocalStories] = useState<LocalStoryMeta[]>([]);
+  useEffect(() => {
+    // 每次进书架都重扫一次剧本包目录：安装/删除后无需重启即可看到。
+    resetLocalStories();
+    listLocalStories().then(setLocalStories).catch(() => setLocalStories([]));
+  }, []);
   const [searchParams, setSearchParams] = useSearchParams();
   // The drilled-in book lives in the URL (?cat=&book=) so it's its own history
   // entry: hardware/gesture back pops 章节 → 书架 (one level), and it survives the
@@ -95,7 +102,12 @@ export default function StoryBrowserPage() {
 
   // All shelves, then filtered by the search query (matches book title /
   // chapter / activity / story title / page_title).
-  const shelves: Shelf[] = useMemo(() => (index ? buildShelves(index) : []), [index]);
+  // 本地二创剧本包（<资源目录>/library/）合并成独立的「同人剧场」分类，
+  // 不动上游索引；无本地包时 shelf 列表与原来完全一致。
+  const shelves: Shelf[] = useMemo(() => {
+    const merged = index ? mergeLocalStories(index, localStories) : index;
+    return merged ? buildShelves(merged) : [];
+  }, [index, localStories]);
 
   const filtered: Shelf[] = useMemo(() => {
     const q = search.trim().toLowerCase();

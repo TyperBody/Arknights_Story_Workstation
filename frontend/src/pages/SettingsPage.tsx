@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { isDebugConsoleEnabled, setDebugPref, debugBuildDefault } from "../lib/debugSettings";
-import { isHidePlayerBack, setHidePlayerBack } from "../lib/uiSettings";
+import { getPlayerChrome, isHidePlayerBack, setHidePlayerBack, setPlayerChrome, type PlayerChrome } from "../lib/uiSettings";
 import { isAndroid } from "../lib/platform";
 import { getDownloadSettings, setDownloadSettings } from "../lib/predownload";
 import { useDownload } from "../lib/DownloadContext";
@@ -18,6 +18,11 @@ interface CacheStatus {
   asset_db_cached: boolean;
   cached_stories: string[];
   total_size_bytes: number;
+}
+
+interface LibraryDirInfo {
+  library_dir: string;
+  pack_count: number;
 }
 
 interface ResourceDirInfo {
@@ -41,8 +46,10 @@ export default function SettingsPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [resDir, setResDir] = useState<ResourceDirInfo | null>(null);
+  const [libraryDir, setLibraryDir] = useState<LibraryDirInfo | null>(null);
   const [debugConsole, setDebugConsole] = useState(isDebugConsoleEnabled());
   const [hidePlayerBack, setHidePlayerBackState] = useState(isHidePlayerBack());
+  const [playerChrome, setPlayerChromeState] = useState<PlayerChrome>(getPlayerChrome());
   // Download tuning: concurrency + bandwidth limit (shown in KB/s; 0 = unlimited).
   const [concurrency, setConcurrency] = useState(4);
   const [rateLimitKbps, setRateLimitKbps] = useState(0);
@@ -53,6 +60,7 @@ export default function SettingsPage() {
     if (saved) setNickname(saved);
     refreshCacheStatus();
     invoke<ResourceDirInfo>("get_resource_dir").then(setResDir).catch(() => {});
+    invoke<LibraryDirInfo>("get_library_dir").then(setLibraryDir).catch(() => {});
     getDownloadSettings()
       .then((s) => {
         setConcurrency(s.concurrency);
@@ -75,6 +83,28 @@ export default function SettingsPage() {
     }
   };
 
+
+  /** 用系统文件管理器打开 `<资源目录>/assets/library/`。 */
+  const openLibraryDir = useCallback(async () => {
+    try {
+      await invoke<string>("open_library_dir");
+    } catch (error) {
+      showMsg(`打开失败：${error instanceof Error ? error.message : String(error)}`, 5000);
+    }
+  }, []);
+
+  /** 选一个剧本包目录，复制进 `<资源目录>/assets/library/<packId>/`。 */
+  const importLibraryPack = useCallback(async () => {
+    try {
+      const picked = await open({ directory: true, multiple: false, title: "选择剧本包目录（含 pack.json 与 script.txt）" });
+      if (typeof picked !== "string") return;
+      const info = await invoke<LibraryDirInfo & { installed: string }>("import_library_pack", { source: picked });
+      setLibraryDir({ library_dir: info.library_dir, pack_count: info.pack_count });
+      showMsg(`已安装剧本包「${info.installed}」（共 ${info.pack_count} 个）。返回书架即可看到「同人剧场」。`, 6000);
+    } catch (error) {
+      showMsg(`安装失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+    }
+  }, []);
 
   const chooseResourceDir = async () => {
     try {
@@ -105,6 +135,19 @@ export default function SettingsPage() {
     setHidePlayerBack(next);
     setHidePlayerBackState(next);
     showMsg(next ? "已隐藏播放器内的返回按钮（用系统返回手势）" : "已显示播放器内的返回按钮");
+  };
+
+  /** 「播放器底栏」三档：显示 → 自动隐藏 → 隐藏 → 显示。 */
+  const cyclePlayerChrome = () => {
+    const order: PlayerChrome[] = ["show", "auto", "hide"];
+    const next = order[(order.indexOf(playerChrome) + 1) % order.length];
+    setPlayerChrome(next);
+    setPlayerChromeState(next);
+    showMsg(next === "show"
+      ? "播放器底栏：显示（默认）"
+      : next === "auto"
+        ? "播放器底栏：自动隐藏（3 秒无操作后淡出，移动指针恢复）"
+        : "播放器底栏：隐藏（可用「文本」面板查看对话）");
   };
 
   const toggleDebugConsole = () => {
@@ -280,6 +323,23 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Player bottom bar (engine toolbar) */}
+      <div className="setting-group">
+        <label>播放器底栏</label>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <button className="nav-btn" onClick={cyclePlayerChrome}>
+            {playerChrome === "show" ? "显示" : playerChrome === "auto" ? "自动隐藏" : "隐藏"}
+          </button>
+          <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+            {playerChrome === "show"
+              ? "播放时始终显示底部控制条（播放模式 / 播放速度那一行）"
+              : playerChrome === "auto"
+                ? "3 秒无操作后淡出，移动指针 / 触摸即恢复"
+                : "播放时隐藏底部控制条，画面更干净"}
+          </span>
+        </div>
+      </div>
+
       {/* Debug console */}
       <div className="setting-group">
         <label>调试控制台</label>
@@ -312,6 +372,17 @@ export default function SettingsPage() {
               <div style={{ wordBreak: "break-all" }}>
                 当前位置：{resDir.current}
                 {resDir.is_custom ? "（自定义）" : "（默认）"}
+              </div>
+              <div style={{ marginTop: "6px" }}>
+                本地剧本包放在 <code>{libraryDir?.library_dir ?? `${resDir.current}\\assets\\library`}</code>
+                {libraryDir ? `（已安装 ${libraryDir.pack_count} 个）` : ""}
+                <button className="nav-btn" style={{ marginLeft: "6px" }} onClick={openLibraryDir}>打开剧本包文件夹</button>
+                {" "}
+                <button className="nav-btn" onClick={importLibraryPack}>安装剧本包…</button>
+              </div>
+              <div style={{ color: "var(--text-secondary)", marginTop: "4px" }}>
+                剧本包 = 一个目录，内含 <code>pack.json</code> 与 <code>script.txt</code>；
+                也可用 <code>node scripts/fanfic/install-library.mjs</code> 一键安装。
               </div>
               <div style={{ wordBreak: "break-all", color: "var(--text-secondary)" }}>
                 默认位置（exe 所在文件夹）：{resDir.default_dir}

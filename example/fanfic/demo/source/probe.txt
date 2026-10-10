@@ -1,0 +1,15 @@
+[HEADER(key="fanfic_demo", fit_mode="BLACK_MASK")]
+[Background(image="bg_black", x=0, y=0, fadetime=0, block=true)]
+[charslot@arrive(slot="m", name="char_130_doberm_ex", duration=0.5)]
+[name="杜宾"]  这里是……？
+[Decision@pick(options="跟着她走;先问清楚", values="1;2")]
+[Predicate(references="1")]
+[charslot@branchA(slot="m", name="char_002_amiya_1#1", duration=0.5)]
+[name="阿米娅"]  这边走，博士。
+[Predicate(references="2")]
+[charslot@branchB(slot="m", name="char_002_amiya_1#3", duration=0.5)]
+[name="阿米娅"]  先别急，我把情况说清楚。
+[Predicate(references="1;2")]
+[charslot@resolve(slot="m", name="char_130_doberm_ex", duration=0.5)]
+[name="杜宾"]  明白了。
+[End]

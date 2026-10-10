@@ -934,3 +934,1228 @@
     font-size: 12px;
   }
 }
+
+/* =========================================================================
+   同人剧本目录（/fanfic）
+   ========================================================================= */
+
+.fanfic-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 头部：标题左、包数右。 */
+.fanfic-page .browser-header h1 {
+  margin-right: 0;
+}
+
+.fl-spacer {
+  flex: 1;
+}
+
+.fl-count {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.fl-content {
+  padding: 18px 24px calc(40px + var(--safe-bottom));
+}
+
+.fl-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.fl-toolbar .btn-primary,
+.fl-toolbar .nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fl-win {
+  flex: none;
+}
+
+/* 资源目录路径 + 包数 */
+.fl-path {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+/* 页内提示条（替代 window.alert） */
+.fl-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(244, 67, 54, 0.55);
+  border-left: 3px solid var(--error);
+  border-radius: 6px;
+  background: rgba(244, 67, 54, 0.08);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.fl-alert-close {
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fl-alert-close:hover {
+  color: var(--text-primary);
+}
+
+/* 空态 */
+.fl-empty {
+  margin: 24px auto 0;
+  max-width: 720px;
+  padding: 24px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.fl-empty-title {
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.fl-empty-text {
+  margin-top: 6px;
+}
+
+.fl-empty code,
+.fl-path,
+.fl-cmd code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.fl-empty code {
+  color: var(--accent);
+}
+
+.fl-cmd {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.fl-cmd code {
+  color: var(--text-primary);
+  font-size: 12px;
+  white-space: pre;
+}
+
+.fl-empty-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.fl-empty-actions .btn-primary,
+.fl-empty-actions .nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 剧本包卡片 */
+.fl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.fl-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fl-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.fl-pack-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.fl-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fl-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.fl-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fl-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(244, 196, 48, 0.16);
+  border: 1px solid rgba(244, 196, 48, 0.4);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.fl-badge.soft {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.fl-id {
+  color: var(--text-secondary);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.fl-card-desc {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.fl-card-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fl-card-actions .btn-primary,
+.fl-card-actions .nav-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.fl-card-actions .nav-btn.danger:hover {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+}
+
+.fl-card-actions .nav-btn:disabled,
+.fl-card-actions .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+  .fl-content {
+    padding: 14px 16px calc(40px + var(--safe-bottom));
+  }
+  .fl-grid {
+    grid-template-columns: 1fr;
+  }
+  .fl-card {
+    flex-wrap: wrap;
+  }
+  .fl-card-actions {
+    flex-direction: row;
+    width: 100%;
+  }
+  .fl-card-actions button {
+    flex: 1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   剧本编辑器（/editor/:packId）——借鉴 YayinStoryStudio MainEditor 的体验：
+   关键词驱动编辑 + 右侧工具面板（诊断/控制器/剧本信息）+ 状态栏 + 悬停帮助。
+   左侧文本区 ~70%，右侧工具面板 ~30%；窄屏纵向堆叠。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.editor-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  /* 浮动工具窗口（`.ed-win--float`）的定位上下文。 */
+  position: relative;
+}
+
+.ed-header {
+  padding: 10px 16px;
+  gap: 10px;
+}
+
+.ed-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ed-title h1 {
+  font-size: 16px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ed-sub {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.ed-sub code,
+.ed-source code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.ed-spacer {
+  flex: 1;
+}
+
+.ed-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ed-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ed-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ed-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.ed-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #1a1a1a;
+}
+
+.ed-dirty {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.ed-dirty.on {
+  border-color: rgba(244, 196, 48, 0.6);
+  background: rgba(244, 196, 48, 0.12);
+  color: var(--accent);
+}
+
+/* ── 主体：左编辑器 / 右工具面板 ─────────────────────────────────────────── */
+
+.ed-split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.ed-code {
+  flex: 0 0 70%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: #1d1d1d;
+}
+
+/* 两轴都滚：优先滚动左边距外的内容（gutter 吸附）。
+   `max-width` 交给 flex 子项自身，避免被「fit-content」式收缩裁掉长行。 */
+.ed-code-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch; /* gutter 与正文同高；正文比视口高时由 stretch 撑满 */
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* 行号槽：横向滚动时吸附在左边。 */
+.ed-gutter {
+  position: sticky;
+  left: 0;
+  /* 行号槽自撑满滚动内容高度（含正文超出视口的部分），
+     横向滚动时吸附在左侧，不会露出底下的面板背景。 */
+  align-self: stretch;
+  min-height: 100%;
+  z-index: 3;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 24px 6px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 21px;
+  text-align: right;
+  user-select: none;
+}
+
+.ed-gutter-line {
+  display: block;
+  min-width: 2.2ch;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.ed-gutter-line.current {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.ed-gutter-line.error {
+  color: #ff8a80;
+}
+
+.ed-gutter-line.warning {
+  color: #ffd54f;
+}
+
+/* 文本层：透明 textarea 叠在当前行高亮条上，保证两者像素级对齐。
+   宽/高由页面按「最长行 / 行数」算出（内联 width/height），
+   `.ed-anchor` 只负责量。 */
+.ed-code-lines {
+  position: relative;
+  flex: none;
+  min-width: 0;
+}
+
+.ed-linebar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(244, 196, 48, 0.085);
+  border-top: 1px solid rgba(244, 196, 48, 0.22);
+  border-bottom: 1px solid rgba(244, 196, 48, 0.22);
+  pointer-events: none;
+}
+
+.ed-textarea {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  /* 与 .ed-code-lines 等高（行数 × LH + 下 padding，box-sizing 含 padding），
+     所以「行数多时被裁掉」不再发生；滚动统一交给 .ed-code-scroll。 */
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 10px 24px;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  color: var(--text-primary);
+  caret-color: var(--accent);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 21px;
+  tab-size: 4;
+}
+
+.ed-textarea::selection {
+  background: rgba(244, 196, 48, 0.28);
+}
+
+.ed-textarea[readonly] {
+  color: var(--text-primary);
+}
+
+/* 测量锚点：不可见，只用来算光标像素位置（用于补全弹窗 / 悬停帮助）。 */
+.ed-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  max-width: none;
+  white-space: pre;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 21px;
+  pointer-events: none;
+}
+
+/* 补全弹窗 / 悬停帮助（跟随光标）。 */
+.ed-popup {
+  position: absolute;
+  z-index: 6;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 232px;
+  overflow-y: auto;
+  padding: 4px;
+  background: #232323;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+}
+
+.ed-popup-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.ed-popup-item.active {
+  background: rgba(244, 196, 48, 0.16);
+}
+
+.ed-popup-item small {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.ed-hover {
+  position: absolute;
+  z-index: 5;
+  max-width: 340px;
+  padding: 6px 10px;
+  background: #262626;
+  border: 1px solid rgba(244, 196, 48, 0.45);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.ed-hover-title {
+  color: var(--accent);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+.ed-hover-ref {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.ed-code-empty {
+  padding: 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.ed-code-empty code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  color: var(--text-primary);
+}
+
+/* ── 右侧工具面板 ─────────────────────────────────────────────────────── */
+
+.ed-panel {
+  flex: 1 1 30%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+}
+
+.ed-tabs {
+  display: flex;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.ed-tab {
+  flex: 1;
+  padding: 9px 6px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ed-tab:hover {
+  color: var(--text-primary);
+}
+
+.ed-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.ed-tab-count {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.ed-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px 24px;
+}
+
+.ed-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ed-diag {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ed-diag-item {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  align-items: flex-start;
+  padding: 6px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.ed-diag-item:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
+.ed-diag-code {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* 长消息要整段可读：换行 + 长 token 断行，绝不被面板裁掉。 */
+.ed-diag-item > span:last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ed-diag-item.error .ed-diag-code {
+  color: #ff8a80;
+}
+
+.ed-diag-item.warning .ed-diag-code {
+  color: #ffd54f;
+}
+
+.ed-diag-ok {
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--success);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ed-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ed-palette-group h3 {
+  margin-bottom: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ed-palette-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ed-palette-btn {
+  padding: 3px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.ed-palette-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ed-palette-btn.tier-B {
+  opacity: 0.86;
+}
+
+.ed-palette-btn.tier-C {
+  opacity: 0.72;
+}
+
+.ed-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ed-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ed-field span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ed-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.ed-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.ed-source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.ed-source code {
+  word-break: break-all;
+}
+
+.ed-source em {
+  color: var(--text-secondary);
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* ── 状态栏 + 提示条 ───────────────────────────────────────────────── */
+
+.ed-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 14px;
+  padding-bottom: calc(4px + var(--safe-bottom));
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.ed-status .grow {
+  flex: 1;
+}
+
+.ed-status .dirty {
+  color: var(--accent);
+}
+
+.ed-status .saved {
+  color: var(--success);
+}
+
+.ed-status .busy {
+  color: var(--accent);
+}
+
+.ed-status .error {
+  color: var(--error);
+}
+
+.ed-alert {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: rgba(244, 67, 54, 0.14);
+  border-bottom: 1px solid rgba(244, 67, 54, 0.4);
+  color: #ffcdd2;
+  font-size: 12px;
+}
+
+.ed-alert span {
+  flex: 1;
+}
+
+.ed-alert button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ed-viewtabs {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── 预览：可拖拽高度的演出面板 ─────────────────────────────────────── */
+
+.ed-preview {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 340px;
+  min-height: 140px;
+  background: #000;
+  border-top: 1px solid var(--border);
+}
+
+.ed-preview.full {
+  height: 62%;
+}
+
+.ed-preview-resize {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  z-index: 8;
+  cursor: ns-resize;
+}
+
+.ed-preview-resize::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 54px;
+  height: 3px;
+  margin-left: -27px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.ed-preview-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  background: #1b1b1b;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ed-preview-bar .grow {
+  flex: 1;
+}
+
+.ed-preview-frame {
+  flex: 1;
+  min-height: 0;
+}
+
+.ed-preview-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000;
+}
+
+.ed-preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  padding: 16px;
+}
+
+/* ── 舞台挂载点（StagePane，task-10）───────────────────────────────
+   子组件尚未落盘时只显示一行占位；`height` 由页面传入。 */
+.ed-stage {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 0;
+  padding: 8px 12px;
+  background: #141414;
+  border-top: 1px solid var(--border);
+}
+
+.ed-stage-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+}
+
+.ed-stage-host > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ed-stage-host-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-style: normal;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* 控件检视器（ControllerInspector，task-9）：常驻在工具面板顶部。 */
+.ed-inspector {
+  flex: none;
+  margin-bottom: 8px;
+}
+
+.ed-inspector-empty {
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── 行定位条（标题下）：预览到此处 / 上一行 / 下一行 ─────────────── */
+.ed-scrub {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 6px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.ed-scrub .grow {
+  flex: 1;
+}
+
+.ed-scrub input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 60px;
+  max-width: 420px;
+  accent-color: var(--accent);
+}
+
+.ed-scrub input[type="number"] {
+  width: 68px;
+  padding: 2px 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.ed-scrub-btn {
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ed-scrub-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ed-scrub-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 只读（纯 Vite）：不允许保存，视觉上收一点。 */
+.editor-page.readonly .ed-btn.primary {
+  opacity: 0.7;
+}
+
+/* 两块面板互不挤压：1100px 以下改为上下堆叠（编辑器在上，工具面板在下）。 */
+@media (max-width: 1100px) {
+  .ed-split {
+    flex-direction: column;
+  }
+  .ed-code {
+    flex: 1 1 auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  /* 上下堆叠时正文优先：工具面板矮一点，正文至少 12 行可见。 */
+  .ed-panel {
+    flex: 0 0 34vh;
+    border-top: 0;
+  }
+  .ed-code {
+    min-height: 12rem;
+  }
+  .ed-title h1 {
+    max-width: 40vw;
+  }
+  .ed-scrub input[type="range"] {
+    max-width: none;
+  }
+  /* 上下堆叠时舞台别抢正文的高度：随视口收缩。 */
+  .ed-stage {
+    flex: 0 1 auto;
+    max-height: 26vh;
+  }
+}
+
+/* 诊断条目里的「修法」提示（`editcore` 的 fix 字段）。 */
+.ed-diag-fix {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* 「插入控制器」向导（task-9）：居中弹窗，遮罩点击关闭。 */
+.ed-wizard {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.ed-wizard-card {
+  width: min(880px, 94vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   task-15：撤销/重做 + 工具窗口（InspectorWindow）
+   窗口本体的样式在 `components/editor/inspectorWindow.css`；这里只放
+   编辑器页面自己需要的两块：停靠时的容器约束 + 状态栏按钮。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 停靠的工具窗口：在 .ed-split 里保持原来的 flex 行为（右栏撑满/舞台占满宽）。 */
+.ed-split > .ed-win--dock {
+  flex: 1 1 30%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ed-split > .ed-win--dock:first-child {
+  flex: 0 0 70%;
+}
+
+.ed-split > .ed-win {
+  background: transparent;
+}
+
+/* 浮动窗口：脱离文档流，盖在正文上。 */
+.ed-split > .ed-win--float,
+.editor-page > .ed-win--float {
+  flex: none;
+}
+
+/* 右栏浮起来后，把整行让给正文（否则右侧留 30% 空槽）。 */
+.ed-split:has(> .ed-win--float) > .ed-code {
+  flex: 1 1 auto;
+}
+
+/* 关掉右栏窗口时同理。 */
+.ed-split:has(> .ed-code:only-child) > .ed-code {
+  flex: 1 1 auto;
+}
+
+/* 页面里直接作为子元素的工具窗口（舞台 / 预览 / 分支图）。 */
+.editor-page > .ed-win--dock {
+  flex: none;
+  width: 100%;
+}
+
+.editor-page > .ed-win--dock > .ed-win-bar {
+  height: 26px;
+}
+
+/* 预览窗口：dock 时保持原来的高度（由内联 style 决定），float 时撑满窗口。 */
+.ed-preview.float {
+  border-top: 0;
+}
+
+/* 舞台窗口：dock 时高度由内部 `.ed-stage` 的内联 style 决定。 */
+.ed-win-body > .ed-stage {
+  border-top: 0;
+}
+
+/* 状态栏的撤销/重做按钮。 */
+.ed-status-btn {
+  flex: none;
+  padding: 1px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ed-status-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ed-status-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 工具栏的选中态（例如「⌥ 分支图」打开时）。 */
+.ed-btn.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(244, 196, 48, 0.12);
+}

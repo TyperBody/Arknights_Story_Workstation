@@ -35,6 +35,9 @@ export default function HomePage() {
         <button className="nav-btn" onClick={() => navigate("/settings")}>
           设置
         </button>
+        <button className="nav-btn" onClick={() => navigate("/fanfic")}>
+          同人剧本
+        </button>
       </div>
 
       {update ? (

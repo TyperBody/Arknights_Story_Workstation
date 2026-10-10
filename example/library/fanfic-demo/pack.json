@@ -1,0 +1,10 @@
+{
+ "id": "fanfic-demo",
+ "title": "同人样例：初次见面",
+ "chapter": "同人剧场",
+ "author": "Arkstage",
+ "description": "内置示例：两分支小剧本（黑场淡入 → 立绘入场 → 选择分支 → 合流 → 淡出）",
+ "branchPoints": [
+  "pick"
+ ]
+}

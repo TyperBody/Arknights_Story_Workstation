@@ -2,10 +2,35 @@ import { useSyncExternalStore } from "react";
 
 // Small UI preferences kept in localStorage. "hidePlayerBack" hides ONLY the
 // reader's on-screen back button (the other pages keep theirs); users who use the
-// system back gesture can declutter the immersive reader.
+// system back gesture can declutter the immersive reader. "playerChrome" controls
+// the engine's bottom control strip (播放模式 / 播放速度 …) inside the reader.
 
 const HIDE_PLAYER_BACK_KEY = "prts-hide-player-back";
+const PLAYER_CHROME_KEY = "prts-player-chrome";
 const listeners = new Set<() => void>();
+
+/** 播放器底部控制条（引擎 `.story-player > .n-card[aria-label="播放控制"]`）的显示方式。 */
+export type PlayerChrome = "show" | "auto" | "hide";
+
+const PLAYER_CHROME_VALUES: readonly PlayerChrome[] = ["show", "auto", "hide"];
+
+/** 当前「播放器底栏」设置（默认显示；非法/缺失一律回落到 `show`）。 */
+export function getPlayerChrome(): PlayerChrome {
+  const raw = localStorage.getItem(PLAYER_CHROME_KEY);
+  return PLAYER_CHROME_VALUES.includes(raw as PlayerChrome) ? (raw as PlayerChrome) : "show";
+}
+
+export function setPlayerChrome(value: PlayerChrome): void {
+  // `show` 是默认值：不写 key，回到默认即「清掉」。
+  if (value === "show") localStorage.removeItem(PLAYER_CHROME_KEY);
+  else localStorage.setItem(PLAYER_CHROME_KEY, value);
+  listeners.forEach((l) => l());
+}
+
+/** React hook：订阅「播放器底栏」设置（播放页用；iframe 启动只读一次）。 */
+export function usePlayerChrome(): PlayerChrome {
+  return useSyncExternalStore(subscribe, getPlayerChrome);
+}
 
 export function isHidePlayerBack(): boolean {
   return localStorage.getItem(HIDE_PLAYER_BACK_KEY) === "1";

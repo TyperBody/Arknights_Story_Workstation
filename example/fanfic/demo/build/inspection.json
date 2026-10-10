@@ -1,0 +1,31 @@
+{
+ "source": "source/probe.txt",
+ "tags": [
+  {
+   "command": "charslot",
+   "tag": "arrive",
+   "line": 3
+  },
+  {
+   "command": "decision",
+   "tag": "pick",
+   "line": 5
+  },
+  {
+   "command": "charslot",
+   "tag": "branchA",
+   "line": 7
+  },
+  {
+   "command": "charslot",
+   "tag": "branchB",
+   "line": 10
+  },
+  {
+   "command": "charslot",
+   "tag": "resolve",
+   "line": 13
+  }
+ ],
+ "probe": null
+}

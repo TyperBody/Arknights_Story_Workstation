@@ -51,3 +51,9 @@ docs/reference/
 Screenshot_*.jpg
 Screenshot_*.png
 /ref/
+
+# Fanfic tooling scratch (upstream snapshot, probe reports, offline asset mirror)
+/build/fanfic/
+
+# Embedded sample pack for the fan-fiction library (read via include_str!).
+!src-tauri/resources/library/sample-fanfic/build/runtime.json

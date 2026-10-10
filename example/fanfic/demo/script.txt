@@ -1,0 +1,27 @@
+[HEADER(key="fanfic_sample", is_skippable=true, fit_mode="BLACK_MASK")]
+// —— 开场惯例：先黑场落定，再淡入（对应语料 act37side/level_act37side_02_beg.txt 的片头）
+[Blocker(a=1, r=0, g=0, b=0, fadetime=0, block=true)]
+[Dialog]
+[Background(image="bg_black", x=0, y=0, fadetime=0, block=true)]
+[Delay(time=0.4)]
+[Blocker(a=0, r=0, g=0, b=0, fadetime=1.2, block=true)]
+[Delay(time=0.3)]
+// —— 立绘入场：Character 命令读 fadetime（不是 duration）
+[Character(name="char_130_doberm_ex", fadetime=0.8)]
+[Delay(time=0.2)]
+[name="杜宾"]  这里是……？
+[Decision(options="跟着她走;先问清楚", values="1;2")]
+[Predicate(references="1")]
+// —— 差分：#1 是同名立绘的另一张差分，切换同样走 fadetime
+[Character(name="char_002_amiya_1#1", fadetime=0.5)]
+[name="阿米娅"]  这边走，博士。
+[Predicate(references="2")]
+[Character(name="char_002_amiya_1#3", fadetime=0.5)]
+[name="阿米娅"]  先别急，我把情况说清楚。
+// —— 合流：references 写全部分支值，两个分支在这里汇合
+[Predicate(references="1;2")]
+[Character(name="char_130_doberm_ex", fadetime=0.5)]
+[name="杜宾"]  明白了。
+[Delay(time=0.3)]
+// —— 收尾：StoryPlayer 只认 endtip（没有 [End]）；黑场淡出收得更干净
+[Blocker(a=1, r=0, g=0, b=0, fadetime=1.5, block=true)]

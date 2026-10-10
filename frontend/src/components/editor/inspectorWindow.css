@@ -1,0 +1,153 @@
+/* 工具窗口（`InspectorWindow.tsx`）—— Tailwind 风格命名、零依赖。
+   `.ed-win` 是窗口壳；停靠（dock）时就是原来的右栏/底栏观感，
+   浮动（float）时绝对定位 + 阴影 + 缩放手柄。
+   颜色全部走 `browser.css` 的 CSS 变量，主题一致。 */
+
+.ed-win {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* 停靠：撑满父容器（父容器决定宽/高），无圆角阴影，保持原有视觉。 */
+.ed-win--dock {
+  flex: 1 1 auto;
+  border-radius: 0;
+  border: 0;
+}
+
+/* 浮动：绝对定位 + 提升层级 + 阴影。 */
+.ed-win--float {
+  z-index: 30;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+.ed-win--dragging {
+  user-select: none;
+}
+
+/* 标题条：拖动把手。`touch-action:none` 必需（WebView/触摸上否则被当成滚动）。 */
+.ed-win-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 10px;
+  background: #1f1f1f;
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.ed-win--dock .ed-win-bar {
+  cursor: default;
+}
+
+.ed-win-bar:hover {
+  background: #242424;
+}
+
+.ed-win-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.ed-win-title {
+  flex: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ed-win-grow {
+  flex: 1;
+}
+
+.ed-win-btn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ed-win-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--accent);
+}
+
+/* 内容区：内部自己滚（面板/舞台各自已经有滚动容器）。 */
+.ed-win-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* 右下缩放手柄。 */
+.ed-win-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 2;
+  background:
+    linear-gradient(135deg, transparent 0 45%, var(--text-secondary) 45% 55%, transparent 55% 100%),
+    linear-gradient(135deg, transparent 0 70%, var(--text-secondary) 70% 80%, transparent 80% 100%);
+  opacity: 0.5;
+}
+
+.ed-win-resize:hover {
+  opacity: 0.9;
+}
+
+/* 停靠时父容器自己管尺寸，手柄只对浮动有意义；dock 下淡一点。 */
+.ed-win--dock .ed-win-resize {
+  opacity: 0.35;
+}
+
+/* 拖动中的半透明轮廓（可选，给拖拽一点反馈）。 */
+.ed-ghost {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  background: rgba(244, 196, 48, 0.08);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 29;
+}
+
+/* 窄屏：浮动窗口默认缩一点，避免盖满正文。 */
+@media (max-width: 1100px) {
+  .ed-win--float {
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+  }
+}

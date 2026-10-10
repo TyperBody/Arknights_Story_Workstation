@@ -1,0 +1,8 @@
+{
+ "id": "fanfic-demo",
+ "title": "同人样例：初次见面",
+ "chapter": "同人剧场",
+ "author": "demo",
+ "description": "取景器自检用的两分支小脚本",
+ "branchPoints": ["pick"]
+}

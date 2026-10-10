@@ -4,7 +4,9 @@ import { bootEngineInFrame, prewarmEngineDeps, refreshEngineDeps } from "./engin
 import type { WidgetBundle } from "./engineBoot";
 import { setManifestProgress } from "./keepalive";
 import { pushLog } from "./debugLog";
-import { validateStoryPlayer } from "./storyPlayerAdapter";
+import { localStoryOverride, resetLocalStories, setBundleProvider } from "./localStories";
+import { activePackId, hasPackAsset, packAssetCount, packAssetMissCount, packManifestUrls, resolvePackAsset } from "./packAssets";
+import { storyPlayerStaticAssets, validateStoryPlayer } from "./storyPlayerAdapter";
 import { disposeEngineFrame } from "./storyPlayerBoot";
 
 /**
@@ -74,11 +76,18 @@ interface RawStoryRuntime {
 }
 
 export interface StoryRuntime extends RawStoryRuntime {
-  source: "live" | "cache" | "legacy-cache";
+  source: "live" | "cache" | "legacy-cache" | "local";
   warning?: string;
   /** Previous verified generation, used if visible-mode boot rejects the candidate. */
   fallback?: RawStoryRuntime;
 }
+
+// 没有自带快照的剧本包（内置样例等）用共享的 StoryPlayer 快照播放：
+// 与 PRTS 剧情同一个来源（启动时抓取并校验），用户不必自带 ~3 MB 的引擎快照。
+setBundleProvider(async () => {
+  const bundle = await loadBundle();
+  return bundle.story_player ? { bundle: bundle.story_player } : null;
+});
 
 /** Load the shared widget bundle (engine DOM + scripts + global databases). */
 export function loadBundle(): Promise<WidgetBundle> {
@@ -164,6 +173,13 @@ export function loadStoryRuntime(title: string): Promise<StoryRuntime> {
 }
 
 async function refreshStoryRuntime(title: string): Promise<StoryRuntime> {
+  // 本地二创剧本包（<资源目录>/library/<id>/）优先：完全离线、不走 PRTS 的
+  // 「最新优先」候选校验（本地内容没有上游版本可比）。见 localStories.ts。
+  // 「自带素材」的注册就发生在 `localStoryOverride` 里（`build/assets.local.json`
+  // → `asset://`），所以这条 return 之后的引擎请求会先命中包内文件。
+  resetLocalStories(); // 允许刚安装/删除的剧本包被立刻看到
+  const local = await localStoryOverride(title);
+  if (local) return { ...local, source: "local" };
   const key = `story-runtime-v6_${title.replace(/\//g, "_")}`;
   const previousKey = `${key}-previous`;
   let cached: RawStoryRuntime | null = null;
@@ -217,6 +233,16 @@ async function refreshStoryRuntime(title: string): Promise<StoryRuntime> {
     }
     throw error;
   }
+}
+
+/**
+ * 自带素材**完整**的包：manifest 里每个 URL 都已在 `packAssets` 里解析成本地
+ * 文件——播放不需要 PRTS，manifest 抓取（会 new iframe 起一遍引擎）就可以整个
+ * 跳过，离线首播更快、也不产生任何网络请求。只对 `source === "local"` 用。
+ */
+export function manifestCoveredByPack(urls: readonly string[]): boolean {
+  if (!urls.length || !packAssetCount() || packAssetMissCount() > 0) return false;
+  return urls.every((url) => hasPackAsset(url) && Boolean(resolvePackAsset(url)));
 }
 
 const REQUIRED_DATA_BLOCKS = ["datas_txt", "datas_back", "datas_char", "datas_audio", "datas_link"];
@@ -393,10 +419,18 @@ export async function manifestForStory(
   bundle: WidgetBundle,
   title: string,
   pageRevision?: string,
-  engineAssetsRevision?: string
+  engineAssetsRevision?: string,
 ): Promise<string[]> {
   const key = `manifest_${title.replace(/\//g, "_")}`;
   const script = await ensureScriptRecord(title, pageRevision);
+  // 自带素材的包：清单就是它自己的 key 集合，不必再起一遍引擎去抓。
+  if (activePackId() === title) {
+    const own = packManifestUrls();
+    if (own.length && manifestCoveredByPack(own)) {
+      const extra = bundle.story_player ? storyPlayerStaticAssets(bundle.story_player) : [];
+      return [...new Set([...own, ...extra])];
+    }
+  }
   const runtimeRevision = `${bundle.revision || "legacy"}|${engineAssetsRevision || "unknown"}`;
   const cachedRaw = await invoke<string | null>("load_from_cache", { key }).catch(() => null);
   if (cachedRaw) {

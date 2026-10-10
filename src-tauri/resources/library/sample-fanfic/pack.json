@@ -1,0 +1,10 @@
+{
+ "id": "sample-fanfic",
+ "title": "同人样例：初次见面",
+ "chapter": "同人剧场",
+ "author": "Arkstage",
+ "description": "完全自带：4 背景 + 4 立绘随包内置（assets/，断网可播）；黑场淡入 → 选择分支 → 合流 → 淡出",
+ "branchPoints": [
+  "pick"
+ ]
+}

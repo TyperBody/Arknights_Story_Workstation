@@ -1,0 +1,7 @@
+[
+  {"tag":"arrive","node":"charslot"},
+  {"tag":"pick","node":"decision"},
+  {"tag":"branchA","fragment":1},
+  {"tag":"branchB","fragment":2},
+  {"tag":"resolve","node":"join"}
+]

@@ -14,6 +14,8 @@ import { applyPersistedDownloadSettings, loadBundle } from "./lib/predownload";
 import { startKeepalive } from "./lib/keepalive";
 import { BookshelfMetadataProvider } from "./lib/BookshelfMetadataContext";
 import ManifestProbePage from "./pages/ManifestProbePage";
+import FanficLibraryPage from "./pages/FanficLibraryPage";
+import StoryEditorPage from "./pages/StoryEditorPage";
 
 export default function App() {
   // Re-apply the user's saved concurrency / bandwidth limit to the backend once
@@ -44,6 +46,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/browse" element={<StoryBrowserPage />} />
+          <Route path="/fanfic" element={<FanficLibraryPage />} />
+          <Route path="/editor/:packId" element={<StoryEditorPage />} />
           <Route path="/play/:pageTitle" element={<StoryPlayerPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/about" element={<AboutPage />} />

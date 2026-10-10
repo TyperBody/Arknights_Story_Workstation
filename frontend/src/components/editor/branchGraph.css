@@ -1,0 +1,243 @@
+/* 分支图（task-16）样式 —— `frontend/src/components/editor/BranchGraph.tsx` 专用。
+ *
+ * 独立文件（不改 `frontend/src/styles/browser.css`，那是 task-15 的写域）：
+ * `optionalPart()` 懒加载组件时 CSS 跟着 chunk 走，页面不需要额外接线。
+ * 命名空间统一 `.ed-graph*`，与 `.ed-panel` / `.ed-stage` / `.ed-inspector` 同族。
+ * 颜色走主题变量（`--bg-secondary` / `--border` / `--text-secondary`），
+ * 缺失时退回硬编码深色，保证在编辑器页与独立演示页里都好看。
+ */
+
+.ed-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 120px;
+  padding: 8px 10px 10px;
+  overflow: hidden;
+  background: var(--bg-secondary, #14161c);
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 8px;
+  color: inherit;
+}
+
+.ed-graph-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.ed-graph-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.ed-graph-stat {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-secondary, #929292);
+}
+
+.ed-graph-legend {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10.5px;
+  color: var(--text-secondary, #929292);
+  flex-wrap: wrap;
+}
+
+.ed-graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.ed-graph-legend-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.ed-graph-legend-more {
+  opacity: 0.7;
+}
+
+.ed-graph-close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  font-size: 11px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ed-graph-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ed-graph-warn {
+  margin: 0;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #ffd75e;
+  background: rgba(244, 196, 48, 0.12);
+  border: 1px solid rgba(244, 196, 48, 0.45);
+  border-radius: 5px;
+}
+
+.ed-graph-empty {
+  margin: 0;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--text-secondary, #929292);
+}
+
+.ed-graph-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 70px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 6px;
+}
+
+.ed-graph-svg {
+  display: block;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.ed-graph-svg:active {
+  cursor: grabbing;
+}
+
+.ed-graph-node rect {
+  transition: stroke-width 0.12s ease-out;
+}
+
+.ed-graph-node.is-active rect,
+.ed-graph-node.is-picked rect {
+  filter: drop-shadow(0 0 4px rgba(244, 196, 48, 0.55));
+}
+
+.ed-graph-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.ed-graph-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary, #929292);
+}
+
+.ed-graph-fork {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: #14161c;
+  background: #f4c430;
+  border: 1px solid #d6a900;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.ed-graph-fork:disabled {
+  color: var(--text-secondary, #929292);
+  background: transparent;
+  border-color: var(--border, #2a2d36);
+  cursor: default;
+}
+
+.ed-graph-forkbox {
+  flex: 0 0 auto;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 6px;
+}
+
+.ed-graph-forkbox table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.ed-graph-forkbox th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-secondary, #929292);
+  padding: 2px 4px;
+}
+
+.ed-graph-forkbox td {
+  padding: 2px 4px;
+}
+
+.ed-graph-forkbox input {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 11.5px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 4px;
+}
+
+.ed-graph-forkbox input[type="number"] {
+  width: 72px;
+}
+
+.ed-graph-forkbtns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ed-graph-forkbtns button {
+  padding: 3px 9px;
+  font-size: 11px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.ed-graph-forkbtns button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ed-graph-forkok {
+  color: #14161c !important;
+  background: #f4c430 !important;
+  border-color: #d6a900 !important;
+}
+
+.ed-graph-forkgap {
+  flex: 1 1 auto;
+}

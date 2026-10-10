@@ -10,11 +10,16 @@
     "test:metadata": "tsc frontend/src/lib/bookshelfMetadata.ts --target ES2023 --module ESNext --lib ES2023,DOM --skipLibCheck --outDir build/test && node --test frontend/src/lib/bookshelfMetadata.test.mjs",
     "test:storyplayer": "tsc frontend/src/lib/storyPlayerAdapter.ts --target ES2023 --module ESNext --moduleResolution bundler --lib ES2023,DOM --skipLibCheck --outDir build/test && node --test frontend/src/lib/storyPlayerAdapter.test.mjs",
     "test:dialogs": "tsc frontend/src/lib/dialogs.ts --target ES2023 --module ESNext --moduleResolution bundler --lib ES2023,DOM --skipLibCheck --outDir build/test && node --test frontend/src/lib/dialogs.test.mjs",
+    "test:editor": "node scripts/fanfic/editor-selftest.mjs && node scripts/fanfic/animation-selftest.mjs && node scripts/fanfic/editorForms-selftest.mjs",
+    "test:editor:parity": "node scripts/fanfic/editor-selftest.mjs --parity-full",
     "verify:prts-sync": "node scripts/verify-prts-sync.mjs",
     "preview": "vite preview frontend",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "test:stage": "node scripts/fanfic/stage-selftest.mjs",
+    "test:forms:full": "node scripts/fanfic/editorForms-selftest.mjs --full",
+    "test:selfcontained": "node scripts/fanfic/selfcontained-check.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "~2.10.1",
