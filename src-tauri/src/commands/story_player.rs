@@ -102,38 +102,56 @@ async fn fetch_text(url: &str) -> Result<String, String> {
     Ok(text)
 }
 
+/// Manifest 抓取并发（BRIEF §3.2：与设置项的 10 路对齐）。
+/// 模块图是**分层发现**的：同一 frontier 内并发抓，发现新依赖后进入下一 frontier。
+/// 上限不变：80 个模块 / 32 MB；并发只是把「一条链」摊平成「一层」。
+const FETCH_CONCURRENCY: usize = 10;
+const MAX_MODULES: usize = 80;
+const MAX_TOTAL_BYTES: usize = 32 * 1024 * 1024;
+
 async fn fetch_bundle(
     entry: String,
     style_urls: Vec<String>,
     prelude: Vec<String>,
 ) -> Result<StoryPlayerBundle, String> {
     let mut modules = BTreeMap::new();
-    let mut pending = VecDeque::from([entry.clone()]);
-    pending.extend(prelude.iter().cloned());
-    let mut total_bytes = 0;
-    while let Some(url) = pending.pop_front() {
-        if modules.contains_key(&url) {
+    let mut pending: Vec<String> = std::iter::once(entry.clone()).chain(prelude.iter().cloned()).collect();
+    let mut total_bytes = 0usize;
+    while !pending.is_empty() {
+        // 只抓「这一层」里还没拿到的；已经抓过的（多模块共享依赖）直接跳过。
+        let frontier: Vec<String> = pending
+            .drain(..)
+            .filter(|url| !modules.contains_key(url))
+            .collect();
+        if frontier.is_empty() {
             continue;
         }
-        if modules.len() >= 80 {
+        if modules.len() + frontier.len() > MAX_MODULES {
             return Err("StoryPlayer module graph exceeds limit".into());
         }
-        let source = fetch_text(&url).await?;
-        total_bytes += source.len();
-        if total_bytes > 32 * 1024 * 1024 {
-            return Err("StoryPlayer module graph too large".into());
+        let fetched = fetch_many(frontier).await;
+        for (url, result) in fetched {
+            let source = result?;
+            total_bytes += source.len();
+            if total_bytes > MAX_TOTAL_BYTES {
+                return Err("StoryPlayer module graph too large".into());
+            }
+            pending.extend(module_dependencies(&source));
+            modules.insert(url, source);
         }
-        pending.extend(module_dependencies(&source));
-        modules.insert(url, source);
+        // 本层可能又发现新 URL → 下一轮继续；同时再兜一次 80 上限。
+        if modules.len() > MAX_MODULES {
+            return Err("StoryPlayer module graph exceeds limit".into());
+        }
     }
     let mut styles = BTreeMap::new();
-    for url in style_urls {
-        styles.insert(url.clone(), fetch_text(&url).await?);
+    for (url, source) in fetch_many(style_urls).await {
+        styles.insert(url, source?);
     }
     let mut data = BTreeMap::new();
-    for url in SIDECARS {
-        let value: serde_json::Value =
-            serde_json::from_str(&fetch_text(url).await?).map_err(|e| e.to_string())?;
+    for (url, text) in fetch_many(SIDECARS.map(str::to_string).to_vec()).await {
+        let text = text?;
+        let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
         let count = value.as_object().map_or(0, |o| o.len());
         let minimum = if url.ends_with("character.json") {
             100
@@ -145,7 +163,7 @@ async fn fetch_bundle(
                 "Incomplete StoryPlayer sidecar: {url} ({count} entries)"
             ));
         }
-        data.insert(url.to_string(), value);
+        data.insert(url, value);
     }
     Ok(StoryPlayerBundle {
         entry,
@@ -154,6 +172,41 @@ async fn fetch_bundle(
         styles,
         data,
     })
+}
+
+/// 最多 `FETCH_CONCURRENCY` 路并发抓一批 URL（`JoinSet` = 有界工作池）。
+/// 返回 `(url, Result<text>)`；单个失败不影响其它项（由调用方决定致命性）。
+async fn fetch_many(urls: Vec<String>) -> Vec<(String, Result<String, String>)> {
+    let mut queue: VecDeque<String> = VecDeque::from(urls);
+    let mut inflight = 0usize;
+    let mut results = Vec::with_capacity(queue.len());
+    let mut tasks: tokio::task::JoinSet<(String, Result<String, String>)> =
+        tokio::task::JoinSet::new();
+    loop {
+        while inflight < FETCH_CONCURRENCY {
+            let Some(url) = queue.pop_front() else { break };
+            tasks.spawn(async move {
+                let text = fetch_text(&url).await;
+                (url, text)
+            });
+            inflight += 1;
+        }
+        if inflight == 0 {
+            break;
+        }
+        match tasks.join_next().await {
+            Some(Ok(pair)) => {
+                inflight -= 1;
+                results.push(pair);
+            }
+            Some(Err(error)) => {
+                inflight -= 1;
+                results.push((String::new(), Err(format!("StoryPlayer fetch task: {error}"))));
+            }
+            None => break,
+        }
+    }
+    results
 }
 
 pub async fn from_html(html: &str) -> Result<Option<WidgetBundleData>, String> {

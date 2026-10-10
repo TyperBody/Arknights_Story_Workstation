@@ -372,8 +372,6 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
   if (!doc || !win) throw new Error("StoryPlayer iframe unavailable");
   const issues = validateStoryPlayer(snapshot);
   if (issues.length) throw new Error(issues.join("；"));
-  // harness 用它区分「白屏」与「已在跑（含降级）」。
-  doc.documentElement.setAttribute("data-arkstage-boot", "play");
   // 自带素材（`build/assets.local.json`）：可以解析成 iframe realm 也要用的静态表
   const packAssetsShim = opts.mode === "play" && packAssetShimAvailable() ? packAssetShimCode() : null;
   const cancelled = () => opts.isCancelled?.() || !opts.iframe.isConnected;
@@ -403,9 +401,12 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
     else win.__arkstageApp?.getPlayer()?.destroy();
     blobUrls.forEach((url) => URL.revokeObjectURL(url));
   };
+  const bootState = "play";
   doc.open();
   doc.write('<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><pre id="datas_txt" hidden></pre></body></html>');
   doc.close();
+  // harness 用它区分「白屏」与「已在跑（含降级）」——写在 doc.write 重置之后。
+  doc.documentElement.setAttribute("data-arkstage-boot", bootState);
   doc.title = opts.title;
   doc.getElementById("datas_txt")!.textContent = opts.script;
   win.mw = { config: { get: (key: string) => key === "wgUserName" ? localStorage.getItem("prts-nickname") : null } };
@@ -687,7 +688,9 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
     return result;
   } catch (error) {
     pushLog("warn", `[StoryPlayer] 首选快照启动失败（${source}）：`, error);
-    // B) 换源：pack → disk cache（各一次）。本地候选与首选同代时跳过。
+    // 先把「一条人话横幅」保证下来（失败可能没有可换源；页面 catch 之前必须能看到原因）。
+    report();
+    // B) 换源：pack → disk cache（各一次）。与首选同代（字节签名相同）的跳过。
     const candidates = await fallbackSnapshots(snapshot);
     for (const candidate of candidates) {
       const label = candidate.source === "pack" ? `内置快照（${candidate.label ?? "内置"}）` : "本地缓存快照";
@@ -702,7 +705,6 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
         pushLog("warn", `[StoryPlayer] ${label} 启动失败：`, fallbackError);
       }
     }
-    if (!failure) report();
     throw error;
   }
 }

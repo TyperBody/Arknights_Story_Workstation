@@ -4,9 +4,17 @@ import { bootEngineInFrame, prewarmEngineDeps, refreshEngineDeps } from "./engin
 import type { WidgetBundle } from "./engineBoot";
 import { setManifestProgress } from "./keepalive";
 import { pushLog } from "./debugLog";
+import { getAppSettings } from "./appSettings";
 import { localStoryOverride, resetLocalStories, setBundleProvider } from "./localStories";
 import { activePackId, hasPackAsset, packAssetCount, packAssetMissCount, packManifestUrls, resolvePackAsset } from "./packAssets";
 import { storyPlayerStaticAssets, validateStoryPlayer } from "./storyPlayerAdapter";
+import {
+  loadBundledEngine,
+  markBundleSource,
+  noteNetworkSuccess,
+  PACK_CACHE_KEY,
+  saveCachedBundle,
+} from "./enginePack";
 import { disposeEngineFrame } from "./storyPlayerBoot";
 
 /**
@@ -89,6 +97,9 @@ setBundleProvider(async () => {
   return bundle.story_player ? { bundle: bundle.story_player } : null;
 });
 
+/** 老 key（只读兼容）：`widget-bundle-v7` 之前的一代。 */
+const PREVIOUS_BUNDLE_KEYS = ["widget-bundle-v6", "widget-bundle-v5", "widget-bundle-v4"] as const;
+
 /** Load the shared widget bundle (engine DOM + scripts + global databases). */
 export function loadBundle(): Promise<WidgetBundle> {
   if (!bundlePromise) {
@@ -100,10 +111,36 @@ export function loadBundle(): Promise<WidgetBundle> {
   return bundlePromise;
 }
 
+/**
+ * 顺序：**pack → 磁盘 cache → 网络**（BRIEF §3.4）。
+ *
+ * 前两级是**同步可用**的本地字节（pack 随包、cache = 上次网络校验通过），命中即
+ * 返回、立刻点亮引擎；网络作为**后台升级**跑——校验通过才写
+ * `widget-bundle-v7` + `-previous`，并清掉「引擎」横幅（只有网络版成功才清）。
+ * 两级都没有（浏览器生产构建、pack/cache 损坏）时才同步走网络。
+ */
 async function refreshBundle(): Promise<WidgetBundle> {
-  let cached: WidgetBundle | null = null;
+  const pack = await loadBundledEngine();
+  if (pack) {
+    markBundleSource(pack.bundle, "pack");
+    pushLog("info", `[runtime-update] 使用随包引擎快照 ${pack.label}`);
+    void upgradeBundleFromNetwork(pack.bundle).catch(() => {});
+    return pack.bundle;
+  }
+  const cached = await readVerifiedBundleFromCache();
+  if (cached) {
+    markBundleSource(cached, "cache");
+    pushLog("info", "[runtime-update] 使用磁盘缓存引擎快照");
+    void upgradeBundleFromNetwork(cached).catch(() => {});
+    return cached;
+  }
+  return await fetchAndValidateBundle(null);
+}
+
+/** 磁盘上最后一次**网络校验通过**的 bundle（v7 → 老 key）。 */
+async function readVerifiedBundleFromCache(): Promise<WidgetBundle | null> {
   try {
-    for (const key of ["widget-bundle-v6", "widget-bundle-v5", "widget-bundle-v4", "widget-bundle-v3", "widget-bundle-v2"]) {
+    for (const key of [PACK_CACHE_KEY, ...PREVIOUS_BUNDLE_KEYS]) {
       const raw = await invoke<string | null>("load_from_cache", { key });
       if (!raw) continue;
       const candidate = JSON.parse(raw) as WidgetBundle;
@@ -111,32 +148,39 @@ async function refreshBundle(): Promise<WidgetBundle> {
       // operators into HTML entities. Never use such a bundle as offline rollback.
       if (validateBundleShape(candidate).length === 0
         && !candidate.engine_scripts.some((script) => /&(?:amp|gt|lt|quot);/.test(script))) {
-        cached = candidate;
-        break;
+        return candidate;
       }
     }
   } catch {
-    // Continue with the live request.
+    // 走网络。
   }
+  return null;
+}
+
+/** 同步抓取 + 启动校验网络候选（`previous` = 本地回退基准，可为 null）。 */
+async function fetchAndValidateBundle(previous: WidgetBundle | null): Promise<WidgetBundle> {
+  const fresh = await invoke<WidgetBundle>("fetch_widget_bundle", { pageTitle: "W2G/BEG" });
+  if (previous && isSuspiciousRegression(fresh, previous)) {
+    throw new Error("PRTS 全局资源表数量异常回退，已拒绝覆盖本地可用版本");
+  }
+  if (!fresh.story_player) await refreshEngineDeps();
+  await validateBundleBoot(fresh, "W2G/BEG");
+  await saveCachedBundle(fresh, previous);
+  markBundleSource(fresh, "network");
+  return fresh;
+}
+
+/**
+ * 本地已有可用字节时的**后台升级**：网络校验通过 → 落盘 v7（+ `-previous`）
+ * → 清「引擎」横幅（BRIEF §3.5：`noteNetworkSuccess` 只在这里调用）。
+ */
+async function upgradeBundleFromNetwork(previous: WidgetBundle): Promise<void> {
   try {
-    const fresh = await invoke<WidgetBundle>("fetch_widget_bundle", { pageTitle: "W2G/BEG" });
-    if (cached && isSuspiciousRegression(fresh, cached)) {
-      throw new Error("PRTS 全局资源表数量异常回退，已拒绝覆盖本地可用版本");
-    }
-    await validateBundleBoot(fresh, "W2G/BEG");
-    await invoke("save_to_cache", {
-      key: "widget-bundle-v6",
-      data: JSON.stringify(fresh),
-    }).catch(() => {});
-    if (!fresh.story_player) await refreshEngineDeps();
-    return fresh;
+    const fresh = await fetchAndValidateBundle(previous);
+    noteNetworkSuccess();
+    pushLog("info", `[runtime-update] 引擎升级到网络最新版（${fresh.revision || "unknown"}）`);
   } catch (error) {
-    if (cached) {
-      pushLog("warn", "[runtime-update] PRTS 候选引擎验证失败，保留上次可用版本:", error);
-      if (!cached.story_player) await refreshEngineDeps();
-      return cached;
-    }
-    throw error;
+    pushLog("warn", "[runtime-update] 网络引擎不可用，保留本地已验证版本:", error);
   }
 }
 
@@ -501,7 +545,7 @@ class PauseGate {
  * and is the main speed-up for the indexing phase. Kept modest so several heavy
  * engine iframes don't exhaust memory on low-end phones.
  */
-const MANIFEST_CONCURRENCY = 4;
+const MANIFEST_CONCURRENCY_FALLBACK = 10;
 
 /**
  * How many passes to retry stories whose manifest capture failed before giving up.
@@ -510,6 +554,16 @@ const MANIFEST_CONCURRENCY = 4;
  * Bounded so a genuinely broken story can't loop forever.
  */
 const MANIFEST_INDEX_ROUNDS = 4;
+
+/** 设置里的 manifest 并发（`appSettings.manifestConcurrency`，默认 10、上限 16）。 */
+function manifestConcurrency(): number {
+  try {
+    const value = getAppSettings().manifestConcurrency;
+    return Math.max(1, Math.min(16, Math.round(value || MANIFEST_CONCURRENCY_FALLBACK)));
+  } catch {
+    return MANIFEST_CONCURRENCY_FALLBACK;
+  }
+}
 
 // Screen Wake Lock — keep the screen on (so the WebView renderer stays active and
 // the indexing phase keeps running) while the user has the app open and sets the
@@ -693,6 +747,7 @@ export async function runPredownload(
     const runPass = async (items: string[]): Promise<string[]> => {
       const failed: string[] = [];
       let next = 0;
+      const pool = Math.min(manifestConcurrency(), Math.max(1, items.length));
       const worker = async (): Promise<void> => {
         for (;;) {
           await gate.wait();
@@ -704,9 +759,7 @@ export async function runPredownload(
           if (!ok && !gate.cancelled && !offlineErr) failed.push(items[k]);
         }
       };
-      await Promise.all(
-        Array.from({ length: Math.min(MANIFEST_CONCURRENCY, items.length) }, worker)
-      );
+      await Promise.all(Array.from({ length: pool }, worker));
       return failed;
     };
 

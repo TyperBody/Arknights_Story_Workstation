@@ -269,16 +269,22 @@ export async function fallbackSnapshots(current: StoryPlayerSnapshot): Promise<S
   return candidates.filter((candidate) => !sameSnapshot(current, candidate.snapshot));
 }
 
-/** 两份快照是不是同一代（入口 + 模块名集合），用于换源去重。 */
+/**
+ * 两份快照是不是**同一代**（入口 + 「模块名:字节数」签名），用于换源去重。
+ * 只比模块名会把「同一个文件名、不同字节」的两代判成同一代（换源就跳过了），
+ * 所以签名里带上长度：字节不同 = 不同代 = 值得换一次。
+ */
 export function sameSnapshot(a: StoryPlayerSnapshot, b: StoryPlayerSnapshot): boolean {
   if (!a || !b) return false;
   if (a.entry !== b.entry) return false;
-  const names = (snapshot: StoryPlayerSnapshot) =>
-    Object.keys(snapshot.modules ?? {})
-      .map((url) => url.slice(url.lastIndexOf("/") + 1))
-      .sort()
-      .join(",");
-  return names(a) === names(b);
+  return snapshotSignature(a) === snapshotSignature(b);
+}
+
+function snapshotSignature(snapshot: StoryPlayerSnapshot): string {
+  return Object.keys(snapshot.modules ?? {})
+    .map((url) => `${url.slice(url.lastIndexOf("/") + 1)}:${(snapshot.modules[url] ?? "").length}`)
+    .sort()
+    .join(",");
 }
 
 /** `WidgetBundle.story_player` 的形状校验（复用 adapter 的契约，不另立一套）。 */
