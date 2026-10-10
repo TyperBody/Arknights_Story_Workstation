@@ -145,6 +145,34 @@ const manifestSel = catalogMod.projectManifest(
 eq("projectManifest 选择集合并去重", manifestSel.total, 3);
 ok("projectManifest 选中项可镜像", Object.keys(manifestSel.files).every((k) => catalogMod.mirrorOf(k, "jsd") !== null));
 
+/* -------------------------------------- A1. 镜像仓上线门槛（publish-mirror 契约） */
+// 目标仓 `MIRROR_REPO@MIRROR_REF` 是**按需创建**的；三条镜像线路在跑过一次
+// `publish-mirror.yml` 之前必然 404，所以必须保证：(a) 工作流存在且手动触发；
+// (b) mirrorUrl 仍然返回形状正确的 URL；(c) prts 一定在兜底链里。
+const wf = readFileSync(resolve(ROOT, ".github/workflows/publish-mirror.yml"), "utf8");
+ok("publish-mirror.yml 存在且 workflow_dispatch", /workflow_dispatch:/.test(wf));
+ok("publish-mirror.yml 走 MIRROR_TOKEN", wf.includes("MIRROR_TOKEN"));
+ok("publish-mirror.yml 缺 token 时跳过（warning，不红）", wf.includes("MIRROR_TOKEN 未配置"));
+ok("publish-mirror.yml 只发引擎层（默认 runtime）", wf.includes("include_assets"));
+ok("publish-mirror.yml 从 assetRouting 取目标仓", wf.includes("assetRouting.js") && wf.includes("MIRROR_REPO"));
+for (const source of ["jsd", "fastly", "ghproxy"]) {
+  const u = routes.mirrorUrl(source, SAMPLE[0]);
+  ok(`${source} 在镜像仓为空时仍给出形状正确的 URL（404 → 回退）`,
+    typeof u === "string" && u.includes(routes.MIRROR_REPO), u);
+  // `pack` 与 `prts` 展开成同一个官方直链，`buildSourceOrder` 只留先出现的那个；
+  // 所以「回退到 prts」在链上就表现为「出现 pack 或 prts 且 URL = 官方直链」。
+  const chain = routes.routeFor(SAMPLE[0], source);
+  const fallback = chain.find((r) => r.source === "pack" || r.source === "prts");
+  ok(`${source} 的兜底链回到官方直链（pack/prts）`,
+    fallback?.url === routes.officialUrl(SAMPLE[0]), chain.map((r) => `${r.source}=${r.url}`).join(" "));
+}
+ok("SOURCE_HINTS 写明「首次需先跑 publish-mirror」",
+  /publish-mirror/.test(routes.SOURCE_HINTS.jsd) && /publish-mirror/.test(routes.SOURCE_HINTS.fastly) && /publish-mirror/.test(routes.SOURCE_HINTS.ghproxy));
+ok("MIRROR_REPO / MIRROR_REF 可被工作流读取",
+  /^[\w.-]+\/[\w.-]+$/.test(routes.MIRROR_REPO) && routes.MIRROR_REF === "main");
+ok("发布脚本存在（publish-engine / fetchEngine / mirrorStats）",
+  ["publish-engine.mjs", "fetchEngine.mjs", "mirrorStats.mjs"].every((f) => readFileSync(resolve(HERE, f), "utf8").length > 0));
+
 /* ------------------------------------------------- B2. 引擎快照（versions.json） */
 const versions = JSON.parse(readFileSync(resolve(HERE, "versions.json"), "utf8"));
 ok("versions.json schema=2", versions.schema === 2);

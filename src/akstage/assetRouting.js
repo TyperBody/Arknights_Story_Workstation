@@ -32,13 +32,21 @@ export const SOURCE_LABELS = Object.freeze({
   custom: "自定义源",
 });
 
-/** 源的补充说明（设置页副标题）。 */
+/**
+ * 源的补充说明（设置页副标题）。
+ *
+ * ⚠️ **首次使用 jsd / fastly / ghproxy 之前，必须先跑一次
+ * `.github/workflows/publish-mirror.yml`**（Actions → publish-mirror → Run workflow）：
+ * 它会按 `tools/mirror/versions.json` 的清单把引擎层推到镜像仓
+ * `djkcyl/arkstage-mirror@main`。**没跑之前镜像仓是空的 → 三条线路全部 404**，
+ * `routeFor()` 会自动回退到 `prts`（官方直连），表现为「换源了但还是从官方下」。
+ */
 export const SOURCE_HINTS = Object.freeze({
   pack: "优先用安装包内的引擎快照，缺失时直连官方",
   prts: "始终从 prts.wiki 官方域名拉取",
-  jsd: "cdn.jsdelivr.net（大陆访问通常更快）",
-  fastly: "fastly.jsdelivr.net（jsDelivr 的 Fastly 线路）",
-  ghproxy: "gh-proxy.com 前缀加速 GitHub raw",
+  jsd: "cdn.jsdelivr.net（大陆访问通常更快；首次需先跑 publish-mirror 工作流）",
+  fastly: "fastly.jsdelivr.net（jsDelivr 的 Fastly 线路；首次需先跑 publish-mirror 工作流）",
+  ghproxy: "gh-proxy.com 前缀加速 GitHub raw（首次需先跑 publish-mirror 工作流）",
   custom: "自己填模板：{url} = 官方直链，{key} = 规范化 key",
 });
 
@@ -62,7 +70,13 @@ export const MIRRORS = Object.freeze({
   custom: "{tpl}",
 });
 
-/** GitHub 上的镜像仓（`publish-mirror` 工作流把 prts 素材推到这里）。 */
+/**
+ * GitHub 上的镜像仓（引擎层由 `.github/workflows/publish-mirror.yml` 推到这里）。
+ *
+ * **注意：这个仓是「按需创建」的**——在跑过一次 publish-mirror 之前，jsd / fastly /
+ * ghproxy 三条线路都会 404（`mirrorUrl()` 照常返回 URL，只是取不到字节），
+ * `routeFor()` 会自动回退 `prts`。这是**预期行为**，不是 bug。
+ */
 export const MIRROR_REPO = "djkcyl/arkstage-mirror";
 /** 镜像仓的分支 / 引用。 */
 export const MIRROR_REF = "main";
@@ -225,7 +239,10 @@ function fillTemplate(tpl, part, custom) {
  * 为**某一个源**拼下载 URL。该源不适用 → `null`。
  *
  * - `pack` / `prts`：官方直链（包内命中与否由 Rust 决定）。
- * - `jsd` / `fastly` / `ghproxy`：仅对 `MIRRORABLE_HOSTS` 生效。
+ * - `jsd` / `fastly` / `ghproxy`：仅对 `MIRRORABLE_HOSTS` 生效。**这两个（及 gh-proxy）
+ *   依赖镜像仓 `MIRROR_REPO@MIRROR_REF`**，仓没建/没内容前会 404 ——
+ *   表现为「返回了镜像 URL 但取不到字节」；`buildSourceOrder` 已把 `prts` 排在后面兜底，
+ *   首次上线前若想「立刻可用」请选 `pack` / `prts`。
  * - `custom`：需要 `custom` 模板，且模板里必须有 `{url}`/`{key}`/`{host}`/`{path}` 之一。
  *
  * @param {string} source SOURCE_IDS 之一

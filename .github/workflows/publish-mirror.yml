@@ -1,0 +1,145 @@
+# 把**引擎层**（`tools/mirror/versions.json` 的 `runtime` 条目，当前 25 条 / ~15 MB）
+# 发布到镜像仓 `djkcyl/arkstage-mirror@main`，供 `src/akstage/assetRouting.js::MIRRORS`
+# 的 jsDelivr / Fastly / gh-proxy 三条线路读取。
+#
+# ⚠️ **首次使用镜像源前，先手动跑一次本工作流**：目标仓空着时 jsd / fastly / ghproxy
+# 必然 404，客户端会自动回退 `prts`（见 BRIEF §3.3）。跑过一次即可长期复用；
+# 上游引擎换代（`catalog-data.json` 里 widget 哈希变了）后再跑一次。
+#
+# 触发：Actions → "publish-mirror" → Run workflow（可勾选 include_assets 连带素材层）。
+# Secret：`MIRROR_TOKEN` = 对 `djkcyl/arkstage-mirror` 有 contents:write 的 PAT。
+#         未配置 → 只抓取 + 统计（warning），不推送（工作流不红）。
+name: publish-mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_assets:
+        description: "一并发布素材层（catalog 里非 runtime 的条目；体积大）"
+        type: boolean
+        default: false
+      dry_run:
+        description: "只抓取 + 统计，不推送"
+        type: boolean
+        default: false
+      target_repo:
+        description: "镜像仓 owner/name；留空 = 用 assetRouting.js 的 MIRROR_REPO"
+        type: string
+        default: ""
+      target_ref:
+        description: "目标分支；留空 = 用 assetRouting.js 的 MIRROR_REF"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-mirror
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 目标仓 = 输入 > 源码常量（单一事实来源在 assetRouting.js）。
+      - name: Resolve target
+        id: target
+        env:
+          INPUT_REPO: ${{ inputs.target_repo }}
+          INPUT_REF: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${INPUT_REPO}" ]; then
+            PAIR=$(node -e 'import("./src/akstage/assetRouting.js").then(m=>console.log(`${m.MIRROR_REPO} ${m.MIRROR_REF}`))')
+            set -- ${PAIR}
+            REPO="$1"
+            REF="${INPUT_REF:-$2}"
+          else
+            REPO="${INPUT_REPO}"
+            REF="${INPUT_REF:-main}"
+          fi
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+          echo "ref=${REF}"   >> "$GITHUB_OUTPUT"
+          echo "→ 目标：${REPO} @ ${REF}"
+
+      - name: Verify mirror catalog
+        run: node tools/mirror/build-versions.mjs --check
+
+      - name: Fetch snapshot
+        env:
+          SCOPE: ${{ inputs.include_assets && 'all' || 'runtime' }}
+        run: |
+          set -euo pipefail
+          node tools/mirror/publish-engine.mjs --out /tmp/mirror-out --only "${SCOPE}"
+          echo "--- 暂存内容 ---"
+          du -sh /tmp/mirror-out
+          find /tmp/mirror-out -type f | wc -l
+          # 摘要在这里算（cwd = 仓库根）；提交信息用得到。
+          echo "MIRROR_SUMMARY=$(node tools/mirror/mirrorStats.mjs /tmp/mirror-out/mirror/prts/versions.json)" >> "$GITHUB_ENV"
+
+      - name: Publish to mirror repo
+        if: ${{ inputs.dry_run == false }}
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+          TARGET_REF: ${{ steps.target.outputs.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MIRROR_TOKEN:-}" ]; then
+            echo "::warning::MIRROR_TOKEN 未配置 —— 已生成快照但**未推送**。"
+            echo "在 arkstage 仓库 Settings → Secrets and variables → Actions 添加 MIRROR_TOKEN"
+            echo "（对 ${TARGET_REPO} 有 contents:write 的 PAT）后重跑本工作流。"
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${MIRROR_TOKEN}@github.com/${TARGET_REPO}.git" /tmp/mirror-repo \
+            || { echo "::warning::克隆 ${TARGET_REPO} 失败 —— 仓库还没建？先建一个空仓（带 README）再重跑。"; exit 0; }
+          cd /tmp/mirror-repo
+          git checkout -B "${TARGET_REF}"
+          mkdir -p mirror/prts
+          rsync -a --delete --exclude=.git --exclude=README.md /tmp/mirror-out/mirror/ mirror/
+          git config user.name "arkstage-mirror[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "镜像已是最新 —— 无内容可提交。"
+          else
+            git commit -m "mirror: snapshot ${MIRROR_SUMMARY} [skip ci]"
+            git push -u origin "${TARGET_REF}"
+          fi
+
+      # 清单 vs 暂存：条目数必须对得上（离线演练也跑）。
+      - name: Verify staged layout
+        env:
+          SCOPE: ${{ inputs.include_assets && 'all' || 'runtime' }}
+        run: |
+          set -euo pipefail
+          COUNT=$(SCOPE="${SCOPE}" node -e '
+            const fs = require("fs");
+            const v = JSON.parse(fs.readFileSync("tools/mirror/versions.json", "utf8"));
+            const scope = process.env.SCOPE;
+            console.log(v.entries.filter((e) => scope === "all" || e.group === scope).length);
+          ')
+          STAGED=$(find /tmp/mirror-out/mirror/prts -type f ! -name versions.json | wc -l)
+          echo "清单 ${COUNT} 条 / 暂存 ${STAGED} 个文件"
+          [ "${STAGED}" -ge "${COUNT}" ] || { echo "::error::暂存文件少于清单条目"; exit 1; }
+
+      - name: Summary
+        if: always()
+        run: |
+          STATS=$(node tools/mirror/mirrorStats.mjs /tmp/mirror-out/mirror/prts/versions.json 2>/dev/null || echo "未生成")
+          {
+            echo "### publish-mirror"
+            echo "- 目标仓：${{ steps.target.outputs.repo }} @ ${{ steps.target.outputs.ref }}"
+            echo "- 内容：${STATS}"
+            echo "- 客户端线路：cdn.jsdelivr.net / fastly.jsdelivr.net / gh-proxy.com"
+            echo "- dry_run=${{ inputs.dry_run }}，include_assets=${{ inputs.include_assets }}"
+          } >> "$GITHUB_STEP_SUMMARY"
