@@ -29,6 +29,22 @@ const routes = await import(pathToFileURL(resolve(ROOT, "src/akstage/assetRoutin
 const catalogMod = await import(pathToFileURL(resolve(ROOT, "src/akstage/engineCatalog.js")).href);
 const mirrorPath = await import(pathToFileURL(resolve(HERE, "mirrorPath.mjs")).href);
 
+/* ------------------------------------------------- A0. appSettings（localStorage 契约） */
+// `appSettings.ts` 是 TS（Node 直接 import 不了）：这里做**源码级**断言，保证默认值/
+// 值域/key 名与 BRIEF §3.2 一致 —— 也就是 UI 与下载器共享的那份契约。
+const settingsSrc = readFileSync(resolve(ROOT, "frontend/src/lib/appSettings.ts"), "utf8");
+ok("appSettings localStorage key = prts-app-settings", settingsSrc.includes('"prts-app-settings"'));
+ok("appSettings 下载并发默认 12", /downloadConcurrency:\s*12/.test(settingsSrc));
+ok("appSettings manifest 并发默认 10", /manifestConcurrency:\s*10/.test(settingsSrc));
+ok("appSettings 限速默认 0", /rateLimit:\s*0/.test(settingsSrc));
+ok("appSettings 下载并发上限 32 / 下限 1",
+  /DOWNLOAD_CONCURRENCY_MAX\s*=\s*32/.test(settingsSrc) && /DOWNLOAD_CONCURRENCY_MIN\s*=\s*1/.test(settingsSrc));
+ok("appSettings manifest 并发 1…16",
+  /MANIFEST_CONCURRENCY_MAX\s*=\s*16/.test(settingsSrc) && /MANIFEST_CONCURRENCY_MIN\s*=\s*1/.test(settingsSrc));
+ok("appSettings 坏 JSON 回落（try/catch）", settingsSrc.includes("JSON.parse") && settingsSrc.includes("catch"));
+ok("appSettings mirror 仅 5 个合法值",
+  /MIRROR_VALUES[^=]*=\s*\["pack",\s*"jsd",\s*"fastly",\s*"ghproxy",\s*"custom"\]/.test(settingsSrc));
+
 /* ------------------------------------------------------------------ A. 路由 */
 const SAMPLE = [
   "https://static.prts.wiki/widgets/production/StoryPlayer.BQgSL6Cy.js",
@@ -129,6 +145,17 @@ const manifestSel = catalogMod.projectManifest(
 eq("projectManifest 选择集合并去重", manifestSel.total, 3);
 ok("projectManifest 选中项可镜像", Object.keys(manifestSel.files).every((k) => catalogMod.mirrorOf(k, "jsd") !== null));
 
+/* ------------------------------------------------- B2. 引擎快照（versions.json） */
+const versions = JSON.parse(readFileSync(resolve(HERE, "versions.json"), "utf8"));
+ok("versions.json schema=2", versions.schema === 2);
+ok("versions.json 引擎条目 = 目录引擎层", versions.engine.files === catalogMod.engineEntries().length,
+  `${versions.engine.files} vs ${catalogMod.engineEntries().length}`);
+ok("versions.json 每条都有镜像路径", versions.entries.every((e) => mirrorPath.mirrorPathFor(e.key) === e.mirrorPath));
+ok("versions.json 引擎体积已探明（> 0）", versions.engine.bytes > 0, `${versions.engine.bytes} B`);
+ok("versions.json 布局前缀固定", versions.layout.prefix === "mirror/prts");
+const verdicts = mirrorPath.planFromVersions(versions);
+ok("planFromVersions 无重复路径", new Set(verdicts.map((v) => v.path)).size === verdicts.length);
+
 /* ------------------------------------------------------------ C. 镜像布局 */
 eq("mirrorPathFor 基本", mirrorPath.mirrorPathFor("static.prts.wiki/widgets/production/x.js"), "mirror/prts/static.prts.wiki/widgets/production/x.js");
 eq("mirrorPathFor 去 prts: 前缀", mirrorPath.mirrorPathFor("prts:torappu.prts.wiki/assets/avg/background/bg_black.png"), "mirror/prts/torappu.prts.wiki/assets/avg/background/bg_black.png");
@@ -143,8 +170,8 @@ const sample = mirrorPath.aggregateSample([
 eq("抽样只收选中的组", sample.files.map((f) => f.path), ["mirror/sample/a.webp", "mirror/sample/b.webp"]);
 ok("抽样报告节省量", sample.savedBytes === 400, JSON.stringify(sample));
 
-const versions = mirrorPath.buildVersions({ entries: [{ key: HERO, size: 1000, group: "asset" }], engineVersion: "test" });
-ok("versions.json schema/groups 稳定", versions.schema === 2 && versions.groups.asset === 1 && versions.entries[0].mirrorPath === mirrorPath.mirrorPathFor(HERO));
+const built = mirrorPath.buildVersions({ entries: [{ key: HERO, size: 1000, group: "asset" }], engineVersion: "test" });
+ok("buildVersions schema/groups 稳定", built.schema === 2 && built.groups.asset === 1 && built.entries[0].mirrorPath === mirrorPath.mirrorPathFor(HERO));
 
 /* -------------------------------------------------------------------- 收尾 */
 const failed = results.filter((r) => !r.pass);
@@ -160,6 +187,7 @@ if (failed.length) {
   process.exit(1);
 }
 console.log(`  ✓ 路由：${routes.SOURCE_IDS.length} 源 × ${SAMPLE.length} 样例`);
+console.log(`  ✓ 设置契约：prts-app-settings（下载 12/清单 10/不限速）`);
 console.log(`  ✓ 目录：${entries.length} 条（engine ${catalogMod.engineEntries().length} / css ${entries.filter((e) => e.kind === "css").length} / js ${entries.filter((e) => e.kind === "js").length} / font ${entries.filter((e) => e.kind === "font").length} / data ${entries.filter((e) => e.kind === "data").length}）`);
 console.log(`  ✓ 镜像布局：${mirrorPath.mirrorPathFor(CSS)}`);
 console.log(`  ✓ catalog-data.json 读取成功（${readFileSync(resolve(ROOT, "src/akstage/catalog-data.json"), "utf8").length} 字节）`);

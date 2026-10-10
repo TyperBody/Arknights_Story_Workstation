@@ -36,6 +36,20 @@ export const EXTERNALS = [
   { url: "https://torappu.prts.wiki/gamedata/latest/story/story_variables.json", kind: "data" },
 ];
 
+/** 只取前 1 字节探 `content-range` 拿总大小（`GET` + `Range`，比 HEAD 稳）。 */
+async function sizeOf(url) {
+  try {
+    const r = await fetch(url, { method: "GET", headers: { ...UA, Range: "bytes=0-0" } });
+    if (!r.ok) return 0;
+    await r.arrayBuffer();
+    const range = r.headers.get("content-range");
+    if (range && range.includes("/")) return Number(range.split("/").pop()) || 0;
+    return Number(r.headers.get("content-length")) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function get(url) {
   const r = await fetch(url, { headers: UA });
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
@@ -102,6 +116,11 @@ async function main() {
     widgets: widgets.size,
     external: external.length,
   };
+  const sizes = {};
+  for (const item of external) {
+    if (item.kind === "src" || item.kind === "font") sizes[item.url] = await sizeOf(item.url);
+  }
+
   if (checkOnly) {
     const prev = JSON.parse(readFileSync(TARGET, "utf8"));
     const same = JSON.stringify(prev.counts) === JSON.stringify(counts);
@@ -114,6 +133,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     source: { ...SIDE, widgetPage: WIDGET_PAGE, widgetBase: WIDGET_BASE },
     counts,
+    sizes,
     external,
     characterPaths: [...characterPaths].sort(),
     backgroundPaths: [...backgroundPaths].sort(),

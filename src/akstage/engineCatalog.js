@@ -56,6 +56,11 @@ function urlOf(path) {
   return /^https?:\/\//.test(path) ? path : `https://${path}`;
 }
 
+/** `catalog-data.json` 探到的上游字节数：canonical key → bytes（缺省 0）。 */
+const sizes = new Map(
+  Object.entries(data.sizes ?? {}).map(([url, bytes]) => [String(url).replace(/^https?:\/\//, ""), Number(bytes) || 0]),
+);
+
 const ENGINE_HOST = "static.prts.wiki";
 
 export function guessKind(path) {
@@ -157,7 +162,7 @@ export function catalog() {
       kind,
       key,
       urls: urlsFor(info.key),
-      size: Number.isFinite(size) && size > 0 ? size : 0,
+      size: Number.isFinite(size) && size > 0 ? size : sizes.get(info.key) ?? 0,
     });
   };
 

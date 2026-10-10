@@ -1,0 +1,212 @@
+{
+  "schema": 2,
+  "generatedAt": "2026-10-10T21:05:06.605Z",
+  "repo": "djkcyl/arkstage-mirror",
+  "ref": "main",
+  "engine": {
+    "version": "2026-10-10+g13",
+    "files": 25,
+    "bytes": 15238246
+  },
+  "assets": {
+    "files": 25,
+    "bytes": 15238246
+  },
+  "groups": {
+    "runtime": 25
+  },
+  "layout": {
+    "prefix": "mirror/prts",
+    "samplePrefix": "mirror/sample",
+    "note": "全量按 canonical key 铺开；mirror/sample/ 是可选的抽样聚合（去重后的小体积集合）"
+  },
+  "sample": null,
+  "entries": [
+    {
+      "key": "static.prts.wiki/assets/scenario/arknights-scenario.css",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/arknights-scenario.css",
+      "size": 0,
+      "group": "runtime",
+      "kind": "css"
+    },
+    {
+      "key": "static.prts.wiki/npm/PreloadJS%401.0.1/preloadjs.min.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/npm/PreloadJS%401.0.1/preloadjs.min.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/assets/scenario/krliov.toolbox.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/krliov.toolbox.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/assets/scenario/fonts/NotoSans.ttf",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/fonts/NotoSans.ttf",
+      "size": 8927296,
+      "group": "runtime",
+      "kind": "font"
+    },
+    {
+      "key": "static.prts.wiki/NotoSansHans-Medium.woff2",
+      "mirrorPath": "mirror/prts/static.prts.wiki/NotoSansHans-Medium.woff2",
+      "size": 6257388,
+      "group": "runtime",
+      "kind": "font"
+    },
+    {
+      "key": "static.prts.wiki/assets/scenario/ui/ui_speaker.png",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/ui/ui_speaker.png",
+      "size": 3215,
+      "group": "runtime",
+      "kind": "src"
+    },
+    {
+      "key": "static.prts.wiki/assets/scenario/ui/ui_playback_all.png",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/ui/ui_playback_all.png",
+      "size": 16791,
+      "group": "runtime",
+      "kind": "src"
+    },
+    {
+      "key": "static.prts.wiki/assets/scenario/ui/ui_playback.png",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/ui/ui_playback.png",
+      "size": 15894,
+      "group": "runtime",
+      "kind": "src"
+    },
+    {
+      "key": "static.prts.wiki/assets/scenario/ui/ui_fullscreen.png",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/ui/ui_fullscreen.png",
+      "size": 198,
+      "group": "runtime",
+      "kind": "src"
+    },
+    {
+      "key": "static.prts.wiki/assets/scenario/ui/ui_bug_report.png",
+      "mirrorPath": "mirror/prts/static.prts.wiki/assets/scenario/ui/ui_bug_report.png",
+      "size": 3150,
+      "group": "runtime",
+      "kind": "src"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/slide_mask.BQ3hXFW7.png",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/slide_mask.BQ3hXFW7.png",
+      "size": 4780,
+      "group": "runtime",
+      "kind": "src"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/back_shadow.D4pyqE7x.png",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/back_shadow.D4pyqE7x.png",
+      "size": 9534,
+      "group": "runtime",
+      "kind": "src"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/DisplayController.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/DisplayController.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/StoryPlayer.BQgSL6Cy.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/StoryPlayer.BQgSL6Cy.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/Tooltip.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/Tooltip.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/common.CazL1XCQ.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/common.CazL1XCQ.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/defineProperty.BbfpZ9Tg.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/defineProperty.BbfpZ9Tg.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/modulepreload-polyfill.P2Xu9kJm.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/modulepreload-polyfill.P2Xu9kJm.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/naive-ui.ovEGOFPU.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/naive-ui.ovEGOFPU.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/pixi.C1WAkyzQ.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/pixi.C1WAkyzQ.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/polyfills.D2fCD57O.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/polyfills.D2fCD57O.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/rolldown-runtime.hePW80VL.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/rolldown-runtime.hePW80VL.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/sentry.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/sentry.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/style.CFBu-Krp.css",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/style.CFBu-Krp.css",
+      "size": 0,
+      "group": "runtime",
+      "kind": "css"
+    },
+    {
+      "key": "static.prts.wiki/widgets/production/vendor.DtZnMoVI.js",
+      "mirrorPath": "mirror/prts/static.prts.wiki/widgets/production/vendor.DtZnMoVI.js",
+      "size": 0,
+      "group": "runtime",
+      "kind": "js"
+    }
+  ],
+  "catalog": {
+    "entries": 19886,
+    "dataBytes": 1230164,
+    "source": {
+      "character": "https://torappu.prts.wiki/assets/avg/character.json",
+      "background": "https://torappu.prts.wiki/assets/avg/background.json",
+      "variables": "https://torappu.prts.wiki/gamedata/latest/story/story_variables.json",
+      "widgetPage": "https://prts.wiki/w/EP10%2FENTRY",
+      "widgetBase": "https://static.prts.wiki/widgets/production/"
+    }
+  }
+}
