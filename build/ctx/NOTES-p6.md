@@ -26,10 +26,8 @@
 2. **启动顺序实测**：pack 命中即返回，网络升级在**后台**跑（`upgradeBundleFromNetwork`）。好处：
    冷启动零等待、离线首启可播；网络成功 → 写 v7 + 清横幅，失败 → 保留本地字节。
    代价：`loadBundle()` resolve 后 1–3 s bundles 才真正升级（有日志 `[runtime-update] 引擎升级到…`）。
-3. **横幅文案**：契约示例是「已回退到内置快照（v1.2.0-a1b2c3d）」；实现给出的是
-   `v1.0.0-fbb167ed`（= meta.json 的 `version` + `revision` 前 8 位）。**标签里的 `v` 前缀**：
-   示例含 `v`，实现里 `meta.version="1.0.0"`、`label="1.0.0-fbb167ed"`。若需要字面 `v1.0.0-…`，
-   改 `enginePack.ts::readPackOnce` 一行即可。
+3. **横幅文案**：`引擎模块加载失败：StoryPlayer.BQgSL6Cy.js（HTTP 500）；已回退到内置快照（v1.0.0-fbb167ed）`
+   —— 标签 = `v` + `meta.version` + `-` + `revision` 前 8 位，与 BRIEF §0.2 的示例同形。
 4. **`HTTP 500` 从哪来**（重要，Lead 实测前请读）：
    `static.prts.wiki` 的模块响应**不带 `access-control-allow-origin`**（`code.jquery.com`、
    `cdn.jsdelivr.net` 带）。浏览器里裸 `fetch()` 会 CORS 失败（`reason=网络错误`，无状态码）；

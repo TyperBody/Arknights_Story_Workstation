@@ -105,7 +105,7 @@ try {
   t("坏快照 → 换 pack 且横幅写「已回退到内置快照」", () => {
     assert.equal(fallbackReport.error, null);
     assert.ok(fallbackReport.booted);
-    assert.match(fallbackReport.bannerText, /已回退到内置快照（v?[\d.]/);
+    assert.match(fallbackReport.bannerText, /已回退到内置快照（v\d+\.\d+\.\d+-[0-9a-f]{8}）/);
   });
 
   t("页面不白屏：boot 成功且 iframe 里有 .story-player", () => {

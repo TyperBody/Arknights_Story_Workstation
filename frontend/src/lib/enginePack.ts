@@ -104,7 +104,10 @@ async function readPackOnce(): Promise<EnginePack | null> {
     pushLog("warn", `[engine-pack] 随包快照校验失败（继续 cache/network）: ${problems.join("；")}`);
     return null;
   }
-  const label = meta ? [meta.version, (meta.revision || "").slice(0, 8)].filter(Boolean).join("-") : "v1";
+  // 标签形态对齐 BRIEF §0.2 的示例：`v1.0.0-fbb167ed`（版本 + revision 前 8 位）。
+  const label = meta
+    ? `v${String(meta.version || "1").replace(/^v/, "")}${meta.revision ? `-${String(meta.revision).slice(0, 8)}` : ""}`
+    : "v1";
   pushLog(
     "info",
     `[engine-pack] 随包快照就绪 ${label}：${Object.keys(snapshot.modules).length} 模块 / `
