@@ -428,6 +428,16 @@ t("saveLayout/readLayout/listLayouts/activeLayout（内存 localStorage）", () 
   assert.deepEqual(layout.listLayouts(), ["default"]);
   assert.equal(layout.activeLayout(), "default");
 });
+t("saveLayout / loadLayout（§2.4 名字）：复制活跃布局、切换 active", () => {
+  installStorage({});
+  layout.saveLayoutNamed("default", stringify(defaultState()));
+  layout.saveLayout("双栏"); // 不给文本 = 复制当前活跃布局
+  assert.equal(layout.readLayout("双栏"), stringify(defaultState()));
+  assert.equal(layout.loadLayout("双栏"), true);
+  assert.equal(layout.activeLayout(), "双栏");
+  assert.equal(layout.loadLayout("没有这个"), false);
+  assert.equal(layout.activeLayout(), "双栏", "失败的 load 不改 active");
+});
 t("migrateLegacy：旧 prts-editor-windows:* 只读一次后删除", () => {
   layout.consumeLegacy();
   const storage = installStorage({

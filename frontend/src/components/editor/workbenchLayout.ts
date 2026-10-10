@@ -235,6 +235,33 @@ export function loadLayoutWith(codec: LayoutCodec, name: string): unknown | null
   }
 }
 
+/**
+ * §2.4 的 `saveLayout(name)`：不给 `text` 时把**当前活跃布局**的文本复制成命名布局
+ * （`saveLayoutNamed(name, text)` 是带文本的显式版本；持久的布局 JSON 由
+ * `workbenchStack.stringify` 产出）。
+ */
+export function saveLayout(name: string, text?: string): void {
+  const clean = String(name ?? "").trim() || DEFAULT_LAYOUT_NAME;
+  if (typeof text === "string") {
+    saveLayoutNamed(clean, text);
+    return;
+  }
+  const source = readLayout(activeLayout()) ?? readRaw(WB_KEY_DEFAULT);
+  if (source) saveLayoutNamed(clean, source);
+  else writeRaw(WB_KEY_ACTIVE, clean);
+}
+
+/**
+ * §2.4 的 `loadLayout(name)`：存在则把 `active` 指向它并返回 true。
+ * 解析由调用方用 `parse`（或 `loadLayoutWith`）做——本文件不 import 模型。
+ */
+export function loadLayout(name: string): boolean {
+  const clean = String(name ?? "").trim() || DEFAULT_LAYOUT_NAME;
+  if (!readLayout(clean)) return false;
+  writeRaw(WB_KEY_ACTIVE, clean);
+  return true;
+}
+
 /** 当前活跃布局的文本（没有 → null）。 */
 export function readActiveLayout(): string | null {
   return readLayout(activeLayout());
