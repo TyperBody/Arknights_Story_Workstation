@@ -1,10 +1,9 @@
-/* 分支图（task-16）样式 —— `frontend/src/components/editor/BranchGraph.tsx` 专用。
+/* 分支图（T6 / task-7）样式 —— `frontend/src/components/editor/BranchGraph.tsx` 专用。
  *
- * 独立文件（不改 `frontend/src/styles/browser.css`，那是 task-15 的写域）：
- * `optionalPart()` 懒加载组件时 CSS 跟着 chunk 走，页面不需要额外接线。
- * 命名空间统一 `.ed-graph*`，与 `.ed-panel` / `.ed-stage` / `.ed-inspector` 同族。
- * 颜色走主题变量（`--bg-secondary` / `--border` / `--text-secondary`），
- * 缺失时退回硬编码深色，保证在编辑器页与独立演示页里都好看。
+ * dify 风：浅色卡片（`--bg-secondary`）+ 细边框（`--border`）+ 8px 圆角 + 轻阴影；
+ * 选中 = `--accent` 环；左侧 4px 分类色条 + 右上状态点由 JSX 画。
+ * 命名空间：`.ed-graph*`（沿用 task-16）+ `.bg-*`（chrome / 控件）；
+ * 颜色全走主题变量，缺失时退回深色字面量（独立演示页也好看）。
  */
 
 .ed-graph {
@@ -12,7 +11,7 @@
   flex-direction: column;
   gap: 6px;
   min-height: 120px;
-  padding: 8px 10px 10px;
+  padding: 6px 8px 8px;
   overflow: hidden;
   background: var(--bg-secondary, #14161c);
   border: 1px solid var(--border, #2a2d36);
@@ -20,12 +19,64 @@
   color: inherit;
 }
 
+/* ── chrome 条（BRIEF §2.2：`data-chrome="branch"` + `.bg-chrome` / `.bg-fold`） ── */
 .ed-graph-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 0 0 auto;
   min-width: 0;
+  padding: 2px 2px 4px;
+  border-bottom: 1px solid var(--border, #2a2d36);
+}
+
+.ed-graph-head.is-active,
+.ed-graph-head[data-active="1"] {
+  box-shadow: inset 0 -2px 0 var(--accent, #f4c430);
+}
+
+.bg-role-chip {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, #4fc3f7, #f4c430);
+}
+
+.bg-chrome-grow {
+  flex: 1 1 auto;
+}
+
+.bg-zoom {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary, #929292);
+}
+
+.bg-fit,
+.bg-fold {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bg-fit:hover,
+.bg-fold:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent, #f4c430);
+}
+
+.bg-fold {
+  width: 24px;
+  padding: 2px 0;
+  text-align: center;
 }
 
 .ed-graph-title {
@@ -43,7 +94,7 @@
 
 .ed-graph-legend {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   gap: 8px;
   min-width: 0;
   overflow: hidden;
@@ -96,46 +147,175 @@
   color: #ffd75e;
   background: rgba(244, 196, 48, 0.12);
   border: 1px solid rgba(244, 196, 48, 0.45);
-  border-radius: 5px;
+  border-radius: 6px;
 }
 
 .ed-graph-empty {
   margin: 0;
   flex: 0 0 auto;
+  padding: 4px 8px;
   font-size: 11.5px;
   color: var(--text-secondary, #929292);
 }
 
+/* 空态浮在画布中央（画布仍在，网格背景提示"这里会画出走向"）。 */
+.bg-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 6px 12px;
+  background: rgba(12, 15, 20, 0.86);
+  border: 1px dashed var(--border, #343a46);
+  border-radius: 8px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ── 画布 ─────────────────────────────────────────────────────────── */
 .ed-graph-body {
   position: relative;
   flex: 1 1 auto;
-  min-height: 70px;
+  min-height: 90px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.22);
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.06) 1px, transparent 0) 0 0 / 22px 22px,
+    rgba(0, 0, 0, 0.22);
   border: 1px solid var(--border, #2a2d36);
-  border-radius: 6px;
+  border-radius: 8px;
+}
+
+.ed-graph-body[hidden] {
+  display: none;
+}
+
+.ed-graph-pan {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  overflow: hidden;
+}
+
+.ed-graph-pan:active {
+  cursor: grabbing;
 }
 
 .ed-graph-svg {
   display: block;
-  touch-action: none;
-  cursor: grab;
-  user-select: none;
+  width: 100%;
+  height: 100%;
 }
 
-.ed-graph-svg:active {
-  cursor: grabbing;
+/* ── 卡片（dify 风：浅色卡片 + 左色条 + 双行文本 + 状态点） ────── */
+.bg-card {
+  fill: var(--bg-tertiary, #232833);
+  stroke: var(--border, #3a4150);
+  stroke-width: 1;
+  transition: stroke 0.12s ease-out, stroke-width 0.12s ease-out;
 }
 
-.ed-graph-node rect {
+.bg-node:hover .bg-card {
+  stroke: var(--accent, #f4c430);
+}
+
+.bg-node.is-active .bg-card,
+.bg-node.is-picked .bg-card {
+  stroke: var(--accent, #f4c430);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 5px rgba(244, 196, 48, 0.45));
+}
+
+.bg-node {
+  cursor: pointer;
+}
+
+.bg-title {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--text-primary, #e6e9f0);
+  pointer-events: none;
+}
+
+.bg-summary {
+  font-size: 10.5px;
+  fill: var(--text-secondary, #929292);
+  pointer-events: none;
+}
+
+.bg-title-bar {
+  pointer-events: none;
+}
+
+.bg-diamond {
+  pointer-events: none;
+}
+
+.bg-pill {
+  fill: rgba(244, 196, 48, 0.14);
+  stroke: rgba(244, 196, 48, 0.5);
+  stroke-width: 0.8;
+}
+
+.bg-pill-text {
+  font-size: 9.5px;
+  fill: #ffd75e;
+  pointer-events: none;
+}
+
+.bg-values {
+  font-size: 9px;
+  fill: #f4c430;
+  pointer-events: none;
+}
+
+.bg-merge-tag {
+  font-size: 9px;
+  fill: #b39ddb;
+  pointer-events: none;
+}
+
+.bg-state {
+  pointer-events: none;
+}
+
+/* ── 边 ───────────────────────────────────────────────────────── */
+.bg-edge path {
   transition: stroke-width 0.12s ease-out;
 }
 
-.ed-graph-node.is-active rect,
-.ed-graph-node.is-picked rect {
-  filter: drop-shadow(0 0 4px rgba(244, 196, 48, 0.55));
+.bg-edge-choice path,
+.bg-edge-merge path {
+  stroke-width: 1.8;
 }
 
+.bg-edge-label-bg {
+  fill: rgba(12, 15, 20, 0.86);
+  stroke: var(--border, #343a46);
+  stroke-width: 0.8;
+}
+
+.bg-edge-label-text {
+  font-size: 9.5px;
+  fill: #e6e9f0;
+  pointer-events: none;
+}
+
+.bg-hint {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  color: #ffd75e;
+  background: rgba(12, 15, 20, 0.8);
+  border: 1px solid rgba(244, 196, 48, 0.35);
+  border-radius: 5px;
+}
+
+/* ── 底部操作条 + 分叉表格（沿用 task-16 的交互） ─────────────── */
 .ed-graph-actions {
   display: flex;
   align-items: center;
@@ -158,9 +338,9 @@
   padding: 3px 10px;
   font-size: 11.5px;
   color: #14161c;
-  background: #f4c430;
+  background: var(--accent, #f4c430);
   border: 1px solid #d6a900;
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -176,7 +356,7 @@
   padding: 8px;
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--border, #2a2d36);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .ed-graph-forkbox table {
@@ -234,7 +414,7 @@
 
 .ed-graph-forkok {
   color: #14161c !important;
-  background: #f4c430 !important;
+  background: var(--accent, #f4c430) !important;
   border-color: #d6a900 !important;
 }
 

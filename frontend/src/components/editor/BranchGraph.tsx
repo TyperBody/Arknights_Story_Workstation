@@ -1,39 +1,43 @@
 /**
- * StoryEditorPage 的「分支图」视图（task-16）——**独立组件，只依赖 props**。
+ * 「分支图」视图（T6 / task-7）——**dify 风分层 DAG**，纯 SVG，零新依赖。
  *
  * ```tsx
  * <BranchGraph
- *   text={text}                        // 全文（与编辑器 textarea 同源）
- *   caretLine={caret.line}             // 1 基光标行：高亮 + 自动滚入可视区
- *   onJumpToLine={(line) => …}         // 点节点 = 跳到该节点起始行
- *   onPatch={(next, caret) => …}       // 「⤳ 在此分叉」= 回写整篇
- *   height={220}                       // 缺省 220
- *   onClose={() => …}                  // 可选：右上角 ✕
+ *   text={text}                    // 全文（与编辑器 textarea 同源）
+ *   caretLine={caret.line}         // 1 基光标行 → 高亮对应卡片
+ *   onJumpToLine={(line) => …}     // 点卡片 = 跳到该卡片首行
+ *   onPatch={(next, caret) => …}   // 「⤳ 在此分叉」= 回写整篇
+ *   height={340}                   // 可选：容器高度
+ *   chrome={{title, ariaLabel, visible, onToggle, onSelect, active}}  // 可选（BRIEF §2.2）
  * />
  * ```
  *
- * 纯 SVG/DOM、零新依赖。所有「线路 / 合流 / 分叉补丁」推导来自
- * `src/akstage/local/branchGraph.js`（`buildGraph` / `graphAt` /
- * `suggestForkOptions` / `forkPatch`）—— 见那里的注释（引擎出处
- * `engine/runtime.ts` 的 decision/predicate case 与
- * `engine/log/semantics.ts` 的 `passesGate`；形状与预算见
- * `.akskills/arkstage-fanfic/reference/branching.md`）。本文件只负责画与交互：
- *   · x 轴 = `node.depth`（列）= 决策层；y 轴 = 节点顺序；线路 ≥6 色循环 + 图例；
- *     选线节点（choice）= 菱形头部 + 双边框；合流节点 = 虚线框；点节点 = 跳行；
- *     hover = 原生 `<title>`（行号 + 线路 + 原文首行）；
- *   · 滚轮缩放（`viewBox`，clamp 0.4~3）；拖空白平移；`pointerdown` 上 `touch-action:none`；
- *   · 「⤳ 在此分叉」：选中节点 → 弹一张 2~4 行的小表格（选项文本 + value）→
- *     确定 → `onPatch(forkPatch(text, 节点末行, rows))` 回写整篇（页面会重跑 lint）；
- *   · 无 Decision → 空态文案；`degraded` → 黄色提示条，图仍可交互。
+ * 排布**全部**来自 `src/akstage/local/branchGraph.js` 的纯函数
+ * （`buildGraph` / `layoutGraph` / `graphAt` / `suggestForkOptions` / `forkPatch`）：
+ *   · 分层：`layer` 单调（拓扑长路径），相邻列 x = `PAD + layer × 232`；
+ *   · 卡片：200×64（左侧 4px 分类色条 + 标题 1 行 + 摘要 1 行 + 右上状态点）；
+ *   · 连线：正交折线（跨列 S 折 / 同列绕行，拐点 6px 圆角），`role: "choice"`
+ *     的边在竖向段中点贴分支标签；`[Decision]` 卡片把选项画成 pills + 菱形角标。
+ * 本文件只负责**画与交互**（滚轮缩放 0.2…2、拖空白平移、`0` / `⤢ 适配` 复位、
+ * 点卡片跳行、`⤳ 在此分叉`）。
  *
- * 缺 `onPatch`、`text` 为空、无 Decision、`degraded` 都**不崩**：作为
+ * DOM 标记（harness 断言锚点，**只增不改**）：
+ *   `[data-branch-graph="1"]`（svg）、`[data-branch-node="<id>"]` + `data-branch-layer`、
+ *   `[data-branch-edge="1"]`（= `data-branch-path="1"]`，同一元素两个名字）、
+ *   `[data-branch-pan="1"]`（平移面）、`[data-branch-action="fit"]`、
+ *   `[data-branch-empty="1"]`、`[data-chrome="branch"]` + `.bg-chrome` / `.bg-fold`。
+ * 缺 `text` / `onPatch` / chrome / 无 Decision / `degraded` 都**不崩**：作为
  * `optionalPart()` 懒加载的可选面板，任何一种缺席都是正常状态。
  */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PanelChromeProps } from "./inspectorWindow";
 import {
   buildGraph,
   forkPatch,
   graphAt,
+  layoutGraph,
+  LAYOUT_ZOOM_MAX,
+  LAYOUT_ZOOM_MIN,
   suggestForkOptions,
   type Edge,
   type Graph,
@@ -42,7 +46,7 @@ import {
 } from "../../../../src/akstage/local/branchGraph.js";
 import "./branchGraph.css";
 
-/** 组件的 props（task-16 契约**逐字**）。 */
+/** 组件的 props：task-16 契约 + P4 的可选 chrome（BRIEF §2.2）。 */
 export interface BranchGraphProps {
   text: string;
   caretLine: number;
@@ -50,60 +54,127 @@ export interface BranchGraphProps {
   onPatch?: (nextText: string, caretLine?: number) => void;
   height?: number;
   onClose?: () => void;
+  /**
+   * 窗口壳 chrome（BRIEF §2.2 / P4 的 `inspectorWindow.ts`）。
+   * **可选**：不给时内容照常渲染（只少一条 `.bg-chrome`）。
+   * （`./inspectorWindow` 的类型在 P4 落盘前不存在，故这里只 `import type`
+   *  —— 运行期零耦合；若该文件缺席，删掉这一行即可，组件本身不受影响。）
+   */
+  chrome?: PanelChromeProps;
 }
 
-/** 线路配色（≥6 循环；`-1` = 主线/未归属的淡色）。 */
-const ROUTE_COLORS = ["#f4c430", "#4fc3f7", "#a5d6a7", "#ff8a65", "#ba68c8", "#4db6ac", "#e57373", "#9575cd"];
-/** 单次滚轮的缩放倍率（配合 `ZOOM_MIN`/`ZOOM_MAX` 的 clamp）。 */
-const ZOOM_STEP = 1.1;
-/** 画布几何（SVG 用户单位 ≈ px；缩放只改 `viewBox`）。 */
-const COL_W = 196;
-const ROW_H = 34;
-const NODE_W = 160;
-const NODE_H = 26;
-const PAD = 16;
-const LABEL_CHARS = 14;
-const ZOOM_MIN = 0.4;
-const ZOOM_MAX = 3;
-/** 分叉表格的行数范围（契约：2~4 行）。 */
-const FORK_ROWS_MIN = 2;
-const FORK_ROWS_MAX = 4;
-
-interface ViewBox {
+/** 布局输出的最小结构（`layoutGraph` 的 JSDoc 是 `any`，这里给视图补形状）。 */
+interface LayoutNode {
+  id: string;
   x: number;
   y: number;
   w: number;
   h: number;
+  layer: number;
+  role: "start" | "decision" | "merge" | "node" | "end";
+  kind: string;
+  lane: string | null;
+  line: number;
+  range: [number, number];
+  text: string;
+  title: string;
+  summary: string;
+  values: number[];
+  mixed: boolean;
+  /** decision 卡片：选项 pills。 */
+  lines: string[];
 }
-
-interface ForkRow {
+interface LayoutEdge {
+  id: string;
+  from: string;
+  to: string | null;
+  points: [number, number][];
+  d: string;
+  anchor: { x: number; y: number } | null;
+  role: "main" | "choice" | "merge" | "back" | "dead";
   label: string;
-  value: number;
+  value: number | null;
+}
+interface Layout {
+  nodes: LayoutNode[];
+  edges: LayoutEdge[];
+  lanes: { id: string; label: string; value: number; opts: string; line: number; colorIndex: number }[];
+  choiceLines: { line: number; title: string; edgeIds: string[]; options: string[] }[];
+  width: number;
+  height: number;
+  degenerate: boolean;
 }
 
-/** 空图（`buildGraph` 理论上不会抛；这里只是第二道保险）。 */
+/** 线路配色（固定 8 色循环；节点分类色条 + 边 + 图例共用）。 */
+const ROLE_COLORS: Record<string, string> = {
+  start: "#4db6ac",
+  decision: "#f4c430",
+  merge: "#9575cd",
+  end: "#8b93a7",
+  node: "#4fc3f7",
+  back: "#e57373",
+  main: "#4b5563",
+  choice: "#f4c430",
+  dead: "#6b7280",
+};
+/** 无 Decision 时的人话提示（harness 逐字断言）。 */
+const EMPTY_HINT = "这个剧本还没有分支：插入 [Decision] 后这里会画出走向";
+/** 滚轮每格的缩放倍率（clamp 到 `LAYOUT_ZOOM_MIN..MAX`）。 */
+const ZOOM_STEP = 1.12;
+/** 画布四周的最小可视留白（「适配」用）。 */
+const FIT_PAD = 18;
+/** 分叉表格的行数范围。 */
+const FORK_ROWS_MIN = 2;
+const FORK_ROWS_MAX = 4;
+
 const EMPTY_STATS = {
   lines: 0, parsedLines: 0, decisions: 0, choices: 0, routes: 0, nodes: 0, edges: 0,
   merges: 0, forks: 0, maxDepth: 0, combos: 0, lineagesMax: 0, degradedReasons: [] as string[],
 };
+/** 空布局（`layoutGraph` 理论上不抛；这里只是第二道保险）。 */
+const EMPTY_LAYOUT: Layout = {
+  nodes: [], edges: [], lanes: [], choiceLines: [], width: 0, height: 0, degenerate: false,
+};
 
-/** 节点标签截断（**不用 canvas 量字体**；纯字符串截断）。 */
-function clipLabel(text: string, max = LABEL_CHARS): string {
-  const value = String(text ?? "").replace(/\s+/g, " ").trim();
-  return value.length > max ? `${value.slice(0, max)}…` : value || "（空）";
+/** 数值 clamp。 */
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(high, Math.max(low, value));
 }
 
-/** 线路索引 → 颜色（越界循环）。 */
-function colorOf(index: number): string {
-  if (index < 0) return "#6b7280";
-  return ROUTE_COLORS[index % ROUTE_COLORS.length] ?? "#6b7280";
+/** 视图状态：`x/y` = 平移（屏幕 px），`zoom` = 缩放。 */
+interface ViewState {
+  key: string;
+  zoom: number;
+  x: number;
+  y: number;
+}
+
+/** 把整张图缩放到容器里（「适配」/ 首帧）。 */
+function fitView(layout: Layout, w: number, h: number): ViewState {
+  const bw = Math.max(1, layout.width);
+  const bh = Math.max(1, layout.height);
+  const zoom = clamp(Math.min((w - FIT_PAD * 2) / bw, (h - FIT_PAD * 2) / bh), LAYOUT_ZOOM_MIN, LAYOUT_ZOOM_MAX);
+  return { key: "", zoom, x: r((w - bw * zoom) / 2), y: r((h - bh * zoom) / 2) };
+}
+
+/** 两位小数（避免浮点尾巴进 DOM / 断言）。 */
+function r(value: number): number {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 }
 
 /**
- * 分支图面板。
+ * 分支图面板：dify 风分层 DAG。
  * @param props
  */
-export default function BranchGraph({ text, caretLine, onJumpToLine, onPatch, height = 220, onClose }: BranchGraphProps) {
+export default function BranchGraph({
+  text,
+  caretLine,
+  onJumpToLine,
+  onPatch,
+  height = 320,
+  onClose,
+  chrome,
+}: BranchGraphProps) {
   /** 图：文本变化才重算（大脚本也只算一次）。 */
   const graph: Graph = useMemo(() => {
     try {
@@ -122,111 +193,112 @@ export default function BranchGraph({ text, caretLine, onJumpToLine, onPatch, he
     }
   }, [text, caret]);
 
-  /**
-   * 手动点选（优先于光标行）。**不做 effect 重置** —— 记录「点选时那一稿的
-   * 文本」，文本一变（含 `forkPatch` 回写）自动视为未点选，从而指向必然存在
-   * 的节点 id（`useState` 里存快照，避免 setState-in-effect）。
-   */
+  /** 布局（纯函数、确定性；同一 `graph` 只算一次）。 */
+  const layout: Layout = useMemo(() => {
+    try {
+      return (layoutGraph(graph) ?? EMPTY_LAYOUT) as Layout;
+    } catch {
+      return EMPTY_LAYOUT;
+    }
+  }, [graph]);
+
+  /** 手动点选（优先于光标行）；文本一变视为未点选（避免悬空 id）。 */
   const [picked, setPicked] = useState<{ text: string; id: string } | null>(null);
   const selectedId = (picked && picked.text === text ? picked.id : null) ?? caretNodeId;
   const selectedNode = useMemo(
-    () => (selectedId ? graph.nodes.find((node: GraphNode) => node.id === selectedId) ?? null : null),
-    [graph, selectedId],
+    () => (selectedId ? layout.nodes.find((node) => node.id === selectedId) ?? null : null),
+    [layout, selectedId],
   );
-  const routeIndex = useMemo(() => new Map<string, number>(graph.routes.map((route: Route, index: number) => [route.id, index] as const)), [graph]);
+  const lanes = useMemo(() => new Map<string, number>(layout.lanes.map((lane) => [lane.id, lane.colorIndex])), [layout]);
 
-  /** 布局：x = depth 列，y = 节点顺序。 */
-  const layout = useMemo(() => {
-    const positions = new Map<string, { x: number; y: number }>();
-    graph.nodes.forEach((node: GraphNode, index: number) => {
-      positions.set(node.id, { x: PAD + node.depth * COL_W, y: PAD + index * ROW_H });
+  /** 平移面尺寸（「适配」的基准；`ResizeObserver` 只更新尺寸，不动视图）。 */
+  const panRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const host = panRef.current;
+    if (!host || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      setSize({ w: host.clientWidth || 0, h: host.clientHeight || 0 });
     });
-    return positions;
-  }, [graph]);
+    observer.observe(host);
+    setSize({ w: host.clientWidth || 0, h: host.clientHeight || 0 });
+    return () => observer.disconnect();
+  }, []);
 
-  const content = useMemo(() => {
-    const maxDepth = graph.nodes.reduce((max: number, node: GraphNode) => Math.max(max, node.depth), 0);
-    return {
-      width: PAD * 2 + (maxDepth + 1) * COL_W,
-      height: PAD * 2 + Math.max(1, graph.nodes.length) * ROW_H + 8,
+  /**
+   * 视图 = 派生（`boxKey`）+ 用户交互的折叠：内容 / 容器尺寸一变，
+   * `boxKey` 变化 → 自动回到「适配」。所以**不需要** effect 里 setState。
+   */
+  const [view, setView] = useState<ViewState>({ key: "", zoom: 1, x: 0, y: 0 });
+  const boxKey = `${layout.width}x${layout.height}x${layout.nodes.length}x${size.w}x${size.h}`;
+  const fitted = useMemo(
+    () => (size.w > 0 && size.h > 0 ? fitView(layout, size.w, size.h) : { key: "", zoom: 1, x: 0, y: 0 }),
+    [layout, size.w, size.h],
+  );
+  const current: ViewState = view.key === boxKey ? view : { ...fitted, key: boxKey };
+  const applyView = useCallback((next: ViewState) => {
+    setView({ ...next, key: boxKey });
+  }, [boxKey]);
+
+  /** `⤢ 适配`（也是首帧 / 内容变化后的基准）。 */
+  const fit = useCallback(() => {
+    applyView({ ...fitView(layout, size.w || 320, size.h || 200), key: boxKey });
+  }, [applyView, boxKey, layout, size.h, size.w]);
+
+  /** 热键 `0` = 适配（不在输入框里按才生效，别抢 textarea 的数字键）。 */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "0" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const tag = (event.target as HTMLElement | null)?.tagName ?? "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      event.preventDefault();
+      fit();
     };
-  }, [graph]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fit]);
 
-  const bodyHeight = Math.max(80, height - 84);
-  /**
-   * 视图状态 = 派生（内容尺寸）+ 用户交互（缩放/平移）的**折叠**结果：
-   * `boxKey` 记录派生时用的内容尺寸，内容一变自动以「看得见全图」为基准，
-   * 不需要在 effect 里 setState。光标行居中同理（见下面 `viewBox` 的 y 修正）。
-   */
-  const EMPTY_VIEW = { key: "", zoom: 1, panX: 0, panY: 0 };
-  const [view, setView] = useState<{ key: string; zoom: number; panX: number; panY: number }>(EMPTY_VIEW);
-  const boxKey = `${content.width}x${content.height}x${bodyHeight}`;
-  const viewState = view.key === boxKey ? view : { ...EMPTY_VIEW, key: boxKey };
-  const baseHeight = Math.max(1, bodyHeight || content.height);
-  /** 光标行所在节点的 y（用于「自动居中」；派生阶段算，不写 effect）。 */
-  const caretY = useMemo(() => (caretNodeId ? layout.get(caretNodeId)?.y ?? null : null), [caretNodeId, layout]);
-  /** 当前 `viewBox`：内容尺寸 + 缩放决定宽高，光标行决定 y（鼠标拖过则用 panY）。 */
-  const box = useMemo<ViewBox>(() => {
-    const width = Math.max(1, content.width) / viewState.zoom;
-    const height = baseHeight / viewState.zoom;
-    const maxY = Math.max(0, content.height - height);
-    const desired = caretY !== null ? caretY - height / 2 + NODE_H / 2 : viewState.panY - height / 2;
-    const y = Math.min(maxY, Math.max(0, viewState.panY !== 0 ? viewState.panY : desired));
-    return { x: viewState.panX, y, w: width, h: height };
-  }, [baseHeight, caretY, content.height, content.width, viewState.panX, viewState.panY, viewState.zoom]);
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  const drag = useRef<{ x: number; y: number; box: ViewBox } | null>(null);
-  /** 「⤳ 在此分叉」草稿：`null` = 弹窗关闭。 */
-  const [fork, setFork] = useState<{ nodeId: string; rows: ForkRow[] } | null>(null);
-  /**
-   * 交互（滚轮缩放 / 拖拽平移）→ 折成 `{zoom, panX, panY}`。
-   * 目标 `value` 相对**本帧派生出来的 `box`** 计算，故不需要在 effect 里
-   * 同步状态（内容一变，`boxKey` 变化即自动回到「看得见全图」的基准）。
-   */
-  const applyView = useCallback((value: ViewBox) => {
-    setView({
-      key: boxKey,
-      zoom: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.max(1, content.width) / Math.max(1, value.w))),
-      panX: value.x,
-      panY: value.y,
-    });
-  }, [boxKey, content.width]);
-
-  /** 滚轮 = 缩放。缩放倍率 clamp 在 `ZOOM_MIN..ZOOM_MAX`（`viewBox` 越小越"放大"）。 */
-  const onWheel = useCallback((event: React.WheelEvent<SVGSVGElement>) => {
+  /** 滚轮 = 以指针为锚缩放（0.2…2）。 */
+  const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (!layout.nodes.length) return;
     event.preventDefault();
+    const host = panRef.current;
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const px = event.clientX - rect.left;
+    const py = event.clientY - rect.top;
     const factor = event.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
-    const width = Math.min(content.width / ZOOM_MIN, Math.max(content.width / ZOOM_MAX, box.w / factor));
-    const ratio = width / box.w;
-    applyView({ ...box, w: width, h: box.h * ratio });
-  }, [applyView, box, content.width]);
+    const zoom = clamp(current.zoom * factor, LAYOUT_ZOOM_MIN, LAYOUT_ZOOM_MAX);
+    if (zoom === current.zoom) return;
+    const wx = (px - current.x) / current.zoom;
+    const wy = (py - current.y) / current.zoom;
+    applyView({ key: boxKey, zoom: r(zoom), x: r(px - wx * zoom), y: r(py - wy * zoom) });
+  }, [applyView, boxKey, current, layout.nodes.length]);
 
-  /** 拖空白 = 平移。 */
-  const onPointerDown = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+  /** 拖空白 = 平移（卡片 / 按钮上按下不算）。 */
+  const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const onPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as Element | null;
-    if (target?.closest("[data-node]")) return;
-    drag.current = { x: event.clientX, y: event.clientY, box };
+    if (target?.closest("[data-branch-node],button")) return;
+    drag.current = { x: event.clientX, y: event.clientY, vx: current.x, vy: current.y };
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
       /* 某些 WebView 不支持；退化为不捕获 */
     }
-  }, [box]);
-
-  const onPointerMove = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+  }, [current.x, current.y]);
+  const onPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const state = drag.current;
     if (!state) return;
-    const pixels = Math.max(60, bodyRef.current?.clientWidth ?? content.width);
-    const scale = state.box.w / pixels;
     applyView({
-      ...state.box,
-      x: state.box.x - (event.clientX - state.x) * scale,
-      y: Math.max(0, state.box.y - (event.clientY - state.y) * (state.box.h / Math.max(40, bodyHeight))),
+      key: boxKey,
+      zoom: current.zoom,
+      x: r(state.vx + (event.clientX - state.x)),
+      y: r(state.vy + (event.clientY - state.y)),
     });
-  }, [applyView, bodyHeight, content.width]);
-
-  const onPointerUp = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+  }, [applyView, boxKey, current.zoom]);
+  const onPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     drag.current = null;
     try {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -235,58 +307,111 @@ export default function BranchGraph({ text, caretLine, onJumpToLine, onPatch, he
     }
   }, []);
 
+  /** 「⤳ 在此分叉」草稿：`null` = 弹窗关闭。 */
+  const [fork, setFork] = useState<{ nodeId: string; rows: { label: string; value: number }[] } | null>(null);
   const openFork = useCallback(() => {
     if (!selectedNode || !onPatch) return;
-    let rows: ForkRow[] = [];
+    let rows: { label: string; value: number }[] = [];
     try {
       rows = suggestForkOptions(String(text ?? ""), FORK_ROWS_MIN).slice(0, FORK_ROWS_MAX);
     } catch {
-      rows = [
-        { label: "选项一", value: 1 },
-        { label: "选项二", value: 2 },
-      ];
+      rows = [{ label: "选项一", value: 1 }, { label: "选项二", value: 2 }];
     }
     setFork({ nodeId: selectedNode.id, rows });
   }, [onPatch, selectedNode, text]);
-
   const confirmFork = useCallback(() => {
     if (!fork || !onPatch) return;
-    const node = graph.nodes.find((candidate: GraphNode) => candidate.id === fork.nodeId);
+    const node = layout.nodes.find((candidate) => candidate.id === fork.nodeId);
     setFork(null);
     if (!node) return;
     try {
-      const result = forkPatch(String(text ?? ""), node.lines[1], fork.rows);
+      const result = forkPatch(String(text ?? ""), node.range[1], fork.rows);
       onPatch(result.text, result.caretLine);
     } catch (error) {
-      // 极端输入下宁可不动稿，也不要让页面崩（`Textarea` 里还有用户的原文）。
       console.warn("[branch-graph] forkPatch failed:", error);
     }
-  }, [fork, graph, onPatch, text]);
+  }, [fork, layout.nodes, onPatch, text]);
 
-  const hasChoice = graph.nodes.some((node) => node.kind === "choice");
+  /** 分支行高亮：`layout.mergeLines` 里的卡片画合流角标。 */
+  const mergeLineSet = useMemo(() => {
+    const raw = (layout as unknown as { mergeLines?: number[] }).mergeLines;
+    return new Set(Array.isArray(raw) ? raw : []);
+  }, [layout]);
+
+  const hasChoice = layout.nodes.some((node) => node.role === "decision");
+  const colorOf = useCallback((node: LayoutNode): string => {
+    if (node.role === "node" && node.lane) {
+      const index = lanes.get(node.lane);
+      if (index !== undefined) return ["#4fc3f7", "#a5d6a7", "#ff8a65", "#ba68c8", "#4db6ac", "#e57373", "#9575cd", "#f4c430"][index % 8] ?? "#4fc3f7";
+    }
+    return ROLE_COLORS[node.role] ?? "#6b7280";
+  }, [lanes]);
+  const edgeColor = useCallback((edge: LayoutEdge): string => {
+    if (edge.role === "choice") return "#f4c430";
+    if (edge.role === "merge") return "#9575cd";
+    if (edge.role === "back") return "#e57373";
+    if (edge.role === "dead") return "#6b7280";
+    return "#5b6472";
+  }, []);
+
+  const bodyHeight = Math.max(120, height - 58);
+  /** 折叠（`▾`）：有 chrome 时用 `chrome.visible` / `chrome.onToggle`；
+   *  没有 chrome 时退化为**组件内部**的收起（DOM 不卸载，与契约「显示不显示」一致）。 */
+  const [folded, setFolded] = useState(false);
+  const hidden = chrome?.visible === false || (!chrome?.onToggle && folded);
+  const toggleFold = useCallback(() => {
+    if (chrome?.onToggle) chrome.onToggle();
+    else setFolded((value) => !value);
+  }, [chrome]);
 
   return (
-    <section className="ed-graph" style={{ height, width: "100%" }} aria-label="分支图">
-      <header className="ed-graph-head">
-        <span className="ed-graph-title">分支图</span>
+    <section className="ed-graph bg-graph" style={{ height, width: "100%" }} aria-label="分支图">
+      <header className="ed-graph-head bg-chrome" data-chrome="branch" data-active={chrome?.active ? "1" : "0"}
+        onClick={chrome?.onSelect}
+        onKeyDown={(event) => { if (event.key === "Enter") chrome?.onSelect?.(); }}
+        role={chrome?.onSelect ? "button" : undefined}
+        tabIndex={chrome?.onSelect ? 0 : undefined}
+      >
+        <span className="bg-role-chip" data-branch-role="legend" aria-hidden="true" />
+        <span className="ed-graph-title">{chrome?.title ?? "分支图"}</span>
         <span className="ed-graph-stat">
           {hasChoice
-            ? `${graph.stats.decisions} 决策 · ${graph.routes.length} 线路 · ${graph.merges.length} 合流`
+            ? `${graph.stats.decisions} 决策 · ${layout.lanes.length} 线路 · ${graph.stats.merges} 合流`
             : "还没有分支"}
         </span>
-        <span className="ed-graph-legend">
-          {graph.routes.slice(0, 6).map((route: Route, index: number) => (
-            <span key={route.id} className="ed-graph-legend-item" title={`${route.value}：${route.label}`}>
-              <i style={{ background: colorOf(routeIndex.get(route.id) ?? index) }} />
-              {`${route.value}:${clipLabel(route.label, 8)}`}
+        <span className="ed-graph-legend" data-branch-legend="1">
+          {layout.lanes.slice(0, 6).map((lane) => (
+            <span key={lane.id} className="ed-graph-legend-item" title={`${lane.value}：${lane.label}`}>
+              <i style={{ background: colorOf({ role: "node", lane: lane.id } as LayoutNode) }} />
+              {`${lane.value}:${lane.label.slice(0, 8)}`}
             </span>
           ))}
-          {graph.routes.length > 6 ? <span className="ed-graph-legend-more">{`+${graph.routes.length - 6}`}</span> : null}
+          {layout.lanes.length > 6 ? <span className="ed-graph-legend-more">{`+${layout.lanes.length - 6}`}</span> : null}
         </span>
+        <span className="bg-chrome-grow" />
+        <span className="bg-zoom" data-branch-zoom-label="1">{`${Math.round(current.zoom * 100)}%`}</span>
+        <button
+          type="button"
+          className="bg-fit"
+          data-branch-action="fit"
+          title="适配窗口（快捷键 0）"
+          onClick={fit}
+        >
+          ⤢ 适配
+        </button>
+        <button
+          type="button"
+          className="bg-fold"
+          data-branch-action="fold"
+          onClick={toggleFold}
+          title={hidden ? "展开分支图" : "收起分支图"}
+          aria-expanded={!hidden}
+          aria-label={`${hidden ? "展开" : "收起"}${chrome?.ariaLabel || "分支图"}`}
+        >
+          {hidden ? "▸" : "▾"}
+        </button>
         {onClose ? (
-          <button type="button" className="ed-graph-close" onClick={onClose} aria-label="关闭分支图">
-            ✕
-          </button>
+          <button type="button" className="ed-graph-close" onClick={onClose} aria-label="关闭分支图">✕</button>
         ) : null}
       </header>
 
@@ -295,114 +420,154 @@ export default function BranchGraph({ text, caretLine, onJumpToLine, onPatch, he
           {`分支结构较复杂，图上可能只展开了部分线路${graph.stats.degradedReasons[0] ? `（${graph.stats.degradedReasons[0]}）` : ""}`}
         </p>
       ) : null}
-      {hasChoice ? null : <p className="ed-graph-empty">还没有分支：选中一行后点「⤳ 在此分叉」。</p>}
 
-      <div className="ed-graph-body" ref={bodyRef} style={{ height: bodyHeight }}>
-        <svg
-          className="ed-graph-svg"
-          viewBox={`${box.x} ${box.y} ${Math.max(1, box.w)} ${Math.max(1, box.h)}`}
-          preserveAspectRatio="xMidYMin meet"
-          width="100%"
+      <div className="ed-graph-body" style={{ height: bodyHeight }} hidden={hidden}>        <div
+          className="ed-graph-pan"
+          data-branch-pan="1"
+          ref={panRef}
           onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          <defs>
-            <marker id="ed-graph-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-              <path d="M0,0 L7,3.5 L0,7 z" fill="#4b5563" />
-            </marker>
-          </defs>
-
-          {graph.edges.map((edge: Edge, index: number) => {
-            const from = edge.from ? layout.get(edge.from) : undefined;
-            if (!from) return null;
-            const to = edge.to ? layout.get(edge.to) : undefined;
-            const color = edge.value === null ? "#4b5563" : colorOf(routeIndex.get(edge.routes[0] ?? "") ?? -1);
-            const x1 = from.x + NODE_W;
-            const y1 = from.y + NODE_H / 2;
-            const x2 = to ? to.x : x1 + 28;
-            const y2 = to ? to.y + NODE_H / 2 : y1;
-            return (
-              <g key={`edge-${index}`}>
-                <path
-                  d={to ? `M ${x1} ${y1} C ${x1 + 28} ${y1}, ${x2 - 28} ${y2}, ${x2} ${y2}` : `M ${x1} ${y1} h 28`}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={to ? 1.6 : 1.1}
-                  strokeDasharray={to ? undefined : "4 3"}
-                  markerEnd={to ? "url(#ed-graph-arrow)" : undefined}
-                />
-                {edge.label ? (
-                  <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 3} textAnchor="middle" fontSize={9.5} fill="#cfd6e4">
-                    {clipLabel(edge.label, 8)}
-                  </text>
-                ) : null}
+          <svg
+            className="ed-graph-svg"
+            data-branch-graph="1"
+            data-branch-zoom={r(current.zoom)}
+            width="100%"
+            height="100%"
+            aria-label="分支图（按 Decision / Predicate 画剧情走向）"
+          >
+            <defs>
+              <marker id="bg-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 z" fill="#7a8494" />
+              </marker>
+              <marker id="bg-arrow-choice" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 z" fill="#f4c430" />
+              </marker>
+              <marker id="bg-arrow-merge" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 z" fill="#9575cd" />
+              </marker>
+            </defs>
+            <g className="bg-world" transform={`translate(${r(current.x)} ${r(current.y)}) scale(${r(current.zoom)})`}>
+              {/* 连线在卡片下层：正交折线 + 分支标签（贴竖向段中点） */}
+              <g className="bg-edges">
+                {layout.edges.map((edge) => {
+                  const color = edgeColor(edge);
+                  const dashed = edge.role === "back" || edge.role === "dead" || edge.role === "merge";
+                  return (
+                    <g key={edge.id} className={`bg-edge bg-edge-${edge.role}`} data-branch-edge-role={edge.role}>
+                      <path
+                        data-branch-edge="1"
+                        data-branch-path="1"
+                        data-branch-edge-id={edge.id}
+                        d={edge.d}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth={edge.role === "choice" || edge.role === "merge" ? 1.8 : 1.4}
+                        strokeDasharray={dashed ? "5 4" : undefined}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke"
+                        markerEnd={edge.to && edge.role !== "dead" ? (edge.role === "choice" ? "url(#bg-arrow-choice)" : edge.role === "merge" ? "url(#bg-arrow-merge)" : "url(#bg-arrow)") : undefined}
+                      />
+                      {edge.label && edge.anchor ? (
+                        <g className="bg-edge-label" transform={`translate(${r(edge.anchor.x)} ${r(edge.anchor.y)})`}>
+                          <rect x={-30} y={-11} width={60} height={17} rx={4} className="bg-edge-label-bg" />
+                          <text className="bg-edge-label-text" textAnchor="middle" y={1.5}>{edge.label.slice(0, 8)}</text>
+                          <title>{`${edge.label}（value=${edge.value ?? "—"}）`}</title>
+                        </g>
+                      ) : null}
+                    </g>
+                  );
+                })}
               </g>
-            );
-          })}
 
-          {graph.nodes.map((node: GraphNode) => {
-            const position = layout.get(node.id);
-            if (!position) return null;
-            const stroke = node.kind === "choice"
-              ? "#f4c430"
-              : node.kind === "merge"
-                ? "#8b93a7"
-                : colorOf(node.route ? routeIndex.get(node.route) ?? -1 : -1);
-            const active = node.id === caretNodeId;
-            const chosen = node.id === selectedId;
-            const label = `#${node.lines[0]}${node.lines[1] > node.lines[0] ? `–${node.lines[1]}` : ""} · ${
-              node.route ?? (node.kind === "merge" ? "合流" : "主线")
-            }\n${node.text}`;
-            return (
-              <g
-                key={node.id}
-                data-node={node.id}
-                className={`ed-graph-node${active ? " is-active" : ""}${chosen ? " is-picked" : ""}`}
-                transform={`translate(${position.x} ${position.y})`}
-                onClick={() => {
-                  setPicked({ text, id: node.id });
-                  onJumpToLine(node.lines[0]);
-                }}
-              >
-                <title>{label}</title>
-                <rect
-                  x={0}
-                  y={0}
-                  width={NODE_W}
-                  height={NODE_H}
-                  rx={7}
-                  fill={node.kind === "merge" ? "rgba(139,147,167,0.12)" : "rgba(255,255,255,0.05)"}
-                  stroke={stroke}
-                  strokeWidth={active || chosen ? 2.4 : 1.2}
-                  strokeDasharray={node.kind === "merge" ? "5 3" : undefined}
-                />
-                {node.kind === "choice" ? <polygon points="8,13 17,4 26,13 17,22" fill="none" stroke={stroke} strokeWidth={1.4} /> : null}
-                <text x={node.kind === "choice" ? 32 : 8} y={NODE_H / 2 + 4} fontSize={11} fill="#e6e9f0">
-                  {clipLabel(node.text)}
-                </text>
-                {node.values.length > 1 ? (
-                  <text x={NODE_W - 6} y={NODE_H - 6} textAnchor="end" fontSize={8.5} fill="#f4c430">
-                    {`v${node.values.filter((value: number) => value !== 0).join("/") || "0"}`}
-                  </text>
-                ) : null}
+              {/* 卡片节点：左色条 + 标题 + 摘要 + 状态点 */}
+              <g className="bg-nodes">
+                {layout.nodes.map((node) => {
+                  const color = colorOf(node);
+                  const active = node.id === caretNodeId;
+                  const chosen = node.id === selectedId;
+                  const isMerged = mergeLineSet.has(node.line);
+                  return (
+                    <g
+                      key={node.id}
+                      className={`ed-graph-node bg-node bg-node-${node.role}${active ? " is-active" : ""}${chosen ? " is-picked" : ""}`}
+                      data-node={node.id}
+                      data-branch-node={node.id}
+                      data-branch-layer={node.layer}
+                      data-branch-role={node.role}
+                      transform={`translate(${r(node.x)} ${r(node.y)})`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setPicked({ text, id: node.id });
+                        onJumpToLine(node.line);
+                      }}
+                    >
+                      <title>{`#${node.range[0]}${node.range[1] > node.range[0] ? `–${node.range[1]}` : ""} · ${node.role}${node.lane ? ` · ${node.lane}` : ""}\n${node.text}`}</title>
+                      <rect className="bg-card" x={0} y={0} width={node.w} height={node.h} rx={8} />
+                      <rect className="bg-card-bar" x={1} y={1} width={4} height={node.h - 2} rx={2} fill={color} />
+                      {node.role === "decision" ? (
+                        <polygon className="bg-diamond" points="14,32 20,24 26,32 20,40" fill="none" stroke={color} strokeWidth={1.4} />
+                      ) : null}
+                      <text className="bg-title" x={node.role === "decision" ? 34 : 14} y={27}>{node.title}</text>
+                      {node.role === "decision" ? (
+                        <g className="bg-pills">
+                          {node.lines.slice(0, 3).map((option, index) => (
+                            <g key={`${node.id}-pill-${index}`} transform={`translate(${14 + index * 62} 40)`}>
+                              <rect className="bg-pill" x={0} y={0} width={58} height={16} rx={4} />
+                              <text className="bg-pill-text" x={29} y={11.5} textAnchor="middle">{option.slice(0, 5)}</text>
+                            </g>
+                          ))}
+                        </g>
+                      ) : (
+                        <text className="bg-summary" x={14} y={46}>{node.summary}</text>
+                      )}
+                      {isMerged ? <text className="bg-merge-tag" x={node.w - 12} y={58} textAnchor="end">合流</text> : null}
+                      <circle
+                        className={`bg-state bg-state-${isMerged ? "done" : active ? "active" : "idle"}`}
+                        cx={node.w - 11}
+                        cy={12}
+                        r={3.5}
+                        fill={isMerged ? "#4caf50" : active ? "#f4c430" : "#5b6472"}
+                      />
+                      {node.mixed ? (
+                        <text className="bg-values" x={node.w - 12} y={node.h - 4} textAnchor="end">
+                          {`v${node.values.filter((value) => value !== 0).join("/") || "0"}`}
+                        </text>
+                      ) : null}
+                    </g>
+                  );
+                })}
               </g>
-            );
-          })}
-        </svg>
+            </g>
+          </svg>
+
+          {!hasChoice ? (
+            <p className="ed-graph-empty bg-empty" data-branch-empty="1" role="status">{EMPTY_HINT}</p>
+          ) : null}
+          {layout.degenerate ? (
+            <p className="bg-hint" data-branch-hint="degenerate">节点较多，已退化为一列排布；可滚轮缩放后拖动查看。</p>
+          ) : null}
+        </div>
       </div>
+
+      {hidden ? (
+        <p className="ed-graph-empty" data-branch-hidden="1">{`${chrome?.title ?? "分支图"}已收起（点 ▸ 展开）`}</p>
+      ) : null}
 
       <div className="ed-graph-actions">
         <span className="ed-graph-hint">
-          {selectedNode ? `选中 #${selectedNode.lines[0]}：${clipLabel(selectedNode.text, 20)}` : "点选一个节点后点「⤳ 在此分叉」"}
+          {selectedNode ? `选中 #${selectedNode.range[0]}：${selectedNode.title}` : "点卡片跳行 · 拖空白平移 · 滚轮缩放 · 0 / ⤢ 适配"}
         </span>
         <button
           type="button"
           className="ed-graph-fork"
+          data-branch-action="fork"
           disabled={!selectedNode || !onPatch}
-          title={onPatch ? "在选中节点之后插入一条 Decision（每条线一个 Predicate + 末尾合流闸门）" : "当前为只读（未提供 onPatch）"}
+          title={onPatch ? "在选中卡片之后插入一条 Decision（每条线一个 Predicate + 末尾合流闸门）" : "当前为只读（未提供 onPatch）"}
           onClick={openFork}
         >
           ⤳ 在此分叉
@@ -426,9 +591,9 @@ export default function BranchGraph({ text, caretLine, onJumpToLine, onPatch, he
                       value={row.label}
                       onChange={(event) => {
                         const value = event.currentTarget.value;
-                        setFork((current) => current && {
-                          ...current,
-                          rows: current.rows.map((item, at) => (at === index ? { ...item, label: value } : item)),
+                        setFork((state) => state && {
+                          ...state,
+                          rows: state.rows.map((item, at) => (at === index ? { ...item, label: value } : item)),
                         });
                       }}
                     />
@@ -440,9 +605,9 @@ export default function BranchGraph({ text, caretLine, onJumpToLine, onPatch, he
                       onChange={(event) => {
                         const parsed = Number.parseInt(event.currentTarget.value, 10);
                         const value = Number.isFinite(parsed) ? parsed : 0;
-                        setFork((current) => current && {
-                          ...current,
-                          rows: current.rows.map((item, at) => (at === index ? { ...item, value } : item)),
+                        setFork((state) => state && {
+                          ...state,
+                          rows: state.rows.map((item, at) => (at === index ? { ...item, value } : item)),
                         });
                       }}
                     />
@@ -454,35 +619,29 @@ export default function BranchGraph({ text, caretLine, onJumpToLine, onPatch, he
           <div className="ed-graph-forkbtns">
             <button
               type="button"
-              onClick={() => setFork((current) => current && current.rows.length < FORK_ROWS_MAX
-                ? {
-                  ...current,
-                  rows: [...current.rows, { label: `选项${current.rows.length + 1}`, value: Math.max(1, ...current.rows.map((row) => row.value)) + 1 }],
-                }
-                : current)}
+              onClick={() => setFork((state) => state && state.rows.length < FORK_ROWS_MAX
+                ? { ...state, rows: [...state.rows, { label: `选项${state.rows.length + 1}`, value: Math.max(1, ...state.rows.map((row) => row.value)) + 1 }] }
+                : state)}
               disabled={fork.rows.length >= FORK_ROWS_MAX}
             >
               + 一行
             </button>
             <button
               type="button"
-              onClick={() => setFork((current) => current && current.rows.length > FORK_ROWS_MIN
-                ? { ...current, rows: current.rows.slice(0, -1) }
-                : current)}
+              onClick={() => setFork((state) => state && state.rows.length > FORK_ROWS_MIN ? { ...state, rows: state.rows.slice(0, -1) } : state)}
               disabled={fork.rows.length <= FORK_ROWS_MIN}
             >
               − 一行
             </button>
             <span className="ed-graph-forkgap" />
-            <button type="button" className="ed-graph-forkcancel" onClick={() => setFork(null)}>
-              取消
-            </button>
-            <button type="button" className="ed-graph-forkok" onClick={confirmFork}>
-              插入
-            </button>
+            <button type="button" className="ed-graph-forkcancel" onClick={() => setFork(null)}>取消</button>
+            <button type="button" className="ed-graph-forkok" onClick={confirmFork}>插入</button>
           </div>
         </div>
       ) : null}
     </section>
   );
 }
+
+/** 保留 `Route` / `GraphNode` / `Edge` 的类型引用（页面 props 契约的一部分）。 */
+export type { Edge, Graph, GraphNode, Route };
