@@ -89,6 +89,8 @@ try {
   t("① 输入层：横向可滚（长行不被裁）", Boolean(codeScroll) && codeScroll.scrollW >= codeScroll.clientW, JSON.stringify(codeScroll));
 
   // ── 1. 舞台连续缩放 ───────────────────────────────────────
+  // 舞台面板是懒加载部件：等它出现（组合件落盘前会一直是 0）。
+  await page.waitForSelector('[data-wb-panel="stage"] [data-stage-pane]', { timeout: 20_000 }).catch(() => {});
   const stage = page.locator("[data-stage-pane]").first();
   const hasStage = await stage.count();
   t("① 舞台存在", hasStage >= 1, `count=${hasStage}`);
