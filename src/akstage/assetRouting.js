@@ -60,15 +60,23 @@ export const MIRRORS = Object.freeze({
   pack: "https://{host}/{path}",
   /** PRTS 官方直连。 */
   prts: "https://{host}/{path}",
-  /** jsDelivr 的 GitHub 线路：镜像仓 `<repo>@<ref>` 下按 `{host}/{path}` 存放。 */
-  jsd: "https://cdn.jsdelivr.net/gh/{repo}@{ref}/{host}/{path}",
+  /** jsDelivr 的 GitHub 线路：镜像仓 `<repo>@<ref>` 下按 `{prefix}/{host}/{path}` 存放。 */
+  jsd: "https://cdn.jsdelivr.net/gh/{repo}@{ref}/{prefix}/{host}/{path}",
   /** jsDelivr 的 Fastly 线路。 */
-  fastly: "https://fastly.jsdelivr.net/gh/{repo}@{ref}/{host}/{path}",
+  fastly: "https://fastly.jsdelivr.net/gh/{repo}@{ref}/{prefix}/{host}/{path}",
   /** gh-proxy：给 GitHub raw URL 加前缀。 */
-  ghproxy: "https://gh-proxy.com/https://raw.githubusercontent.com/{repo}/{ref}/{host}/{path}",
+  ghproxy: "https://gh-proxy.com/https://raw.githubusercontent.com/{repo}/{ref}/{prefix}/{host}/{path}",
   /** 自定义：`{tpl}` 由调用方传入（localStorage `prts-app-settings` 的 `customMirror`）。 */
   custom: "{tpl}",
 });
+
+/**
+ * 镜像仓里的目录前缀 —— **必须与 `tools/mirror/mirrorPath.mjs::MIRROR_PREFIX`
+ * 逐字符相同**（发布端与客户端各持一份常量，`mirror-selftest.mjs` 断言二者一致）。
+ * `publish-engine.mjs` 写到 `<repo>/mirror/prts/<host>/<path>`，所以客户端 URL 也要带这一层，
+ * 否则发布完仍然 404。
+ */
+export const MIRROR_PREFIX = "mirror/prts";
 
 /**
  * GitHub 上的镜像仓（引擎层由 `.github/workflows/publish-mirror.yml` 推到这里）。
@@ -229,6 +237,7 @@ function fillTemplate(tpl, part, custom) {
     .replace(/\{tpl\}/g, String(custom ?? ""))
     .replace(/\{repo\}/g, MIRROR_REPO)
     .replace(/\{ref\}/g, MIRROR_REF)
+    .replace(/\{prefix\}/g, MIRROR_PREFIX)
     .replace(/\{host\}/g, part.host)
     .replace(/\{path\}/g, encodePath(part.path))
     .replace(/\{key\}/g, part.canonical)

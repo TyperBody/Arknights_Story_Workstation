@@ -72,11 +72,11 @@ const CSS = "https://static.prts.wiki/assets/scenario/arknights-scenario.css";
 eq("prts 源 = 官方直链", routes.mirrorUrl("prts", CSS), CSS);
 eq("pack 源 = 官方直链", routes.mirrorUrl("pack", CSS), CSS);
 ok("jsd 源 = cdn.jsdelivr.net/gh/…",
-  routes.mirrorUrl("jsd", CSS) === "https://cdn.jsdelivr.net/gh/djkcyl/arkstage-mirror@main/static.prts.wiki/assets/scenario/arknights-scenario.css");
+  routes.mirrorUrl("jsd", CSS) === "https://cdn.jsdelivr.net/gh/djkcyl/arkstage-mirror@main/mirror/prts/static.prts.wiki/assets/scenario/arknights-scenario.css");
 ok("fastly 源 = fastly.jsdelivr.net/gh/…",
-  routes.mirrorUrl("fastly", CSS) === "https://fastly.jsdelivr.net/gh/djkcyl/arkstage-mirror@main/static.prts.wiki/assets/scenario/arknights-scenario.css");
+  routes.mirrorUrl("fastly", CSS) === "https://fastly.jsdelivr.net/gh/djkcyl/arkstage-mirror@main/mirror/prts/static.prts.wiki/assets/scenario/arknights-scenario.css");
 ok("ghproxy 源 = gh-proxy.com 前缀",
-  routes.mirrorUrl("ghproxy", CSS) === "https://gh-proxy.com/https://raw.githubusercontent.com/djkcyl/arkstage-mirror/main/static.prts.wiki/assets/scenario/arknights-scenario.css");
+  routes.mirrorUrl("ghproxy", CSS) === "https://gh-proxy.com/https://raw.githubusercontent.com/djkcyl/arkstage-mirror/main/mirror/prts/static.prts.wiki/assets/scenario/arknights-scenario.css");
 eq("custom 源 = 模板展开",
   routes.mirrorUrl("custom", CSS, "https://my.cdn/{key}?u={url}"),
   "https://my.cdn/static.prts.wiki/assets/scenario/arknights-scenario.css?u=" + CSS);
@@ -181,6 +181,14 @@ ok("versions.json 引擎条目 = 目录引擎层", versions.engine.files === cat
 ok("versions.json 每条都有镜像路径", versions.entries.every((e) => mirrorPath.mirrorPathFor(e.key) === e.mirrorPath));
 ok("versions.json 引擎体积已探明（> 0）", versions.engine.bytes > 0, `${versions.engine.bytes} B`);
 ok("versions.json 布局前缀固定", versions.layout.prefix === "mirror/prts");
+// 发布端（publish-engine）与客户端（assetRouting）的前缀必须逐字符相同，否则发布完仍 404。
+ok("客户端 MIRROR_PREFIX 与发布端一致",
+  routes.MIRROR_PREFIX === versions.layout.prefix && routes.MIRROR_PREFIX === mirrorPath.MIRROR_PREFIX,
+  `client=${routes.MIRROR_PREFIX} publish=${versions.layout.prefix}`);
+// 客户端 URL 必须落在发布端的路径上：URL 去掉 CDN 前缀后以 /<prefix>/<host>/<path> 结尾。
+ok("客户端 URL 与发布路径对齐",
+  routes.mirrorUrl("jsd", CSS).endsWith(`/${mirrorPath.mirrorPathFor(CSS)}`),
+  `${routes.mirrorUrl("jsd", CSS)} vs ${mirrorPath.mirrorPathFor(CSS)}`);
 const verdicts = mirrorPath.planFromVersions(versions);
 ok("planFromVersions 无重复路径", new Set(verdicts.map((v) => v.path)).size === verdicts.length);
 
