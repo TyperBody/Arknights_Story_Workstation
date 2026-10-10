@@ -48,6 +48,13 @@ export const WINDOW_SPECS: Record<PanelId, WindowSpec> = {
   branch: { title: "分支图", map: true, minW: 320, minH: 200, order: 40, kind: "map" },
 };
 
+/** 触碰阈值：拖动超过这么多像素才算「拖起来了」（低于它 = 点击/双击）。 */
+export const WB_DRAG_THRESHOLD = 4;
+/** 分隔条厚度（px）；`workbench.css` 的 `.wb-gutter` 与之一致。 */
+export const WB_GUTTER_SIZE = 6;
+/** 面板块的缺省最小尺寸（树里第一个面板推不出来时兜底）。 */
+export const WB_FALLBACK_MIN = { minW: 160, minH: 120 };
+
 /** 分隔条 share 的合法区间（两条都要 clamp 到这里，§2.3）。 */
 export const SHARE_MIN = 0.12;
 export const SHARE_MAX = 0.88;

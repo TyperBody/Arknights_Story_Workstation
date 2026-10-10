@@ -184,6 +184,11 @@ export function leaves(state: WorkbenchState): string[] {
   return out;
 }
 
+/** 叶子数量（`holder` / `min` 也算）；harness/渲染调试用。 */
+export function size(state: WorkbenchState): number {
+  return leaves(state).length;
+}
+
 /** 面板在树里吗？ */
 export function has(state: WorkbenchState, id: PanelId): boolean {
   return pathTo(state, id) != null;
@@ -230,6 +235,12 @@ export function replace(root: Subject, path: readonly number[], next: Subject): 
   return head === 0
     ? { ...root, a: replace(root.a, tail, next) }
     : { ...root, b: replace(root.b, tail, next) };
+}
+
+/** `split` 的孩子（`side` 0 = a / 1 = b）；叶子 → null。 */
+export function childAt(node: Subject | null | undefined, side: 0 | 1): Subject | null {
+  if (!node || node.t !== "split") return null;
+  return side === 0 ? node.a : node.b;
 }
 
 /** 删除 `path` 处的叶子：父 split 用幸存的那个孩子顶上。 */
@@ -361,26 +372,10 @@ export function resize(state: WorkbenchState, path: readonly number[], share: nu
   return state;
 }
 
-/** 树里**第一个** split 的路径（`resize` 的兜底目标；`null` = 树里没有 split）。 */
+/** 树里最外层 split 的路径（先序；根是 split → `[]`）；树里没有 split → `null`。
+ *  `resize(state, firstSplitPath(state), share)` = 拖最外层的分隔条。 */
 export function firstSplitPath(state: WorkbenchState): number[] | null {
-  const root = state?.root;
-  if (!isSplit(root)) return null;
-  let node: Subject = root;
-  const path: number[] = [];
-  while (isSplit(node) && node.t === "split") {
-    if (isSplit(node.a)) {
-      path.push(0);
-      node = node.a;
-      continue;
-    }
-    if (isSplit(node.b)) {
-      path.push(1);
-      node = node.b;
-      continue;
-    }
-    return path;
-  }
-  return path.length ? path : isSplit(root) ? [] : null;
+  return state?.root && state.root.t === "split" ? [] : null;
 }
 
 /**
@@ -450,7 +445,8 @@ export function stringify(state: WorkbenchState): string {
     const tail = Math.abs(pct - 50) < 0.5 ? "" : `%${pct}`;
     return `${open}${walk(node.a)}${sep}${walk(node.b)}${tail}${close}`;
   };
-  return walk(state?.root);
+  // 空/坏状态 → `_`（空槽）：`parse(stringify(x))` 的往返更稳，UI 也能显示"空工作台"。
+  return walk(state?.root) || "_";
 }
 
 /** `stringify` 的逆：空白随便加；形状/`%NN` 严格，坏输入 → `null`。 */
@@ -538,6 +534,6 @@ export function summarize(state: WorkbenchState): string {
     const pct = Math.round(clampShare(node.share) * 100);
     return `${walk(node.a)} ${pct}% ${dir} ${walk(node.b)}`;
   };
-  const dims = state?.minimized?.length ? `　收起：${state.minimized.join("、")}` : "";
+  const dims = state?.minimized?.length ? ` 收起：${state.minimized.join("、")}` : "";
   return `${walk(state?.root)}${dims}`;
 }

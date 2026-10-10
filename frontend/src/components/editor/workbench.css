@@ -1,0 +1,231 @@
+/* 演出工作台容器（`Workbench.tsx`）—— 递归 flex 布局 + 分隔条 + 落点提示。
+   面板**内容**的外观不在这里（那是各内容组件的 CSS / `inspectorWindow.css`）；
+   这里只管：树怎么分格、分隔条长什么样、拖拽时 overlays 怎么画。
+   命名 `wb-`，与旧 `.ed-win` 共存：`[data-workbench]` 内部的面板仍是
+   `[data-wb-panel]` 面板块，标题条/按钮沿用 `ed-win-bar` / `ed-win-btn`。 */
+
+.wb-root {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: var(--bg-primary, #171717);
+}
+
+.wb-tree {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ── 递归：split / slot ─────────────────────────────────────────── */
+
+.wb-split {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-split--row {
+  flex-direction: row;
+}
+
+.wb-split--col {
+  flex-direction: column;
+}
+
+.wb-slot {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-split--col > .wb-slot {
+  overflow: hidden;
+}
+
+/* ── 分隔条 ─────────────────────────────────────────────────── */
+
+.wb-gutter {
+  flex: 0 0 6px;
+  position: relative;
+  z-index: 2;
+  background: var(--border, #2c2c2c);
+  touch-action: none;
+  transition: background 120ms ease;
+}
+
+.wb-split--row > .wb-gutter {
+  cursor: col-resize;
+}
+
+.wb-split--col > .wb-gutter {
+  cursor: row-resize;
+}
+
+.wb-gutter::after {
+  /* 加宽的命中区（视觉 6px、命中 10px），800px 的编辑器里也好抓。 */
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.wb-split--row > .wb-gutter::after {
+  left: -2px;
+  right: -2px;
+}
+
+.wb-split--col > .wb-gutter::after {
+  top: -2px;
+  bottom: -2px;
+}
+
+.wb-gutter:hover,
+.wb-root--resizing .wb-gutter--active,
+.wb-gutter--active {
+  background: var(--accent, #4c8dff);
+}
+
+/* ── 面板 / 占位 ────────────────────────────────────────────── */
+
+.wb-panel {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-secondary, #1c1c1c);
+}
+
+.wb-panel--map {
+  border: 1px solid var(--border, #2c2c2c);
+  border-radius: 6px;
+}
+
+.wb-panel--dragging {
+  opacity: 0.72;
+}
+
+.wb-holder {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-empty {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  border: 1px dashed var(--border, #333);
+  border-radius: 6px;
+  opacity: 0.5;
+}
+
+/* ── 落点提示（拖动中悬停到边缘/中心） ─────────────────────── */
+
+.wb-overlay {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent, #4c8dff) 26%, transparent);
+  border: 2px solid var(--accent, #4c8dff);
+  box-sizing: border-box;
+  transition: all 90ms ease;
+}
+
+.wb-overlay--left {
+  inset: 0 50% 0 0;
+}
+
+.wb-overlay--right {
+  inset: 0 0 0 50%;
+}
+
+.wb-overlay--top {
+  inset: 0 0 50% 0;
+}
+
+.wb-overlay--bottom {
+  inset: 50% 0 0 0;
+}
+
+.wb-overlay--center {
+  inset: 12% 12%;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #4c8dff) 18%, transparent);
+}
+
+/* 拖动中的整页观感：正文不可选，光标提示"在拖"。 */
+.wb-root--dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.wb-root--dragging .wb-panel {
+  user-select: none;
+}
+
+/* ── 跟随指针的图层（可选） ──────────────────────────────── */
+
+.wb-drag-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* ── 收起项（minimized） ───────────────────────────────── */
+
+.wb-min-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border, #2c2c2c);
+  background: #191919;
+  font-size: 11px;
+  color: var(--text-secondary, #aaa);
+}
+
+.wb-min-label {
+  opacity: 0.7;
+}
+
+.wb-min-item,
+.wb-min-clear {
+  border: 1px solid var(--border, #333);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: #232323;
+  color: var(--text-primary, #ddd);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wb-min-item:hover,
+.wb-min-clear:hover {
+  border-color: var(--accent, #4c8dff);
+  color: var(--accent, #4c8dff);
+}
+
+/* ── 窄屏：横向 split 堆叠（<= 900px） ─────────────────── */
+
+@media (max-width: 900px) {
+  .wb-split--row {
+    flex-direction: column;
+  }
+  .wb-gutter[data-wb-dir="row"] {
+    cursor: row-resize;
+    flex-basis: 6px;
+  }
+}
