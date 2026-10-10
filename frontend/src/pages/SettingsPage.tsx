@@ -12,6 +12,36 @@ import type { Tier, CompressEstimate } from "../lib/CompressionContext";
 import type { StoryIndex } from "../hooks/useStoryIndex";
 import { collectEnvInfo, copyText } from "../lib/diagnostics";
 import { confirmAction } from "../lib/dialogs";
+import {
+  DEFAULT_SETTINGS,
+  DOWNLOAD_CONCURRENCY_MAX,
+  DOWNLOAD_CONCURRENCY_MIN,
+  MANIFEST_CONCURRENCY_MAX,
+  MANIFEST_CONCURRENCY_MIN,
+  type MirrorSource,
+  setAppSettings,
+  useAppSettings,
+} from "../lib/appSettings";
+import { catalogSummary, mirrorUrl, type CatalogSummary } from "../lib/engineCatalog";
+
+/** 下载源下拉项（`SOURCE_IDS` 的中文标签 + 说明）。 */
+const MIRROR_LABELS: Record<MirrorSource, { label: string; hint: string }> = {
+  pack: { label: "随包快照 + 官方直连", hint: "优先用安装包内的引擎，缺失时直连 PRTS（默认）" },
+  jsd: { label: "jsDelivr", hint: "cdn.jsdelivr.net，大陆访问通常更快" },
+  fastly: { label: "Fastly CDN", hint: "fastly.jsdelivr.net，jsDelivr 的备用线路" },
+  ghproxy: { label: "gh-proxy", hint: "经 gh-proxy.com 前缀加速 GitHub 镜像仓" },
+  custom: { label: "自定义源", hint: "自填模板 URL；占位符 {url} / {key} / {host} / {path}" },
+};
+
+/** 下载源示例 URL（设置页「当前会拼成…」预览。以引擎入口为样例；`example` 处是上游产物哈希）。 */
+const SAMPLE_URL = "https://static.prts.wiki/widgets/production/StoryPlayer.example.js";
+
+/** 读设置里的数值：缺/坏/越界 → 默认值（**不抛**）。 */
+function clampSetting(value: number, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
 
 interface CacheStatus {
   story_index_cached: boolean;
@@ -51,9 +81,14 @@ export default function SettingsPage() {
   const [hidePlayerBack, setHidePlayerBackState] = useState(isHidePlayerBack());
   const [playerChrome, setPlayerChromeState] = useState<PlayerChrome>(getPlayerChrome());
   // Download tuning: concurrency + bandwidth limit (shown in KB/s; 0 = unlimited).
-  const [concurrency, setConcurrency] = useState(4);
+  // 并发默认 12（1…32）、manifest 并发默认 10（1…16）—— 均可在 `prts-app-settings` 里改，
+  // 未设置时用 `DEFAULT_SETTINGS`；老用户已保存的 Rust 端设置优先（见 useEffect）。
+  const appSettings = useAppSettings();
+  const [concurrency, setConcurrency] = useState(DEFAULT_SETTINGS.downloadConcurrency);
+  const [manifestConcurrency, setManifestConcurrency] = useState(DEFAULT_SETTINGS.manifestConcurrency);
   const [rateLimitKbps, setRateLimitKbps] = useState(0);
   const [envInfo, setEnvInfo] = useState("");
+  const [catalog, setCatalog] = useState<CatalogSummary | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("prts-nickname");
@@ -67,22 +102,52 @@ export default function SettingsPage() {
         setRateLimitKbps(Math.round(s.rateLimitBps / 1024));
       })
       .catch(() => {});
+    try {
+      setCatalog(catalogSummary());
+    } catch {
+      setCatalog(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const saveDownloadSettings = async (nextConcurrency: number, nextKbps: number) => {
-    const c = Math.max(1, Math.min(32, Math.round(nextConcurrency) || 1));
+  /** 存「下载并发 / 限速」：Rust 端（真正跑下载的）优先，同时写进 appSettings 便于 UI 回显。 */
+  const saveDownloadSettings = async (nextConcurrency: number, nextManifest: number, nextKbps: number) => {
+    const c = clampSetting(nextConcurrency, DOWNLOAD_CONCURRENCY_MIN, DOWNLOAD_CONCURRENCY_MAX, DEFAULT_SETTINGS.downloadConcurrency);
+    const m = clampSetting(nextManifest, MANIFEST_CONCURRENCY_MIN, MANIFEST_CONCURRENCY_MAX, DEFAULT_SETTINGS.manifestConcurrency);
     const kbps = Math.max(0, Math.round(nextKbps) || 0);
     setConcurrency(c);
+    setManifestConcurrency(m);
     setRateLimitKbps(kbps);
+    setAppSettings({ downloadConcurrency: c, manifestConcurrency: m, rateLimit: kbps * 1024 });
     try {
       await setDownloadSettings({ concurrency: c, rateLimitBps: kbps * 1024 });
-      showMsg(kbps === 0 ? `已保存：并发 ${c}，不限速` : `已保存：并发 ${c}，限速 ${kbps} KB/s`);
+      showMsg(
+        `已保存：下载并发 ${c}、清单并发 ${m}，` + (kbps === 0 ? "不限速" : `限速 ${kbps} KB/s`),
+      );
     } catch (e) {
-      showMsg(`保存失败: ${e instanceof Error ? e.message : String(e)}`, 5000);
+      showMsg(`已存到应用设置；同步到下载器失败: ${e instanceof Error ? e.message : String(e)}`, 6000);
     }
   };
 
+  /** 选下载源（`mirror` ∈ `SOURCE_IDS`）；`custom` 需配合模板。 */
+  const chooseMirror = (next: MirrorSource) => {
+    setAppSettings({ mirror: next });
+    showMsg(`下载源已切换：${MIRROR_LABELS[next].label}${next === "custom" && !appSettings.customMirror ? "（记得填模板）" : ""}`);
+  };
+
+  const saveCustomMirror = (next: string) => {
+    setAppSettings({ customMirror: next });
+  };
+
+  // 「当前源会拼成…」预览：把样例 URL 交给**同一套** mirrorUrl（与下载路径一致）。
+  const previewMirror = (source: MirrorSource, template: string): string => {
+    try {
+      const out = mirrorUrl(source, SAMPLE_URL, template);
+      return out ?? "—（该源对本样例不适用 / 缺模板）";
+    } catch {
+      return "—";
+    }
+  };
 
   /** 用系统文件管理器打开 `<资源目录>/assets/library/`。 */
   const openLibraryDir = useCallback(async () => {
@@ -278,21 +343,98 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Download source (mirror) — 换下载源 + 预览 */}
+      <div className="setting-group">
+        <label>下载源（引擎 / 素材从哪拉）</label>
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+          <select
+            value={appSettings.mirror}
+            aria-label="下载源"
+            style={{ minWidth: "200px" }}
+            onChange={(e) => chooseMirror(e.target.value as MirrorSource)}
+          >
+            {(Object.keys(MIRROR_LABELS) as MirrorSource[]).map((id) => (
+              <option key={id} value={id}>{MIRROR_LABELS[id].label}</option>
+            ))}
+          </select>
+          <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+            {MIRROR_LABELS[appSettings.mirror].hint}
+          </span>
+        </div>
+        {appSettings.mirror === "custom" && (
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
+            <input
+              type="text"
+              value={appSettings.customMirror}
+              placeholder="https://your-mirror/{url}（或 …/{host}/{path}）"
+              style={{ minWidth: "320px", flex: "1 1 320px" }}
+              onChange={(e) => saveCustomMirror(e.target.value)}
+            />
+            <span style={{ fontSize: "13px", color: "var(--text-secondary)", alignSelf: "center" }}>
+              占位符：<code>{`{url}`}</code> 官方直链、<code>{`{key}`}</code> 规范化 key、<code>{`{host}`}</code> / <code>{`{path}`}</code>
+            </span>
+          </div>
+        )}
+        <div className="cache-info" style={{ marginTop: "8px", wordBreak: "break-all" }}>
+          <div style={{ color: "var(--text-secondary)" }}>样例预览：{previewMirror(appSettings.mirror, appSettings.customMirror)}</div>
+          <div style={{ color: "var(--text-secondary)", marginTop: "4px" }}>
+            包内已有的引擎快照会**优先**命中，源只在需要联网补齐时生效；换源即时生效，无需重启。
+            {catalog ? `（目录已收录 ${catalog.entries} 条，其中引擎 ${catalog.engine} 条）` : ""}
+          </div>
+        </div>
+      </div>
+
       {/* Download tuning */}
       <div className="setting-group">
         <label>下载设置（预下载的并发与限速）</label>
-        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ fontSize: "13px" }}>并发数</span>
+        <div style={{ display: "flex", gap: "18px", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "13px" }}>下载并发</span>
+            <input
+              type="range"
+              min={DOWNLOAD_CONCURRENCY_MIN}
+              max={DOWNLOAD_CONCURRENCY_MAX}
+              step={1}
+              value={concurrency}
+              aria-label="下载并发"
+              style={{ width: "150px" }}
+              onChange={(e) => setConcurrency(Number(e.target.value))}
+              onMouseUp={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
+              onTouchEnd={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
+              onKeyUp={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
+            />
             <input
               type="number"
-              min={1}
-              max={32}
+              min={DOWNLOAD_CONCURRENCY_MIN}
+              max={DOWNLOAD_CONCURRENCY_MAX}
               value={concurrency}
-              style={{ width: "72px" }}
+              aria-label="下载并发数值"
+              style={{ width: "64px" }}
               onChange={(e) => setConcurrency(Number(e.target.value))}
-              onBlur={() => saveDownloadSettings(concurrency, rateLimitKbps)}
+              onBlur={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
             />
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+              1…{DOWNLOAD_CONCURRENCY_MAX}，默认 {DEFAULT_SETTINGS.downloadConcurrency}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "13px" }}>清单并发</span>
+            <input
+              type="range"
+              min={MANIFEST_CONCURRENCY_MIN}
+              max={MANIFEST_CONCURRENCY_MAX}
+              step={1}
+              value={manifestConcurrency}
+              aria-label="清单并发"
+              style={{ width: "120px" }}
+              onChange={(e) => setManifestConcurrency(Number(e.target.value))}
+              onMouseUp={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
+              onTouchEnd={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
+              onKeyUp={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
+            />
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+              1…{MANIFEST_CONCURRENCY_MAX}，默认 {DEFAULT_SETTINGS.manifestConcurrency}（抓剧情资源清单）
+            </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <span style={{ fontSize: "13px" }}>限速 (KB/s)</span>
@@ -303,10 +445,14 @@ export default function SettingsPage() {
               value={rateLimitKbps}
               style={{ width: "96px" }}
               onChange={(e) => setRateLimitKbps(Number(e.target.value))}
-              onBlur={() => saveDownloadSettings(concurrency, rateLimitKbps)}
+              onBlur={() => saveDownloadSettings(concurrency, manifestConcurrency, rateLimitKbps)}
             />
-            <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>0 = 不限速</span>
+            <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>0 = 不限速（默认）</span>
           </div>
+        </div>
+        <div className="cache-info" style={{ marginTop: "8px", color: "var(--text-secondary)" }}>
+          并发越高下载越快：大文件并发 {DOWNLOAD_CONCURRENCY_MIN}…{DOWNLOAD_CONCURRENCY_MAX}，小清单并发 {MANIFEST_CONCURRENCY_MIN}…{MANIFEST_CONCURRENCY_MAX}。
+          默认下载并发 {DEFAULT_SETTINGS.downloadConcurrency}、清单并发 {DEFAULT_SETTINGS.manifestConcurrency}、不限速；网络不稳时可下调。
         </div>
       </div>
 
