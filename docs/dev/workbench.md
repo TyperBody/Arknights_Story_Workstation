@@ -40,6 +40,15 @@
 - `src/akstage/engineCatalog.js` + `catalog-data.json`：引擎 25 条（css/js/font/src/data）、素材 19,861 条；`frontend/src/lib/engineCatalog.ts` 是 TS 包装。
 - Rust：`download::DEFAULT_CONCURRENCY = 12`、`MAX_CONCURRENCY = 32`；`setDownloadSettings` 由设置页写入。
 
+## 3.5 观感证据（截图）
+
+| | |
+|---|---|
+| 工作台 + 分支图（常驻 dock / Map / dify 卡片） | ![workbench](images/workbench-branch.png) |
+| dify 风分支图（分区卡片 + 正交连线 + 适配） | ![branch](images/branch-graph-dify.png) |
+| 设置 → 下载源 / 下载并发 | ![settings](images/settings-download-source.png) |
+| 舞台连续缩放（滚轮锚点、viewBox 变、几何不变） | ![stage](images/stage-zoom.png) |
+
 ## 4. 回归
 
 ```bash
