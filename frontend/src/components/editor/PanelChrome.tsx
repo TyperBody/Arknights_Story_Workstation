@@ -65,7 +65,5 @@ export function PanelFold({
   );
 }
 
-/** 自定义 hook：把受控 `chrome.visible` 折叠成"要不要给内容区加 `hidden`"。 */
-export function chromeHidden(chrome?: Partial<PanelChromeProps>): boolean {
-  return chrome?.visible === false;
-}
+/* 折叠判定（`chromeHidden`）在 `./chromeHidden.ts`：本文件按 `react-refresh` 的
+   "只导出组件" 规则，避免把函数混在组件文件里。 */

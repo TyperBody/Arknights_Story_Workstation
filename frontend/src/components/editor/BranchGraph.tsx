@@ -214,16 +214,28 @@ export default function BranchGraph({
   /** 平移面尺寸（「适配」的基准；`ResizeObserver` 只更新尺寸，不动视图）。 */
   const panRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const measure = useCallback(() => {
+    const host = panRef.current;
+    if (!host) return;
+    const next = { w: host.clientWidth || 0, h: host.clientHeight || 0 };
+    setSize((prev) => (prev.w === next.w && prev.h === next.h ? prev : next));
+  }, []);
+  // 尺寸测量：`ref` 回调里量首帧（DOM 挂载即触发，不需要 effect 里 setState），
+  // `ResizeObserver` 负责后续变化；`useEffect` 里同步 `setSize` 会被
+  // `react-hooks/set-state-in-effect` 判为级联渲染。
+  const attachPan = useCallback((node: HTMLDivElement | null) => {
+    panRef.current = node;
+    if (!node) return;
+    const next = { w: node.clientWidth || 0, h: node.clientHeight || 0 };
+    setSize((prev) => (prev.w === next.w && prev.h === next.h ? prev : next));
+  }, []);
   useEffect(() => {
     const host = panRef.current;
     if (!host || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      setSize({ w: host.clientWidth || 0, h: host.clientHeight || 0 });
-    });
+    const observer = new ResizeObserver(measure);
     observer.observe(host);
-    setSize({ w: host.clientWidth || 0, h: host.clientHeight || 0 });
     return () => observer.disconnect();
-  }, []);
+  }, [measure]);
 
   /**
    * 视图 = 派生（`boxKey`）+ 用户交互的折叠：内容 / 容器尺寸一变，
@@ -424,7 +436,7 @@ export default function BranchGraph({
       <div className="ed-graph-body" style={{ height: bodyHeight }} hidden={hidden}>        <div
           className="ed-graph-pan"
           data-branch-pan="1"
-          ref={panRef}
+          ref={attachPan}
           onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
