@@ -1,0 +1,20 @@
+{
+ "version": "1.0.0",
+ "catalogVersion": "widget-bundle-v7",
+ "entry": "https://static.prts.wiki/widgets/production/StoryPlayer.BQgSL6Cy.js",
+ "entryFile": "StoryPlayer.BQgSL6Cy.js",
+ "revision": "fbb167ed4d22bc9e9318381dd81bcc0f565f32b60cc37060778e9315c3752fcd",
+ "bytes": 3423993,
+ "files": 13,
+ "modules": 9,
+ "styles": 1,
+ "data": 3,
+ "source": "W2G/BEG",
+ "builtAt": "2026-10-10T19:36:12Z",
+ "optional": [
+  "https://static.prts.wiki/widgets/production/pixi.C1WAkyzQ.js",
+  "https://static.prts.wiki/widgets/production/naive-ui.ovEGOFPU.js",
+  "https://static.prts.wiki/widgets/production/common.CazL1XCQ.js",
+  "https://static.prts.wiki/widgets/production/vendor.DtZnMoVI.js"
+ ]
+}

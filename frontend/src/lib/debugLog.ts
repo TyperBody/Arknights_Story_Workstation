@@ -13,13 +13,40 @@ export interface LogEntry {
   time: number;
   level: LogLevel;
   msg: string;
+  /**
+   * Expected/benign noise (e.g. a `data:`/`blob:` module URL failing a
+   * `modulepreload` hint). Kept in the debug panel for diagnosis, but never
+   * promoted into the user-facing status banner.
+   */
+  silent?: boolean;
+  /** Repeat count for coalesced `silent` lines (never shows as N rows). */
+  count?: number;
 }
+
+/** A user-facing one-liner (banner) — NOT a raw log line. See BRIEF §2.7. */
+export interface StatusEntry {
+  kind: StatusKind;
+  message: string;
+  hint?: string;
+  time: number;
+}
+
+export type StatusKind = "engine" | "stage" | "download" | "boot";
 
 const MAX_ENTRIES = 500;
 const entries: LogEntry[] = [];
 const listeners = new Set<() => void>();
 let seq = 0;
 let installed = false;
+
+/**
+ * `data:`/`blob:` module URLs are how we inject the engine into the iframe. A
+ * failed `<link rel=modulepreload>` for one of them is expected (the import map
+ * already points at the same module), so it must not surface as a scary error.
+ */
+export function isVolatileModuleUrl(value: unknown): boolean {
+  return typeof value === "string" && /^(?:data|blob):/.test(value);
+}
 
 function fmt(a: unknown): string {
   if (a instanceof Error) return a.stack || `${a.name}: ${a.message}`;
@@ -44,13 +71,76 @@ function fmt(a: unknown): string {
 }
 
 export function pushLog(level: LogLevel, ...args: unknown[]): void {
-  entries.push({ id: seq++, time: Date.now(), level, msg: args.map(fmt).join(" ") });
+  const msg = args.map(fmt).join(" ");
+  const silent = isSilentNoise(level, msg, args);
+  // 同一句 `data:`/`blob:` 噪音只留一行（计数累加），否则启动一次能刷满 500 条。
+  if (silent) {
+    for (let index = entries.length - 1; index >= Math.max(0, entries.length - 40); index -= 1) {
+      const entry = entries[index];
+      if (entry.silent && entry.msg === msg) {
+        entry.count = (entry.count ?? 1) + 1;
+        entry.time = Date.now();
+        listeners.forEach((l) => l());
+        return;
+      }
+    }
+  }
+  entries.push({ id: seq++, time: Date.now(), level, msg, silent });
   if (entries.length > MAX_ENTRIES) entries.shift();
   listeners.forEach((l) => l());
 }
 
+/**
+ * Our own engine modules are injected as `data:text/javascript;base64,…` (and,
+ * historically, `blob:`). The iframe reports a failed *preload hint* for those on
+ * some WebViews even though execution succeeds from the import map — so the noise
+ * stays in the debug panel (`silent`) and never reaches the banner.
+ */
+function isSilentNoise(level: LogLevel, msg: string, args: unknown[]): boolean {
+  if (level !== "error" && level !== "warn") return false;
+  if (args.some(isVolatileModuleUrl)) return true;
+  return /(?:^|[\s"'(`=])(?:data:text\/javascript|blob:)/.test(msg);
+}
+
 export function getEntries(): readonly LogEntry[] {
   return entries;
+}
+
+// ── 用户可见横幅（BRIEF §2.7） ────────────────────────────────────────────────
+// 纪律：横幅 = 人话一条 + 可关；同 kind+message 去重；`data:`/`blob:` 的
+// 「模块加载失败」只在 debug 面板可见（silent 标记），不进横幅。
+const statuses = new Map<StatusKind, StatusEntry>();
+const statusListeners = new Set<() => void>();
+
+/** Publish (or refresh, if identical) the user-facing banner for `kind`. */
+export function pushStatus(kind: StatusKind, message: string, hint?: string): void {
+  const key = String(kind) as StatusKind;
+  const current = statuses.get(key);
+  if (current && current.message === message && current.hint === hint) return;
+  statuses.set(key, { kind: key, message, hint, time: Date.now() });
+  statusListeners.forEach((l) => l());
+}
+
+/** Drop the banner for `kind` (e.g. the engine finally booted from the network). */
+export function resolveStatus(kind: string): void {
+  if (!statuses.delete(kind as StatusKind)) return;
+  statusListeners.forEach((l) => l());
+}
+
+/** Read-only snapshot of the live banners (DebugConsole renders these; others read). */
+export function statusEntries(): Array<{ kind: string; message: string; hint?: string }> {
+  return [...statuses.values()].map(({ kind, message, hint }) => ({ kind, message, hint }));
+}
+
+/** Drop one banner by kind — the "✕" on a status row. */
+export function dismissStatus(kind: string): void {
+  resolveStatus(kind);
+}
+
+/** Subscribe to banner changes so the UI can re-render live. */
+export function subscribeStatus(listener: () => void): () => void {
+  statusListeners.add(listener);
+  return () => statusListeners.delete(listener);
 }
 
 export function clearLog(): void {

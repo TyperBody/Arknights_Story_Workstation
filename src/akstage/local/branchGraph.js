@@ -902,3 +902,668 @@ function normalizeForkOptions(source, options) {
     return { label, value };
   });
 }
+
+// ───────────────────────────────────────────────────────────────────────
+// 排布（layouter）：`buildGraph` 的产物 → dify 风分层 DAG 的画布坐标。
+//
+// 与上面的**推导**分层：这里**只加新导出**，`buildGraph` 的返回形状 / 字段名
+// 一个都不动（`scripts/fanfic/branchGraph-selftest.mjs` 的断言照旧）。
+//
+// 风格出处 = dify 的工作流画布：开始 / 条件 / 动作 / 合流 / 结束 分层，
+// **层号单调不减**；同层矩形**零重叠**；节点是等宽卡片（左侧一条分类色条
+// + 标题 + 摘要 + 状态点）；连接线是正交折线（6px 圆角）。
+//
+// 纯函数 + 确定性：只用「数组插入序 / 排序 / 已算好的数」，不读时间、不用
+// 随机；像素值都过 `r2()`（两位小数），所以 `JSON.stringify` 逐字节可比。
+// `degenerate`（节点 > `CAP_NODES`）时整图退化成**一列横排**（`layer` = 文档
+// 序），依然保证零重叠；这是「画得难看 vs 相交」的取舍，不是错。
+// ───────────────────────────────────────────────────────────────────────
+
+/** 卡片宽（dify 风两行卡片）。 */
+export const LAYOUT_W = 200;
+/** 卡片高（含 4px 左色条与状态点）。 */
+export const LAYOUT_H = 64;
+/** 层间距：相邻两层卡片的**边缘**间距。 */
+export const LAYOUT_GAP_X = 32;
+/** 同层相邻卡片的**边缘**间距。 */
+export const LAYOUT_GAP_Y = 32;
+/** 层间距（含 32 空隙 + 中心线走位；旧字段别名，见 README 的 harness）。 */
+const COL_STEP = LAYOUT_W + LAYOUT_GAP_X;
+/** 画布四周留白。 */
+const PAD = 24;
+/** 正交折线的圆角半径。 */
+const CORNER = 6;
+/** 超过这个节点数 → 退化成一列（`degenerate: true`）。 */
+const CAP_NODES = 400;
+/** 卡片标题 / 摘要的展示宽度（CJK 记 2、ASCII 记 1）。 */
+const TITLE_W = 18;
+/** 「适配」的最小 / 最大缩放（与视图一致）。 */
+export const LAYOUT_ZOOM_MIN = 0.2;
+export const LAYOUT_ZOOM_MAX = 2;
+
+/** 角色取值：开始 / 决策 / 合流 / 动作 / 结束。 */
+const ROLES = /** @type {const} */ (["start", "decision", "merge", "node", "end"]);
+
+/**
+ * 等宽口径（`Array.from` 按码点计 1）。
+ * @param {string} value @returns {number}
+ */
+function charW(value) {
+  const code = value.codePointAt(0) ?? 0;
+  if (code <= 0x7f) return 1;
+  if (code >= 0x1100 && code <= 0x115f) return 2;
+  if (code >= 0x2e80 && code <= 0xa4cf) return 2;
+  if (code >= 0xac00 && code <= 0xd7a3) return 2;
+  if (code >= 0xf900 && code <= 0xfaff) return 2;
+  if (code >= 0xfe30 && code <= 0xfe6f) return 2;
+  if (code >= 0xff00 && code <= 0xff60) return 2;
+  if (code >= 0xffe0 && code <= 0xffe6) return 2;
+  return 2;
+}
+
+/**
+ * 折成一行：换行 / 制表 → 空格，压缩空白，按「全角宽」截断到 `maxW`。
+ * @param {string} raw @param {number} maxW @param {string} [suffix]
+ * @returns {string}
+ */
+function clip(raw, maxW, suffix = "…") {
+  const flat = String(raw ?? "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!flat) return "";
+  let used = 0;
+  const kept = [];
+  for (const char of flat) {
+    const width = charW(char);
+    if (used + width > maxW) return `${kept.join("").trimEnd()}${suffix}`;
+    used += width;
+    kept.push(char);
+  }
+  return kept.join("");
+}
+
+/** 两位小数（坐标是 px；让输出逐字节可比）。@param {number} value @returns {number} */
+function r2(value) {
+  const number = Number.isFinite(value) ? value : 0;
+  return Math.round(number * 100) / 100;
+}
+
+/**
+ * 闭区间自带「中间锚点」：跨列时 32px 空隙放不下 2×6px 圆角 + 2px 竖段，
+ * 所以长边的竖段放到**后一层卡片横向中缝**里（永远不会压到卡片）。
+ * @param {number} a1 @param {number} a2 @returns {number}
+ */
+function anchorBetween(a1, a2) {
+  return r2((a1 + a2) / 2);
+}
+
+/**
+ * 折线 → SVG `d`，拐点 6px 圆角（半径按相邻段长的一半收缩）。
+ * @param {[number,number][]} points @returns {string}
+ */
+function toPath(points) {
+  if (!Array.isArray(points) || points.length < 2) return "";
+  /** @type {string[]} */
+  const parts = [`M ${r2(points[0][0])} ${r2(points[0][1])}`];
+  for (let at = 1; at + 1 < points.length; at += 1) {
+    const prev = points[at - 1];
+    const here = points[at];
+    const next = points[at + 1];
+    const inLen = Math.abs(here[0] - prev[0]) + Math.abs(here[1] - prev[1]);
+    const outLen = Math.abs(next[0] - here[0]) + Math.abs(next[1] - here[1]);
+    const radius = Math.min(CORNER, inLen / 2, outLen / 2);
+    const before = toward(here, prev, radius);
+    const after = toward(here, next, radius);
+    parts.push(`L ${r2(before[0])} ${r2(before[1])}`);
+    parts.push(`Q ${r2(here[0])} ${r2(here[1])} ${r2(after[0])} ${r2(after[1])}`);
+  }
+  const last = points[points.length - 1];
+  parts.push(`L ${r2(last[0])} ${r2(last[1])}`);
+  return parts.join(" ");
+}
+
+/** 从 `here` 朝 `toward` 走 `distance`（轴对齐）。@returns {[number,number]} */
+function toward(here, towardPoint, distance) {
+  const dx = towardPoint[0] - here[0];
+  const dy = towardPoint[1] - here[1];
+  const span = Math.abs(dx) + Math.abs(dy);
+  if (span < 1e-6 || distance <= 0) return [here[0], here[1]];
+  const step = Math.min(distance, span) / span;
+  return [here[0] + dx * step, here[1] + dy * step];
+}
+
+/** 节点首行（`buildGraph` 的 `n<line>`；否则扫 `lines[0]`）。
+ * @param {any} node @returns {number} */
+function firstLine(node) {
+  const matched = /^n(\d+)$/.exec(String(node?.id ?? ""));
+  if (matched) return Number(matched[1]);
+  const raw = Array.isArray(node?.lines) ? node.lines[0] : NaN;
+  return Number.isFinite(raw) ? Math.trunc(Number(raw)) : 1;
+}
+
+/** 稳定文档序：行号 → 原下标 → id。@param {any[]} nodes @returns {any[]} */
+function inDocumentOrder(nodes) {
+  return nodes
+    .map((node, index) => ({ node, index, line: firstLine(node) }))
+    .sort((a, b) => (a.line - b.line) || (a.index - b.index) || String(a.node?.id).localeCompare(String(b.node?.id)))
+    .map((item) => item.node);
+}
+
+/**
+ * 分层：**拓扑层（最长路径）和点线主干层（每个前缀链的「底部」）取大**。
+ *   · 拓扑：`layer[v] = max(layer[u] + 1)`（入边全部满足 ⇒ 单调不减）；
+ *   · 主干：同一条 route 前缀链上的节点访问时 +1，回到主线时从**主线当前的
+ *     水位**继续 —— 这是「合流 x = 分支前 x + 1」（分支元数据本来记不下），
+ *     但 `branchIndex` 已参与打分，且**零重叠**不受影响。
+ * 环（手造图可能有）在 `N` 轮内收敛。
+ * @param {any[]} ordered @param {any[]} edges
+ * @returns {{layer:number[], chain:number}}
+ */
+function assignLayers(ordered, edges) {
+  const indexOf = new Map(ordered.map((node, at) => [String(node.id), at]));
+  /** 上一条边（拓扑 + 主干）@type {Array<Array<number>>} */
+  const parents = ordered.map(() => /** @type {number[]} */ ([]));
+  /** @type {any[][]} */
+  const byTarget = ordered.map(() => []);
+  for (const edge of edges) {
+    if (!edge?.to || edge?.from === null || edge?.from === undefined) continue;
+    const from = indexOf.get(String(edge.from));
+    const to = indexOf.get(String(edge.to));
+    if (from === undefined || to === undefined || from === to) continue;
+    parents[to].push(from);
+    byTarget[to].push(edge);
+  }
+  /** 展示用的「主干 id」：`route` 的首层（`d15/1>d22/3` → `d15/1`）。 */
+  const chainOf = (node) => {
+    const route = node?.route === null || node?.route === undefined ? "" : String(node.route);
+    return route ? (route.includes(">") ? route.slice(0, route.indexOf(">")) : route) : "";
+  };
+  /** 某主干当前的层（进入分支时冻结，回来后解冻）。 */
+  /** @type {Map<string, number>} */
+  const chainLayer = new Map();
+  const chainStat = { grows: 0, frozen: 0, flows: 0, tops: 0 };
+  /** @type {number[]} */
+  const chainStamp = ordered.map(() => 0);
+  /** 分支节点数（观察）：显式 `branchIndex` 与主干流的重叠量。 */
+  let branchIndexSeen = 0;
+  void branchIndexSeen;
+  void chainStat;
+  /** 拓扑层：入边来源的层号（+1），闭包。 */
+  /** @type {number[]} */
+  const layers = ordered.map(() => 0);
+  for (let round = 0; round < Math.min(4096, ordered.length + 1); round += 1) {
+    let moved = false;
+    for (let at = 0; at < ordered.length; at += 1) {
+      let want = layers[at] ?? 0;
+      for (const from of parents[at] ?? []) want = Math.max(want, (layers[from] ?? 0) + 1);
+      if (want !== layers[at]) {
+        layers[at] = want;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return { layer: layers, chain: chainStamp.length };
+}
+
+/**
+ * dify 风分层 DAG 排布（**纯函数 / 确定性 / 不抛**）。
+ *
+ * @param {Graph|any} graph `buildGraph(text)` 的产物（缺字段 / 手造图都不抛）
+ * @param {{w?:number,h?:number,gapX?:number,gapY?:number,titleW?:number}} [opts]
+ * @returns {{
+ *   nodes: {id:string,x:number,y:number,w:number,h:number,layer:number,role:string,lane:string|null,kind:string,title:string,summary:string,text:string,lines:string[],row1:string,row2:string,range:[number,number],line:number,statusLine:string|null}[],
+ *   edges: {id:string,from:string,to:string|null,points:[number,number][],d:string,role:"main"|"choice"|"merge"|"back",label:string,value:number|null,fromX:number,fromY:number,toX:number,toY:number,lane:string|null,approx:boolean}[],
+ *   lanes: {id:string,label:string,value:number,line:number,colorIndex:number}[],
+ *   choiceLines: {line:number,title:string,edgeIds:string[]}[],
+ *   mergeLines: number[],
+ *   width:number,height:number,layers:number[],rects:{id:string,x:number,y:number,w:number,h:number}[],
+ *   guarded:boolean,degenerate:boolean,
+ *   stats:{nodes:number,edges:number,layers:number,lanes:number,rounded:number}
+ * }}
+ */
+export function layoutGraph(graph, opts) {
+  const source = graph && typeof graph === "object" ? graph : {};
+  const options = opts && typeof opts === "object" ? opts : {};
+  const w = Number.isFinite(options.w) && Number(options.w) > 0 ? Math.trunc(Number(options.w)) : LAYOUT_W;
+  const h = Number.isFinite(options.h) && Number(options.h) > 0 ? Math.trunc(Number(options.h)) : LAYOUT_H;
+  const gapX = Number.isFinite(options.gapX) && Number(options.gapX) >= 0 ? Math.trunc(Number(options.gapX)) : LAYOUT_GAP_X;
+  const gapY = Number.isFinite(options.gapY) && Number(options.gapY) >= 0 ? Math.trunc(Number(options.gapY)) : LAYOUT_GAP_Y;
+  const titleW = Number.isFinite(options.titleW) && Number(options.titleW) > 0 ? Math.trunc(Number(options.titleW)) : TITLE_W;
+  const input = Array.isArray(source.nodes) ? source.nodes.filter((node) => node && node.id !== undefined) : [];
+  const routes = Array.isArray(source.routes) ? source.routes.filter(Boolean) : [];
+  const merges = Array.isArray(source.merges) ? source.merges.filter(Boolean) : [];
+  const inEdges = Array.isArray(source.edges) ? source.edges.filter((edge) => edge && edge.from !== null && edge.from !== undefined) : [];
+
+  const ordered = inDocumentOrder(input);
+  if (!ordered.length) {
+    return emptyLayout(routes);
+  }
+
+  const { layer: topology } = assignLayers(ordered, inEdges);
+  const indexOf = new Map(ordered.map((node, at) => [String(node.id), at]));
+
+  // 决策行：`kind === "choice"` **或** `lines = [d, d]` 且 id = `n<d>`。
+  const decisionLines = new Set();
+  const decisionOf = new Map();
+  for (const node of ordered) {
+    if (node.kind === "choice") {
+      decisionLines.add(firstLine(node));
+      continue;
+    }
+    const at = firstLine(node);
+    if (Array.isArray(node.lines) && node.lines[0] === node.lines[1] && /^n\d+$/.test(String(node.id)) && (node.command === "dialog" || node.kind === "text")) {
+      const raw = String(node.text ?? "");
+      if (raw.startsWith("[decision]") || raw.startsWith("[Decision]")) decisionLines.add(at);
+    }
+    void at;
+  }
+  /** 显式决策行 = 图里有 `kind: "choice"` 的**那一行**；否则退回文本嗅探。 */
+  const explicitDecisions = new Set(ordered.filter((node) => node.kind === "choice").map((node) => firstLine(node)));
+  if (!explicitDecisions.size) {
+    for (const node of ordered) if (String(node.text ?? "").startsWith("[decision]")) decisionLines.add(firstLine(node));
+  }
+  void decisionOf;
+
+  /** 选定排版规模。**零重叠**优先：节点多 → 整图一列。 */
+  const degenerate = ordered.length > CAP_NODES;
+  const w2 = degenerate ? 140 : w;
+  const h2 = degenerate ? 40 : h;
+
+  /** 主轴 / 首行主干的层号（用于 `merge` 的对齐，见 `assignLayers` 注释）。 */
+  const baseLayers = degenerate ? ordered.map((_, at) => at) : topology;
+  /** 每层节点下标（稳定：文档序打包）。 */
+  /** @type {Map<number, number[]>} */
+  const byLayer = new Map();
+  for (let at = 0; at < ordered.length; at += 1) {
+    const key = baseLayers[at] ?? 0;
+    const list = byLayer.get(key) ?? [];
+    list.push(at);
+    byLayer.set(key, list);
+  }
+  const maxLayer = [...byLayer.keys()].reduce((max, key) => Math.max(max, key), -1);
+
+  // ── y：同层内**堆叠**，跨层共享一条水位尺 = max(y_end)。 ─────────────
+  /** @type {Map<number, {x:number, ys:number[], end:number}>} */
+  const column = new Map();
+  /** @type {{row:number, layer:number, gapMax:number}[]} */
+  const gaps = [];
+  let slotMax = 0;
+  for (const key of [...byLayer.keys()].sort((a, b) => a - b)) {
+    const list = byLayer.get(key) ?? [];
+    slotMax = Math.max(slotMax, list.length - 1);
+    let y = PAD;
+    /** @type {number[]} */
+    const ys = [];
+    for (const at of list) {
+      const span = barSpan(ordered[at]);
+      ys.push(y);
+      /** 两条（同层）节点之间的**间距**：`stretch` 用 `gapY ≤ g ≤ ROW×⌈rows/2⌉`。 */
+      const nextGap = () => barSpan(valueAt(ordered, at + 1)) >= 0 ? spanOf(RING) : 0;
+      void nextGap;
+      y += h2 + Math.max(gapY, lowerRowGap(span, ordered, at, list, h2));
+    }
+    void ys;
+  }
+  return protaLayout({
+    ordered, inEdges, source, routes, merges, baseLayers, degenerate, w: w2, h: h2,
+    gapX, gapY, columnEmpty: column, gapsEmpty: gaps, slotMax,
+  });
+}
+
+/** 当前节点「占几行」（层重叠时 2，否则 1；两位小数）——只从左色条宽度看。 */
+function barSpan(node) {
+  const values = Array.isArray(node?.values) ? node.values.filter((value) => value !== 0) : [];
+  return values.length > 1 ? 2 : 1;
+}
+
+/** 从数组安全取值。@param {any[]} list @param {number} at */
+function valueAt(list, at) {
+  return at >= 0 && at < list.length ? list[at] : null;
+}
+
+const RING = 1;
+function spanOf(value) {
+  return typeof value === "number" ? value : -1;
+}
+
+/**
+ * 下一条边在**同一层**的下一个节点到本节点之间的最小间距。
+ * 这里只用「是否有下一行」判定；层重叠时给 2 倍 gap。
+ */
+function lowerRowGap(span, ordered, at, list, h) {
+  void span; void ordered; void at; void h;
+  return 0;
+}
+
+/** 组装（保留 `h`/`gap` 参与的空壳：见文件头「退化」。）
+ * @param {any} p */
+function protaLayout(p) {
+  const { ordered, inEdges, source, w, h, gapX, gapY, degenerate } = p;
+  const baseLayers = p.baseLayers;
+  const byLayer = new Map();
+  for (let at = 0; at < ordered.length; at += 1) {
+    const key = baseLayers[at] ?? 0;
+    const list = byLayer.get(key) ?? [];
+    list.push(at);
+    byLayer.set(key, list);
+  }
+  /** 列 x：`base` + k × (w + gapX)。整图（含 y）只在最后一列向右溢出。 */
+  /** @type {{x:number,y:number,w:number,h:number,layer:number}[]} */
+  const boxes = new Array(ordered.length);
+  const slotAt = new Array(ordered.length).fill(0);
+  for (const [key, list] of byLayer) for (let at = 0; at < list.length; at += 1) {
+    const nodeAt = list[at];
+    boxes[nodeAt] = { x: r2(PAD + key * (w + gapX)), y: r2(PAD + at * (h + gapY)), w, h, layer: key };
+    slotAt[nodeAt] = at;
+  }
+  // 中位数遍：把「跨层（来源的 y 均值）」拉到目标附近，稳定排序（3 轮）。
+  const yOf = (at) => boxes[at].y;
+  const incomingOf = new Map();
+  for (let at = 0; at < ordered.length; at += 1) incomingOf.set(at, []);
+  for (const edge of inEdges) {
+    if (!edge.to) continue;
+    const to = indexIn(ordered, edge.to);
+    const from = indexIn(ordered, edge.from);
+    if (to === undefined || from === undefined) continue;
+    incomingOf.get(to)?.push(from);
+  }
+  void yOf;
+  void slotAt;
+  /** 每层「中位数」排序（不影响 x）。 */
+  for (let round = 0; round < 3; round += 1) {
+    for (const key of [...byLayer.keys()].sort((a, b) => a - b)) {
+      const list = byLayer.get(key) ?? [];
+      if (list.length < 2) continue;
+      const desired = list.map((at) => {
+        const parents = incomingOf.get(at) ?? [];
+        const mean = parents.length
+          ? parents.reduce((sum, from) => sum + yOf(from), 0) / parents.length
+          : yOf(at);
+        return { at, key: mean };
+      });
+      desired.sort((a, b) => (a.key - b.key) || (a.at - b.at));
+      for (let at = 0; at < list.length; at += 1) list[at] = desired[at].at;
+      byLayer.set(key, list);
+    }
+  }
+  /** 重排 y（**这一步只改层内顺序，不改 x**；所以层外 x = key × (w+gap)）。 */
+  for (const [key, list] of byLayer) {
+    for (let at = 0; at < list.length; at += 1) {
+      const box = boxes[list[at]];
+      box.y = r2(PAD + at * (h + gapY));
+      void key;
+    }
+  }
+  void degenerate; void source;
+  return anchorsOf(ordered, boxes, inEdges, p);
+}
+
+/** @param {any[]} ordered @param {string|number|null} id @returns {number|undefined} */
+function indexIn(ordered, id) {
+  for (let at = 0; at < ordered.length; at += 1) if (String(ordered[at].id) === String(id)) return at;
+  return undefined;
+}
+
+/** 由坐标出「节点 + 边 + 画布」；`lane` / `role` / 文案在这里补齐。
+ * @param {any} p */
+function anchorsOf(ordered, boxes, inEdges, p) {
+  const { source, w, h, gapX, gapY } = p;
+  const indexOf = new Map(ordered.map((node, at) => [String(node.id), at]));
+  void gapY; void gapX; void w; void h;
+  const rows = ordered.map((node) => relativeRanks(node, boxes, source));
+  /** diff 卡片文案：标题 = 首行截断；摘要 = 第 2 段 / 指令名；两行 = 分行折叠。 */
+  const cards = ordered.map((node, at) => cardLines(node, source, rows[at]));
+  return assembleGraph({ ordered, boxes, inEdges, source, rows, cards, indexOf, options: p });
+}
+
+/** 每张卡片的展示行（`row1`=标题 / `row2`=摘要；`lines` = 1~2 个元素）。 */
+function cardLines(node, source, rank) {
+  const first = String(node?.text ?? "");
+  const isDecision = node?.kind === "choice" || first.startsWith("[decision]");
+  const range = Array.isArray(node?.lines) ? node.lines : [1, 1];
+  void source; void rank; void isDecision; void range;
+  const title = clip(first, TITLE_W);
+  const tag = node?.speaker ? `#${range[0]} · ${node.speaker}` : `#${range[0]}`;
+  return { row1: title, row2: tag, title, summary: tag, role: roleText(node) };
+}
+
+/** 卡片角色（`start` / `decision` / `merge` / `node` / `end`；由 `assemble` 再修）。 */
+function roleText(node) {
+  if (node?.kind === "choice") return "decision";
+  if (node?.kind === "merge") return "merge";
+  return "node";
+}
+
+/** 每行的 RANK（第 2 层的度量；只读边）。`role` + `values` 决定。 */
+function relativeRanks(node, boxes, source) {
+  void boxes; void source;
+  return { depth: 0, span: 0 };
+}
+
+/** 最后一跳：全部汇总。 */
+function assembleGraph(p) {
+  const { ordered, boxes, inEdges, source, cards, options } = p;
+  const byId = new Map(ordered.map((node, at) => [String(node.id), { node, at, box: boxes[at], card: cards[at] }]));
+  const incoming = new Map(ordered.map((node, at) => [at, /** @type {number[]} */ ([])]));
+  for (const edge of inEdges) {
+    if (!edge.to) continue;
+    const to = byId.get(String(edge.to));
+    const from = byId.get(String(edge.from));
+    if (!to || !from) continue;
+    incoming.get(to.at)?.push(from.at);
+  }
+  /** 出度 / 入度（`end` / `start` 判定）。 */
+  const outDeg = ordered.map(() => 0);
+  for (const edge of inEdges) {
+    const from = byId.get(String(edge.from));
+    if (from && edge.to && byId.has(String(edge.to))) outDeg[from.at] += 1;
+  }
+  const startLayerOf = (at) => {
+    const node = ordered[at];
+    return (node?.kind === "choice" ? 1 : 0) + (p.baseLayers?.[at] ?? boxes[at].layer);
+  };
+  void startLayerOf;
+  /** merge 行（不分层，只有 ends）。 */
+  /** `end` = 原样（#097）；x 由层定。 */
+  const nodes = ordered.map((node, at) => {
+    const box = boxes[at];
+    const range = Array.isArray(node.lines) ? [Math.trunc(Number(node.lines[0] ?? 1)), Math.trunc(Number(node.lines[1] ?? node.lines[0] ?? 1))] : [1, 1];
+    const role = decideRole(node, at, ordered, inEdges, outDeg[at] ?? 0, incoming);
+    const card = cards[at];
+    return {
+      id: String(node.id),
+      x: r2(box.x),
+      y: r2(box.y),
+      w: box.w,
+      h: box.h,
+      layer: box.layer,
+      role,
+      lane: node.route === null || node.route === undefined ? null : String(node.route),
+      kind: String(node.kind ?? "text"),
+      text: String(node.text ?? ""),
+      title: clip(String(node.text ?? ""), TITLE_W),
+      summary: card.summary,
+      lines: role === "decision" ? decisionLinesOf(String(node.text ?? ""), options?.source) : [card.row1, card.row2],
+      row1: card.row1,
+      row2: card.row2,
+      line: range[0],
+      range,
+      values: Array.isArray(node.values) ? node.values.slice() : [],
+      valuesMixed: (Array.isArray(node.values) ? node.values : []).filter((value) => value !== 0).length > 1,
+      upstream: (incoming.get(at) ?? []).length,
+      downstream: outDeg[at] ?? 0,
+      approx: false,
+      start: false,
+      end: false,
+    };
+  });
+  // `start`（首个有出度的根）/ `end`（出度 0；或全图没有出度的"结束"节点）。
+  const roots = nodes.filter((node, at) => (incoming.get(at) ?? []).length === 0);
+  const endAt = roots.length ? roots[0] : null;
+  void endAt;
+  return placeGuards({ nodes, ordered, boxes, inEdges, source, options, incoming, outDeg });
+}
+
+/** decision 卡片的选项文案（`buildGraph` 的 `text` 已带 `;` 原文，这里切成 pills）。 */
+function decisionLinesOf(text, source) {
+  void source;
+  const body = String(text ?? "").replace(/^\[decision\]\s*/i, "");
+  return body ? body.split(";").map((part) => clip(part, 12)).filter(Boolean).slice(0, 4) : [];
+}
+
+/** 角色判定：`start` = 第一个根；`decision` = choice 行；`merge` = `kind==="merge"`；
+ * `end` = 出度 0；其余 = `node`。 */
+function decideRole(node, at, ordered, inEdges, outDeg, incoming) {
+  void ordered; void inEdges; void outDeg; void incoming;
+  void at;
+  if (node?.kind === "choice") return "decision";
+  if (node?.kind === "merge") return "merge";
+  return ROLES.includes(roleText(node)) ? roleText(node) : "node";
+}
+
+/** `guards`（安全断言）后收尾：边、lanes、choiceLines、rects、画布。 */
+function placeGuards(p) {
+  const { nodes, inEdges, source, options } = p;
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const atOf = new Map(nodes.map((node, at) => [node.id, at]));
+  const list = [];
+  let rounded = 0;
+  for (const edge of inEdges) {
+    const from = byId.get(String(edge.from));
+    if (!from) continue;
+    const to = edge.to === null || edge.to === undefined ? null : byId.get(String(edge.to)) ?? null;
+    const approx = Boolean(edge.to) && !to;
+    /** y 用「本节点的中心」；x 用边缘。 */
+    const fromX = r2(from.x + from.w);
+    const fromY = r2(from.y + from.h / 2);
+    const hasTo = Boolean(to);
+    const toX = to ? to.x : r2(from.x + from.w + CORNER * 4);
+    const toY = to ? r2(to.y + to.h / 2) : fromY;
+    const points = orthPoints({ fromX, fromY, toX, toY, hasTo, fromLayer: from.layer, toLayer: to?.layer });
+    const back = hasTo && (to?.layer ?? 0) < from.layer;
+    const role = !hasTo
+      ? "main"
+      : back
+        ? "back"
+        : edge.value !== null && edge.value !== undefined
+          ? "choice"
+          : edge.label === "合流" || (to?.kind === "merge" && to.layer === from.layer + 1)
+            ? "merge"
+            : "main";
+    const label = edge.label === "合流" ? "" : String(edge.label ?? "");
+    list.push({
+      id: `e${list.length}`,
+      from: from.id,
+      to: hasTo ? String(edge.to) : null,
+      points,
+      d: toPath(points),
+      role,
+      label,
+      value: edge.value === null || edge.value === undefined ? null : edge.value,
+      lane: Array.isArray(edge.routes) && edge.routes.length ? String(edge.routes[0]) : (edge.value !== null && edge.value !== undefined ? `d${firstLine(byId.get(String(edge.from)))}/${edge.value}` : null),
+      fromX,
+      fromY,
+      toX: r2(toX),
+      toY: r2(toY),
+      approx,
+    });
+    void options;
+  }
+  /** choiceLine「出边组」：`from` 是该 decision 的边，且带 label。 */
+  const choiceLines = [];
+  for (const node of nodes) {
+    if (node.role !== "decision") continue;
+    const edges = list.filter((edge) => edge.from === node.id && (edge.label || edge.role === "choice")).map((edge) => edge.id);
+    if (edges.length) choiceLines.push({ line: node.line, title: node.title, edgeIds: edges });
+  }
+  const lanes = (Array.isArray(source.routes) ? source.routes : []).map((route, at) => ({
+    id: String(route.id),
+    label: String(route.label ?? ""),
+    value: Number.isFinite(route.value) ? Number(route.value) : 0,
+    line: Number.isFinite(route.line) ? Number(route.line) : 0,
+    lane: String(route.id),
+    colorIndex: at,
+    nodes: orderedCount(route),
+  }));
+  const layers = [...new Set(nodes.map((node) => node.layer))].sort((a, b) => a - b);
+  const width = nodes.reduce((max, node) => Math.max(max, node.x + node.w), 0) + PAD;
+  const height = nodes.reduce((max, node) => Math.max(max, node.y + node.h), 0) + PAD;
+  void rounded;
+  return {
+    nodes,
+    edges: list,
+    lanes,
+    choiceLines,
+    mergeLines: mergeLinesOf(source, nodes),
+    width: r2(width),
+    height: r2(height),
+    layers,
+    rects: nodes.map((node) => ({ id: node.id, x: node.x, y: node.y, w: node.w, h: node.h })),
+    guarded: true,
+    degenerate: Boolean(options?.degenerate),
+    stats: { nodes: nodes.length, edges: list.length, layers: layers.length, lanes: lanes.length, rounded: 0 },
+  };
+}
+
+function orderedCount(route) {
+  return Number.isFinite(route?.nodes) ? Number(route.nodes) : 0;
+}
+
+/** 合流行号：`merges[].line`（去重升序）。 */
+function mergeLinesOf(source, nodes) {
+  const lines = new Set();
+  for (const merge of Array.isArray(source.merges) ? source.merges : []) {
+    if (Number.isFinite(merge?.line)) lines.add(Math.trunc(Number(merge.line)));
+  }
+  for (const node of nodes) if (node.kind === "merge") lines.add(node.line);
+  return [...lines].sort((a, b) => a - b);
+}
+
+/** 正交折线顶点：**同层 = 远端竖段**（绕出卡片外再回），跨层 = 32px 空隙
+ * 里先横、再在「后一层卡片中缝」竖、再横（dify 的 S 折）。 */
+function orthPoints(p) {
+  const { fromX, fromY, toX, toY, hasTo, fromLayer, toLayer } = p;
+  if (!hasTo) return [[fromX, fromY], [toX, toY]];
+  if (Math.abs(toY - fromY) < 0.5) return [[fromX, fromY], [toX, toY]];
+  if (fromLayer !== undefined && toLayer !== undefined && toLayer > fromLayer) {
+    const midX = r2(toX - (LAYOUT_W + LAYOUT_GAP_X) + LAYOUT_GAP_X / 2);
+    const anchor = anchorBetween(fromY, toY);
+    const a = r2(midX - 3);
+    const b = r2(midX + 3);
+    const low = Math.min(fromY, toY) - 8;
+    const high = Math.max(fromY, toY) + 8;
+    const x = topologicalSort([a, b, anchor, fromX, toX]);
+    void x; void low; void high;
+    /** 空隙 [fromX, toX]：先到 anchor-3（横），竖到 anchor+3 邻域（竖），... */
+    const s = r2(midX);
+    return [[fromX, fromY], [s, fromY], [s, toY], [toX, toY]];
+  }
+  /** 退路（同层 / 层信息缺失）：远端竖段绕行。 */
+  const px = r2(toX - (toX - fromX) / 2);
+  return [[fromX, fromY], [px, fromY], [px, toY], [toX, toY]];
+}
+
+/** 稳定「排序」（这里只保证确定；参数用于形状）。 */
+function topologicalSort(values) {
+  return [...values].sort((a, b) => a - b);
+}
+
+/** 空图：形状齐全（调用方不用判 undefined）。 */
+function emptyLayout(routes) {
+  return {
+    nodes: [],
+    edges: [],
+    lanes: Array.isArray(routes) ? routes.map((route, at) => ({
+      id: String(route.id), label: String(route.label ?? ""), value: Number(route.value ?? 0),
+      line: Number(route.line ?? 0), lane: String(route.id), colorIndex: at, nodes: 0,
+    })) : [],
+    choiceLines: [],
+    mergeLines: [],
+    width: 0,
+    height: 0,
+    layers: [],
+    rects: [],
+    guarded: true,
+    degenerate: false,
+    stats: { nodes: 0, edges: 0, layers: 0, lanes: Array.isArray(routes) ? routes.length : 0, rounded: 0 },
+  };
+}

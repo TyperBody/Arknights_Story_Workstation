@@ -3,6 +3,7 @@ mod commands;
 mod compress;
 mod data_root;
 mod download;
+mod engine_snapshot;
 mod media;
 mod models;
 mod net;
@@ -326,6 +327,10 @@ pub fn run() {
             // Cache management
             cache::save_to_cache,
             cache::load_from_cache,
+            // Bundled engine snapshot (offline first boot; see engine_snapshot.rs)
+            engine_snapshot::engine_snapshot_info,
+            engine_snapshot::engine_pack_info,
+            engine_snapshot::engine_snapshot_read,
             cache::delete_from_cache,
             cache::list_cached_stories,
             cache::get_cache_status,
