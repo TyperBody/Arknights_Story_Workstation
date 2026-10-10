@@ -26,18 +26,56 @@ const SCRIPT = [
 let pass = 0, fail = 0; const rows = [];
 const t = (label, ok, detail = "") => { rows.push({ label, ok }); if (ok) { pass += 1; console.log(`ok   ${label}${detail ? ` — ${detail}` : ""}`); } else { fail += 1; console.log(`FAIL ${label}${detail ? ` — ${detail}` : ""}`); } };
 
+/** 应用级的「书架信息已更新」浮条会拦截点击：注入样式 + 直接摘除节点 + JS 兜底点击。 */
+async function killBanners(page) {
+  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none!important;pointer-events:none!important}" }).catch(() => {});
+  await page.evaluate(() => document.querySelectorAll(".bookshelf-sync-warning").forEach((el) => el.remove())).catch(() => {});
+}
+/** 点击：优先真实点击；被浮条/遮挡拦住时退回 `el.click()`。 */
+async function clickEl(locator) {
+  try { await locator.click({ timeout: 4000 }); return "click"; }
+  catch { await locator.evaluate((el) => el.click()); return "js"; }
+}
+
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/snap/bin/chromium", args: ["--no-sandbox", "--disable-dev-shm-usage"] });
 try {
   const page = await browser.newPage({ viewport: { width: 1680, height: 1000 } });
+  page.setDefaultTimeout(30_000);
   const pageErrors = [];
   page.on("pageerror", (e) => { const s = String(e.stack ?? e).split("\n")[0]; if (!/transformCallback/.test(s)) pageErrors.push(s); });
+  // 应用级「书架信息已更新」浮条会拦截点击：只在 <head> 就绪后插一条**高优先级**样式，
+  // 并起一个 400ms 的轻量清扫（不用 MutationObserver —— 应用会不断重建该节点，
+  // observer 会被自己的 remove 触发成死循环、把页面渲染饿死）。
+  // 全新布局：清掉上一轮的 `prts-editor-wb:*`（否则点到的是历史布局，不是默认布局）。
   await page.addInitScript(() => {
-    const hide = () => { const s = document.getElementById("lead-hide") || Object.assign(document.createElement("style"), { id: "lead-hide" }); s.textContent = ".bookshelf-sync-warning,.dl-bar{display:none !important}"; (document.head ?? document.documentElement).appendChild(s); };
-    hide(); setInterval(hide, 300);
+    try { Object.keys(localStorage).filter((k) => k.startsWith("prts-editor-wb:")).forEach((k) => localStorage.removeItem(k)); } catch {}
   });
-  await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(SCRIPT)}`, { waitUntil: "domcontentloaded" });
+  await page.addInitScript(() => {
+    const CSS = ".bookshelf-sync-warning,.dl-bar{display:none !important;pointer-events:none !important;visibility:hidden !important}";
+    const install = () => {
+      const root = document.head ?? document.documentElement;
+      if (!root) return false;
+      if (!document.getElementById("lead-hide")) {
+        const style = document.createElement("style");
+        style.id = "lead-hide";
+        style.textContent = CSS;
+        root.appendChild(style);
+      }
+      return true;
+    };
+    const tick = () => { if (install()) document.querySelectorAll(".bookshelf-sync-warning").forEach((el) => el.remove()); };
+    if (!install()) {
+      const onReady = () => { tick(); setInterval(tick, 400); };
+      document.addEventListener("DOMContentLoaded", onReady, { once: true });
+    } else {
+      setInterval(tick, 400);
+    }
+  });
+  await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(SCRIPT)}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
   await page.waitForSelector("textarea.ed-textarea", { timeout: 30000 });
-  await page.waitForTimeout(2000);
+  await killBanners(page);
+  await page.waitForTimeout(1200);
+  await killBanners(page);
 
   // ── 0. 页面活着 ─────────────────────────────────────────────
   const ta = await page.locator("textarea.ed-textarea").count();
@@ -59,7 +97,7 @@ try {
     const before = await zoomLabel();
     for (const action of ["zoom-in", "zoom-in", "zoom-in"]) {
       const btn = stage.locator(`[data-stage-action="${action}"]`).first();
-      if (await btn.count()) await btn.click();
+      if (await btn.count()) await clickEl(btn);
     }
     await page.waitForTimeout(250);
     const after = await zoomLabel();
@@ -68,7 +106,7 @@ try {
     const fit = stage.locator('[data-stage-action="fit"]').first();
     t("① 舞台：有「适配」按钮", (await fit.count()) >= 1);
     const one = stage.locator('[data-stage-action="zoom-1"]').first();
-    if (await one.count()) { await one.click(); await page.waitForTimeout(200); }
+    if (await one.count()) { await clickEl(one); await page.waitForTimeout(200); }
     t("① 舞台：1:1 回到 100%", pct(await zoomLabel()) === 100, await zoomLabel());
     const vb = await page.evaluate(() => document.querySelector("[data-stage-svg]")?.getAttribute("viewBox") ?? "");
     t("① 舞台：缩放只改 viewBox", /^[-\d.]+ [-\d.]+ [\d.]+ [\d.]+$/.test(vb), vb);
@@ -104,7 +142,8 @@ try {
   const tab = page.locator(".ed-viewtabs .ed-btn", { hasText: "分支图" });
   if (await tab.count()) {
     const beforeN = await page.locator('[data-wb-panel="branch"]').count();
-    await tab.first().click(); await page.waitForTimeout(900);
+    await killBanners(page);
+    await clickEl(tab.first()); await page.waitForTimeout(900);
     const midN = await page.locator('[data-wb-panel="branch"]').count();
     const nodes = await page.locator("[data-branch-node]").count();
     const overlay = await page.locator("[data-wb-overlay]").count();
@@ -123,7 +162,7 @@ try {
     });
     t("④ 分支图：节点矩形零重叠", gapOK.bad === 0, JSON.stringify(gapOK));
     await page.screenshot({ path: resolve(SHOTS, "demo-branch.png") });
-    await tab.first().click(); await page.waitForTimeout(500);
+    await clickEl(tab.first()); await page.waitForTimeout(500);
     t("④ 再点关闭 → 从工作台移除", (await page.locator('[data-wb-panel="branch"]').count()) === 0);
   } else t("② 工具栏「分支图」开关", false, "未找到");
 
@@ -136,8 +175,9 @@ try {
   t("⑥ 随包引擎快照存在且 > 1 MB", existsSync(snap) && statSync(snap).size > 1_000_000, existsSync(snap) ? `${(statSync(snap).size / 1e6).toFixed(1)} MB` : "missing");
 
   // ── 7. 设置页：镜像源 + 并发 ──────────────────────────────
-  await page.goto(`${DEV}/settings`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1500);
+  await page.goto(`${DEV}/settings`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.waitForTimeout(1200);
+  await killBanners(page);
   const settingsText = await page.evaluate(() => document.body.innerText);
   t("⑦ 设置：下载源可选", /下载源|镜像/.test(settingsText), "");
   t("⑦ 设置：并发可见（12）", /并发|12/.test(settingsText), "");
