@@ -33,7 +33,7 @@ export default function DebugConsole() {
         <div style={bannerRowStyle} key={entry.kind} data-banner-kind={entry.kind}>
           <span style={{ flex: 1 }}>
             {entry.message}
-            {entry.hint ? <span style={bannerHintStyle}>　{entry.hint}</span> : null}
+            {entry.hint ? <span style={bannerHintStyle}>{" "}{entry.hint}</span> : null}
           </span>
           <button
             onClick={() => {
