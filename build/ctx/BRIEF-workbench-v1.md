@@ -28,15 +28,15 @@ Chromium 用 `playwright-core` + `/snap/bin/chromium`（写法抄 `build/ed-win-
 
 | 归属 | 文件 | 写者 |
 |---|---|---|
-| 设置存储 | `frontend/src/lib/appSettings.ts` | P1 |
-| 素材路由 / 源目录 / 快照抓取 / 镜像工具 | `src/akstage/assetRouting.js`、`src/akstage/engineCatalog.js`、`scripts/mirror/*`、`.github/workflows/publish-mirror.yml` | P1 |
-| 引擎「随包快照」 | `scripts/fanfic/build-engine-bundle.mjs`、`src-tauri/src/engine_snapshot.rs`、`frontend/src/lib/enginePack.ts` | P1 |
-| 引擎加载 / 下载并发 / 设置页 | `frontend/src/lib/{engineBoot,predownload,storyPlayerAdapter,storyPlayerBoot}.ts`、`frontend/src/pages/SettingsPage.tsx` | P1 |
-| 窗口内容（舞台=P2 / 分支图=T6） | `frontend/src/components/editor/{StagePane.tsx,stageModel.ts}` = **P2**；`BranchGraph.tsx` = **T6** | P2 / T6 |
-| 布局模型（纯函数） | `frontend/src/components/editor/workbenchLayout.ts` | P3 |
-| 栈模型 / 窗口容器 | `frontend/src/components/editor/{workbenchStack.ts,InspectorWindow.tsx,Workbench.tsx,workbench.css}` | P4 |
-| 编辑器页接线 + 页面 CSS | `frontend/src/pages/StoryEditorPage.tsx`、`frontend/src/styles/{browser.css,editor-windows.css}` | P5 |
-| 测试主线 | `tools/lint/`、`src/akstage/analyze.mjs`、`scripts/lib/playwright-env.mjs` | P6 |
+| 设置存储 `appSettings.ts`、素材路由 `assetRouting.js`、源目录 `engineCatalog.js`、`scripts/mirror/*`、`.github/workflows/publish-mirror.yml` | `frontend/src/lib/appSettings.ts`、`src/akstage/{assetRouting,engineCatalog}.js`、`scripts/mirror/`、`tools/mirror/versions.json` | **P1** |
+| 引擎「随包快照」+ 引擎加载 | `scripts/fanfic/build-engine-bundle.mjs`、`src-tauri/resources/engine/**`、`src-tauri/src/engine_snapshot.rs`、`frontend/src/lib/{enginePack,engineBoot,predownload,storyPlayerAdapter,storyPlayerBoot}.ts`、`src-tauri/src/lib.rs`(注册命令) | **P6** |
+| 布局模型（纯函数） | `frontend/src/components/editor/{workbenchLayout.ts,workbenchStack.ts,history.ts(只读)}` | **P3** |
+| 容器 / 拼接交互 | `frontend/src/components/editor/{Workbench.tsx,workbench.css}` | **P3** |
+| 窗口壳（dock/map 语义 + 迁移） | `frontend/src/components/editor/{InspectorWindow.tsx,windowState.ts,inspectorWindow.css}` | **P4** |
+| 编辑器页接线 + 页面 CSS | `frontend/src/pages/StoryEditorPage.tsx`、`frontend/src/styles/{browser.css,editor-windows.css}` | **P5** |
+| 窗口内容：舞台 | `frontend/src/components/editor/{StagePane.tsx,stageModel.ts,stageZoom.ts}`、`frontend/src/lib/stageCatalog.ts` | **P2** |
+| 窗口内容：分支图 | `frontend/src/components/editor/BranchGraph.tsx`、`src/akstage/local/branchGraph.js`、`frontend/src/components/editor/branchGraph.css` | **T6** |
+| harness / 验收 | `build/harness/**`、`build/lint/**` | **Lead** |
 
 ## 2. 逐字契约（harness 按这些字符串/形状断言）
 
@@ -55,7 +55,7 @@ localStorage：布局 `prts-editor-wb:default`、命名 `prts-editor-wb:<name>`�
      **迁移**：旧的 `prts-editor-windows:*`（readWindowState 形状 `{kind:"dock",side}` | `{kind:"float",rect}`）只读一次后删除。
 ```
 
-### 2.2 `frontend/src/components/editor/inspectorWindow.ts`（P4 写；T6 会 import，缺文件时 T6 自带行内 stub 类型）
+### 2.2 窗口壳契约：`frontend/src/components/editor/inspectorWindow.ts`（P4 写；P2/T6 的 chrome props 用它）
 
 ```ts
 export interface PanelChromeProps {
@@ -69,7 +69,7 @@ export interface PanelChromeProps {
 //   class 名：.sp-chrome / .bg-chrome / .sp-fold / .bg-fold / .is-active
 ```
 
-### 2.3 `frontend/src/components/editor/workbenchStack.ts`（P4 写：布局树纯模型，无 DOM）
+### 2.3 `frontend/src/components/editor/workbenchStack.ts`（P3 写：布局树纯模型，无 DOM）
 
 ```ts
 export type PanelId = "toolpanel" | "stage" | "preview" | "branch";
@@ -128,7 +128,7 @@ export function defaultStageSelection(): string[];
 export function resolveStageUrl(key: string, source: string): string;
 ```
 
-### 2.7 横幅 / 状态契约（Lead 写；P1/T6 只读）
+### 2.7 横幅 / 状态契约（**P6 写** `debugLog.ts`；其他人只读）
 
 ```ts
 // frontend/src/lib/debugLog.ts
