@@ -52,3 +52,21 @@ node build/ctx/… 见 build/harness/*.mjs
 npx tsc -b frontend                                   # 类型
 npm run test:editor && npm run test:stage             # 编辑器 / 舞台内核
 ```
+
+## 5. 已知门槛（人工）
+
+- 镜像仓 `djkcyl/arkstage-mirror`（或 `assetRouting.js` 的 `MIRROR_REPO/MIRROR_REF`）需**先建空仓 + 配 `MIRROR_TOKEN`（contents:write）**，再手动跑一次 `.github/workflows/publish-mirror.yml`（只发引擎层 25 条 / ~17.6 MB）。未跑前 jsd/fastly/ghproxy 404 是**预期**，`buildSourceOrder` 会自动回退 `pack` → 官方直链。
+- Windows / Android 上需真机验证 `snapshot.json` 的 `include_bytes!` 包体与 CSP；`snapshot.json` 升级引擎时由 `scripts/fanfic/build-engine-bundle.mjs` 重生成，并 bump `src-tauri/resources/engine/v<N>/`。
+
+## 6. 2026-10-11 反馈对照
+
+| 用户原话 | 落点 |
+|---|---|
+| 舞台缩放只有 100%/50% | `stageZoom.ts` 连续缩放 + 滚轮锚点 + `适配/1:1/百分比` |
+| 检视器在工具面板，不该有脱离按钮；是显示/隐藏 | `toolpanel`/`stage` = `shellKind:"dock"`（**无 ⧉ 无 ✕**）；「检视器」退化为 `toolpanel` 内折叠区 |
+| 不能拼接工作区、自由调换位置 | `workbenchStack` + `Workbench.tsx`：拖标题条吸附分屏、中心换位、分隔条调尺寸、`prts-editor-wb:*` 持久化 |
+| 分支图不能移动、排版难看 | `layoutGraph()` dify 风分层 DAG（零重叠/正交折线/`⤢ 适配`/平移缩放） |
+| data:URL 资源加载失败噪音 | `pushStatus` 单条人话横幅 + `data:`/`blob:` 静默 + 重试 2 次（1.5s/3s） |
+| 不要每次爬、要缓存、素材随包 | `resources/engine/v1`（3.4 MB，`include_bytes!`）+ pack→cache→network |
+| 设计里可以换下载镜像源 | 设置 → 「下载源」（pack/prts/jsd/fastly/ghproxy/custom）+ `assetRouting.js` 源表 |
+| 并发拉满 | `downloadConcurrency=12`（滑杆 1…32）、`manifestConcurrency=10`、默认不限速 |
