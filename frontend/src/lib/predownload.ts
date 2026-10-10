@@ -9,6 +9,7 @@ import { localStoryOverride, resetLocalStories, setBundleProvider } from "./loca
 import { activePackId, hasPackAsset, packAssetCount, packAssetMissCount, packManifestUrls, resolvePackAsset } from "./packAssets";
 import { storyPlayerStaticAssets, validateStoryPlayer } from "./storyPlayerAdapter";
 import {
+  isTauriRuntime,
   loadBundledEngine,
   markBundleSource,
   noteNetworkSuccess,
@@ -84,7 +85,7 @@ interface RawStoryRuntime {
 }
 
 export interface StoryRuntime extends RawStoryRuntime {
-  source: "live" | "cache" | "legacy-cache" | "local";
+  source: "live" | "cache" | "legacy-cache" | "local" | "bundled";
   warning?: string;
   /** Previous verified generation, used if visible-mode boot rejects the candidate. */
   fallback?: RawStoryRuntime;
@@ -203,6 +204,21 @@ function isSuspiciousRegression(fresh: WidgetBundle, cached: WidgetBundle): bool
     || (a.engine_script_bytes ?? 0) < (b.engine_script_bytes ?? 0) * 0.7;
 }
 
+/**
+ * 无 Tauri（浏览器 / Vite harness）时的最小可用 runtime：随包快照 + 一个占位脚本。
+ * 预览/探针本来就会用自己那份文本覆盖 `story.script`，这里只保证 bundle 是真的。
+ */
+async function bundledProbeRuntime(title: string): Promise<StoryRuntime | null> {
+  const pack = await loadBundledEngine();
+  if (!pack) return null;
+  return {
+    story: { script: `[HEADER(key="${title || "probe"}", is_skippable=true)]\n`, title: title || "probe" },
+    bundle: pack.bundle,
+    revision: pack.revision,
+    source: "bundled",
+  };
+}
+
 /** Exact-page, fresh-first script + engine/data snapshot for interactive playback. */
 export function loadStoryRuntime(title: string): Promise<StoryRuntime> {
   let promise = storyRuntimePromises.get(title);
@@ -224,6 +240,12 @@ async function refreshStoryRuntime(title: string): Promise<StoryRuntime> {
   resetLocalStories(); // 允许刚安装/删除的剧本包被立刻看到
   const local = await localStoryOverride(title);
   if (local) return { ...local, source: "local" };
+  // 浏览器探针（Vite dev server / harness）：没有 Rust，缓存与网络都不可达；
+  // 直接用**随包快照**给出一份可供预览的 runtime（脚本由调用方覆盖）。
+  if (!isTauriRuntime()) {
+    const probe = await bundledProbeRuntime(title);
+    if (probe) return probe;
+  }
   const key = `story-runtime-v6_${title.replace(/\//g, "_")}`;
   const previousKey = `${key}-previous`;
   let cached: RawStoryRuntime | null = null;

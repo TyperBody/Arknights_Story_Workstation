@@ -21,7 +21,10 @@ static SNAPSHOT_JSON: &[u8] = include_bytes!("../resources/engine/v1/snapshot.js
 /// The compiled-in metadata sidecar (`{version, entry, revision, bytes, …}`).
 static META_JSON: &[u8] = include_bytes!("../resources/engine/v1/meta.json");
 
-/// Where the runtime `WidgetBundle` picks the bundled engine up (see `models.rs`).
+/// `WidgetBundle.revision` used for the shipped snapshot (frontend mirrors this
+/// shape in `enginePack.ts`: `bundled:<revision>`). Exposed for the probe/UI so
+/// the prefix lives in exactly one place.
+#[allow(dead_code)]
 pub const BUNDLED_REVISION_PREFIX: &str = "bundled:";
 
 /// Summary of the compiled-in pack. Mirrors `meta.json` plus live byte counts.
@@ -55,11 +58,6 @@ fn meta_value() -> Result<&'static serde_json::Value, String> {
     .map_err(Clone::clone)
 }
 
-/// Bytes of the compiled-in snapshot (for the probe / cache bookkeeping).
-pub fn snapshot_len() -> u64 {
-    SNAPSHOT_JSON.len() as u64
-}
-
 /// Parse the built-in bundle into JSON. `Err` only when the shipped file is
 /// corrupt, which makes the frontend fall through to cache → network.
 pub fn snapshot_value() -> Result<serde_json::Value, String> {
@@ -79,7 +77,6 @@ pub fn engine_snapshot_info() -> Result<SnapshotInfo, String> {
     let text = snapshot_text()?;
     let snapshot: serde_json::Value = snapshot_value()?;
     let string_field = |name: &str| meta.get(name).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let number_field = |name: &str| meta.get(name).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let modules = snapshot.get("modules").and_then(|v| v.as_object()).map_or(0, |m| m.len());
     let styles = snapshot.get("styles").and_then(|v| v.as_object()).map_or(0, |m| m.len());
     let data = snapshot.get("data").and_then(|v| v.as_object()).map_or(0, |m| m.len());
@@ -158,7 +155,7 @@ mod tests {
             assert!(table.as_object().map_or(0, |t| t.len()) >= 100);
         }
         let text = engine_snapshot_read().unwrap();
-        assert_eq!(text.len() as u64, snapshot_len());
+        assert_eq!(text.len(), SNAPSHOT_JSON.len());
         let info = engine_snapshot_info().unwrap();
         assert_eq!(info.files, 13);
         assert!(info.bytes > 3_000_000);

@@ -668,18 +668,28 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
   const domains = discoverAssetDomains(...Object.values(snapshot.modules), ...Object.values(snapshot.styles));
   const probe = await probeEntry(snapshot.entry, domains);
   const failure = probe.ok ? null : probe.error;
-  const report = (fallbackLabel?: string): void => {
-    if (failure) announceEngineFailure(failure, fallbackLabel);
-    else announceEngineFailure({ url: snapshot.entry, reason: "加载超时" }, fallbackLabel);
+  /** 横幅文案只认**本条首选**（快照残缺/预检失败/加载失败三种，最先出现的赢）。 */
+  let failureNote: { url: string; httpStatus?: number | null; reason?: string } | null =
+    failure ? { url: failure.url, httpStatus: failure.httpStatus, reason: failure.reason } : null;
+  const noteOnce = (note: { url: string; httpStatus?: number | null; reason?: string }): void => {
+    if (!failureNote) failureNote = note;
   };
-  const failureText = (): string => (failure ? failure.reason : "加载超时");
+  const report = (fallbackLabel?: string): void => announceEngineFailure(
+    failureNote ?? { url: snapshot.entry, reason: "加载超时" },
+    fallbackLabel,
+  );
+  const failureText = (): string => failureNote?.reason || (failureNote?.httpStatus ? `HTTP ${failureNote.httpStatus}` : "加载超时");
+
+  // 首选 URL 的**预检**失败（harness 的 500 就命中这里）→ 立刻给出一条人话横幅；
+  // 引擎若仍能从 import map 起来，横幅降级为「已自动恢复」。
+  if (failure) report();
 
   // A) 首选候选：`bootOnce` 内部 = viaSrc → viaInline → 1.5s/3s 退避重试。
   try {
     const result = await bootOnce(opts, snapshot);
     if (!failure) noteNetworkSuccess();
     else if (source === "network") {
-      // 4xx/超时只影响「预检」，但引擎真的起来了：横幅降级为「已自动恢复」。
+      // 只影响「预检」，但引擎真的起来了：更新为「已自动恢复」。
       pushEngineStatus(
         `引擎模块预检失败：${snapshot.entry.split("/").pop()}（${failureText()}）；已自动恢复（重试成功）`,
         "点「重试」可再验证一次；或在 设置 → 资源 → 下载源 换成镜像",
@@ -688,7 +698,8 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
     return result;
   } catch (error) {
     pushLog("warn", `[StoryPlayer] 首选快照启动失败（${source}）：`, error);
-    // 先把「一条人话横幅」保证下来（失败可能没有可换源；页面 catch 之前必须能看到原因）。
+    // 保证页面 catch 之前**已有**一条人话横幅（失败可能没有可换源）。
+    noteOnce({ url: snapshot.entry, reason: error instanceof Error ? error.message.slice(0, 120) : "加载失败" });
     report();
     // B) 换源：pack → disk cache（各一次）。与首选同代（字节签名相同）的跳过。
     const candidates = await fallbackSnapshots(snapshot);

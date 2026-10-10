@@ -73,8 +73,9 @@ export default function StoryPlayerPage() {
         // refresh fails, a validated last-known-good snapshot is retained visibly.
         setStatus(`正在同步剧情与演出引擎: ${decodedTitle}...`);
         const runtime = await loadStoryRuntime(decodedTitle);
-        // 本地二创剧本包（source==="local"）天然离线，没有「PRTS 同步」可谈。
-        if (runtime.source !== "live" && runtime.source !== "local") {
+        // 本地包（`local`）与浏览器探针的随包快照（`bundled`）天然离线，
+        // 没有「PRTS 同步失败」可谈。
+        if (runtime.source !== "live" && runtime.source !== "local" && runtime.source !== "bundled") {
           setSyncWarning("PRTS 同步失败，当前使用上次验证成功的离线快照；建议联网后重新进入。\n" + (runtime.warning || ""));
         }
         if (cancelled) return;
