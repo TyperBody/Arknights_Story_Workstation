@@ -11,7 +11,7 @@ import {
   type LazyExoticComponent,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import InspectorWindow from "../components/editor/InspectorWindow";
+import InspectorWindow, { type WindowState } from "../components/editor/InspectorWindow";
 import { registerWindowSpecs, type PanelChromeProps } from "../components/editor/inspectorWindow";
 import Workbench from "../components/editor/Workbench";
 import {
@@ -25,6 +25,7 @@ import {
   type PanelId,
   type WorkbenchState,
 } from "../components/editor/workbenchStack";
+import { clampWindowState, type FloatRect } from "../components/editor/windowState";
 import {
   DEFAULT_LAYOUT_NAME,
   PANELS,
@@ -1008,6 +1009,8 @@ export default function StoryEditorPage() {
   const [folded, setFolded] = useState<PanelId[]>([]);
   /** 面板「活跃」环（chrome.active）。 */
   const [selected, setSelected] = useState<PanelId | null>(null);
+  /** Map 面板按 `⧉` 浮出工作台时的矩形（`undefined` = 在树里）。 */
+  const [floats, setFloats] = useState<Partial<Record<PanelId, FloatRect>>>({});
   /** 撤销 / 重做（覆盖打字、拖立绘、表单、模板、补全——全走 applyEdit/onChange）。 */
   const historyRef = useRef(createHistory({ limit: 200, mergeMs: 500 }));
   const [historySizes, setHistorySizes] = useState({ undo: 0, redo: 0 });
@@ -2598,24 +2601,60 @@ export default function StoryEditorPage() {
     </div>
   );
 
-  /** 面板内容分发（`Workbench.renderPanel`）。 */
+  /** 面板的窗口壳状态：`floats[id]` 有值 = 该 Map 面板正浮在工作台上。 */
+  const winStateFor = (id: PanelId) =>
+    floats[id] ? ({ kind: "float", rect: floats[id] } as const) : ({ kind: "dock", side: id === "stage" ? "left" : "right" } as const);
+
+  /** `⧉` / 双击标题条：浮动 ↔ 停靠（受控；布局树不动）。 */
+  const onWinChange = useCallback(
+    (id: PanelId, next: WindowState) => {
+      const spec = specOf(id);
+      setFloats((prev) => {
+        if (next.kind === "float") {
+          // 浮动窗别缩成一条：Map 面板（预览 / 分支图）至少 300 高（图/iframe 要地方）。
+          const clamped = clampWindowState(next, boundsRef.current, spec.minW, Math.max(spec.minH, 300));
+          return clamped.kind === "float" ? { ...prev, [id]: clamped.rect } : prev;
+        }
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
+    },
+    []
+  );
+
+  /**
+   * 面板内容分发（`Workbench.renderPanel`）：窗口壳（dock / map / float）包一层
+   * `wb-shell`。浮动时标题条由**壳自己**拖动（指针像素），所以把 pointerdown 拦住，
+   * 别让 `Workbench` 的 `[data-drag-handle]` 会话再接管（那会把浮动窗当成树里的块）。
+   */
   const renderPanelFor = (id: PanelId) => {
     const body =
       id === "toolpanel" ? renderToolpanel() : id === "stage" ? renderStagePane() : id === "preview" ? renderPreviewPane() : renderBranchPane();
     return (
+      <div
+        className="wb-shell"
+        onPointerDown={(event) => {
+          if (floats[id]) event.stopPropagation();
+        }}
+      >
       <InspectorWindow
         title={specOf(id).title}
-        state={{ kind: "dock", side: id === "stage" ? "left" : "right" }}
-        onChange={() => undefined}
+        state={winStateFor(id)}
+        onChange={(next) => onWinChange(id, next)}
         shellKind={isMapPanel(id) ? "map" : "dock"}
         bounds={bounds}
         minW={specOf(id).minW}
         minH={specOf(id).minH}
         chrome={chromeFor(id)}
+        // 浮动窗用「像素 rect」：`percentRect` 的分母是 `bounds`（整页），
+        // 而工作台里 `[data-wb-panel]` 是定位父 → 百分比会走样，改绝对像素。
+        absoluteRect
         onClose={isMapPanel(id) ? () => mapToggle(id) : undefined}
       >
         {body}
       </InspectorWindow>
+      </div>
     );
   };
 

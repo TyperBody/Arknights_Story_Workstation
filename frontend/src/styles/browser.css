@@ -2176,6 +2176,8 @@
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
+  /* 浮动窗超出 slot 时不许把整页撑出滚动条。 */
+  overflow: hidden;
 }
 
 .wb-stage > [data-workbench] {
@@ -2226,5 +2228,26 @@
 
 .ed-branch-wrap > .ed-graph {
   flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 浮动窗（`⧉` / 双击 Map 标题条）：壳自己给 left/top/width/height（受控 rect）。
+   `Workbench` 的 `[data-wb-panel]` 是 `position: relative` 的槽位 → 这里补一条
+   「脱离文档流」，让浮动窗真的浮在工作台上（而不是把槽位撑开）。 */
+[data-workbench] [data-wb-panel] {
+  overflow: visible;
+}
+
+[data-workbench] [data-wb-panel] > .ed-win--float {
+  position: absolute;
+  margin: 0;
+}
+
+/* 面板壳 wrapper：撑满 slot（窗口壳自己撑满），不做别的。 */
+.wb-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
 }
