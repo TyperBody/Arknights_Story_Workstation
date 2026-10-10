@@ -218,6 +218,7 @@ SessionStart 立刻 POST 并跳到下一段（重复条目用于对拍）；`nor
 
 ## 7. 产出（Definition of Done）
 
+
 - [ ] `pack.json` 的 `id` == 目录名 == wikitext 的 `文本路径`；
 - [ ] `node scripts/fanfic/lint.mjs <packDir>` 无 error（报告形状见
       `reference/package.md` §9）；
