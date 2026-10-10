@@ -120,6 +120,120 @@ export function adaptStoryPlayerEntry(source: string): string {
     + (parseFn.length === 1 ? `window.__arkstageParse=${parseFn[0].id!.name};` : "");
 }
 
+/** 模块来源：`network`=PRTS 直连；`pack`/`cache`=本地已验证快照。 */
+export type ModuleSource = "pack" | "cache" | "network";
+
+/** 一个模块 URL 的抓取结果（成功）；失败抛 `StoryPlayerModuleError`。 */
+export interface StoryPlayerModule {
+  url: string;
+  source: ModuleSource;
+  bytes: number;
+  source_code: string;
+}
+
+/**
+ * 模块抓取/校验失败：带 URL + HTTP 状态 + 来源，供横幅显示「人话」。
+ * `reason` 是人类可读的短句（`HTTP 404` / `网络错误` / `空响应`）。
+ */
+export class StoryPlayerModuleError extends Error {
+  readonly url: string;
+  readonly httpStatus: number | null;
+  readonly bytes: number;
+  readonly source: ModuleSource;
+  readonly reason: string;
+
+  constructor(input: {
+    url: string;
+    source?: ModuleSource;
+    httpStatus?: number | null;
+    bytes?: number;
+    reason?: string;
+    cause?: unknown;
+  }) {
+    const status = typeof input.httpStatus === "number" && input.httpStatus > 0 ? input.httpStatus : null;
+    const reason = status ? `HTTP ${status}` : (input.reason || "网络错误");
+    super(`StoryPlayer 模块加载失败: ${input.url} (${reason})`);
+    this.name = "StoryPlayerModuleError";
+    this.url = input.url;
+    this.httpStatus = status;
+    this.bytes = input.bytes ?? 0;
+    this.source = input.source ?? "network";
+    this.reason = reason;
+    if (input.cause !== undefined) (this as { cause?: unknown }).cause = input.cause;
+  }
+}
+
+/** HTTP 语义上「重试还有意义」的状态码（5xx/408/425/429）；
+ *  4xx（404/403…）不停在首选上重试，直接换源更划算。 */
+export function retryableStatus(status: number | null | undefined): boolean {
+  if (status == null) return true; // 网络层错误（含 CORS 失败）：值得重试
+  return status >= 500 || status === 408 || status === 409 || status === 425 || status === 429;
+}
+
+/**
+ * 抓取一个 StoryPlayer 模块源码（fetch 失败 / 非 2xx → 抛 `StoryPlayerModuleError`）。
+ * 只**新增**导出，不改动既有函数签名。
+ *
+ * 注意：`static.prts.wiki`（模块图 CDN）**不带 `access-control-allow-origin`**，
+ * 浏览器里 `fetch()` 会以 CORS 失败（`TypeError: Failed to fetch` → `reason=网络错误`，
+ * 拿不到 HTTP 状态）；带 ACAO 的镜像（code.jquery.com / cdn.jsdelivr.net）能拿到
+ * 状态码，横幅就会显示 `HTTP 500`。引擎真正的加载仍走 `<script type=module src>`
+ * 或 import map（data: URL），这里只是「开机前看一眼首选 URL 健不健康 + 拿字节
+ * 供 pack 换源用」。
+ */
+export async function fetchModuleSource(
+  url: string,
+  options: { source?: ModuleSource; fetchImpl?: typeof fetch; init?: RequestInit } = {}
+): Promise<StoryPlayerModule> {
+  const source = options.source ?? "network";
+  const doFetch = options.fetchImpl ?? fetch;
+  let response: Response;
+  try {
+    response = await doFetch(url, { cache: "no-store", ...(options.init ?? {}) });
+  } catch (error) {
+    throw new StoryPlayerModuleError({ url, source, reason: "网络错误", cause: error });
+  }
+  if (!response.ok) {
+    throw new StoryPlayerModuleError({ url, source, httpStatus: response.status, bytes: 0 });
+  }
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    throw new StoryPlayerModuleError({ url, source, httpStatus: response.status, reason: "读取失败", cause: error });
+  }
+  if (!text.trim()) {
+    throw new StoryPlayerModuleError({ url, source, httpStatus: response.status, bytes: 0, reason: "空响应" });
+  }
+  return { url, source, bytes: text.length, source_code: text };
+}
+
+/** 把一批 URL 按 `limit` 路并发抓完（`manifestConcurrency` 的消费点，默认 10）。
+ *  结果按**输入顺序**返回；单个失败不影响其它项。 */
+export async function fetchModulesConcurrently(
+  urls: readonly string[],
+  options: { source?: ModuleSource; limit?: number } = {}
+): Promise<Array<{ url: string; bytes: number; error?: unknown }>> {
+  const source = options.source ?? "network";
+  const limit = Math.max(1, Math.min(32, options.limit ?? 10));
+  const results: Array<{ url: string; bytes: number; error?: unknown }> = new Array(urls.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      if (index >= urls.length) return;
+      try {
+        const fetched = await fetchModuleSource(urls[index], { source });
+        results[index] = { url: urls[index], bytes: fetched.bytes };
+      } catch (error) {
+        results[index] = { url: urls[index], bytes: 0, error };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, urls.length) }, worker));
+  return results;
+}
+
 /** Normalize imports before blob loading; the import map preserves cycles and
  * shared module identity, including Pixi's lazy renderer chunks.
  */

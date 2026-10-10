@@ -133,7 +133,7 @@ async function readBundledSnapshot(): Promise<StoryPlayerSnapshot | null> {
   }
   if (!inTauri() && import.meta.env.DEV) {
     try {
-      const module = await import("../../src-tauri/resources/engine/v1/snapshot.json");
+      const module = await import("../../../src-tauri/resources/engine/v1/snapshot.json");
       return ((module as { default?: StoryPlayerSnapshot }).default ?? (module as unknown as StoryPlayerSnapshot)) ?? null;
     } catch (error) {
       pushLog("info", "[engine-pack] 浏览器里没有随包快照（走 cache/network）:", error);
@@ -170,7 +170,7 @@ async function readMetaOnce(): Promise<EngineSnapshotInfo | null> {
   }
   if (import.meta.env.DEV) {
     try {
-      const module = await import("../../src-tauri/resources/engine/v1/meta.json");
+      const module = await import("../../../src-tauri/resources/engine/v1/meta.json");
       return ((module as { default?: EngineSnapshotInfo }).default ?? null) as EngineSnapshotInfo | null;
     } catch {
       /* 无 meta 也能跑：标签退化成 `v1`。 */
@@ -311,6 +311,19 @@ export function announceEngineFailure(
 /** 当前是否有 engine 横幅（boot 用来避免同一次失败重复刷屏）。 */
 export function engineFailureShown(): boolean {
   return statusEntries().some((entry) => entry.kind === STATUS_KIND);
+}
+
+/** 通用：写一条 engine 横幅（boot 的「已自动恢复」等场景；同 kind 去重）。 */
+export function pushEngineStatus(message: string, hint?: string): void {
+  pushStatus(STATUS_KIND, message, hint);
+}
+
+/** 横幅已存在 → 补一句「已回退到 X」（同 kind 复用，不刷屏）。 */
+export function annotateFallback(
+  failure: { url: string; httpStatus?: number | null; reason?: string },
+  label: string,
+): void {
+  announceEngineFailure(failure, label);
 }
 
 /** 网络版快照**完整**成功（结构校验 + 启动校验 + 落盘）→ 清掉引擎横幅。 */

@@ -1,9 +1,26 @@
-import type { FrameBootOptions, FrameBootResult } from "./engineBoot";
+import type { FrameBootOptions, FrameBootResult, WidgetBundle } from "./engineBoot";
 import { captureIframe, pushLog } from "./debugLog";
 import { PROXY_BASE, discoverAssetDomains, proxyUrl, rewriteAllCdnUrls } from "./proxy";
 import { packAssetCount, packAssetMissCount, packAssetShimAvailable, packAssetShimCode, resolvePackAsset as resolvePackAssetLive } from "./packAssets";
 import { getPlayerChrome, type PlayerChrome } from "./uiSettings";
-import { adaptStoryPlayerEntry, prepareModule, storyPlayerStaticAssets, validateStoryPlayer, type StoryPlayerSnapshot } from "./storyPlayerAdapter";
+import {
+  announceEngineFailure,
+  annotateFallback,
+  bundleSource,
+  ENGINE_RETRY_DELAYS_MS,
+  fallbackSnapshots,
+  noteNetworkSuccess,
+  pushEngineStatus,
+} from "./enginePack";
+import {
+  adaptStoryPlayerEntry,
+  fetchModuleSource,
+  prepareModule,
+  storyPlayerStaticAssets,
+  validateStoryPlayer,
+  StoryPlayerModuleError,
+  type StoryPlayerSnapshot,
+} from "./storyPlayerAdapter";
 
 interface PlayerContext { script: string[] | Record<string, unknown>[]; scriptText: string; linkMap: Record<string, unknown> }
 interface StoryPlayerWindow extends Window {
@@ -302,14 +319,61 @@ export function disposeEngineFrame(iframe: HTMLIFrameElement): void {
   iframe.contentDocument?.querySelectorAll("audio,video").forEach((el) => (el as HTMLMediaElement).pause());
 }
 
-export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBootResult> {
-  const snapshot = opts.bundle.story_player!;
-  const problems = validateStoryPlayer(snapshot);
-  if (problems.length) throw new Error(problems.join("；"));
+/** `FrameBootOptions.bundle` 的替换（boot 内部换源用；`dom_html` 等原样保留）。 */
+function withSnapshot(bundle: WidgetBundle, snapshot: StoryPlayerSnapshot): WidgetBundle {
+  return { ...bundle, story_player: snapshot };
+}
+
+/** Tauri 运行时（`window.__TAURI_INTERNALS__` 由壳注入）。 */
+function inTauriShell(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/**
+ * 首选候选的**预检**：抓一次入口 URL，拿到 HTTP 状态 / 网络错误。
+ *
+ * 目标 URL：
+ * - Tauri 内：`prts-cdn://`（协议处理器自动带 ACAO、并把上游状态原样带回）；
+ * - 浏览器（dev harness）：原始 https URL（`static.prts.wiki` 不带 ACAO →
+ *   CORS 失败记为「网络错误」；harness 用 `page.route` 能给出真 `HTTP 500`）。
+ */
+async function probeEntry(url: string, domains: string[]): Promise<
+  { ok: true } | { ok: false; error: StoryPlayerModuleError }
+> {
+  const target = inTauriShell() && url.startsWith("https://") ? proxyUrl(url, domains) : url;
+  try {
+    await fetchModuleSource(target, { source: "network" });
+    return { ok: true };
+  } catch (error) {
+    const typed = error as { httpStatus?: number | null; reason?: string };
+    return {
+      ok: false,
+      error: new StoryPlayerModuleError({
+        // 横幅里显示**原始** URL 的文件名，而不是代理地址。
+        url,
+        httpStatus: typed?.httpStatus ?? null,
+        reason: typed?.reason ?? "网络错误",
+        cause: error,
+      }),
+    };
+  }
+}
+
+/**
+ * 起一次「某个候选快照」的引擎。换源复用同一个 iframe：`doc.open()/write()`
+ * 会把文档重置回干净 realm（与原实现一致）。
+ *
+ * 一个候选的加载阶梯（BRIEF §0.5）：`viaSrc()` → `viaInline()` →
+ * 退避重试 1.5s / 3s（共 2 次）→ 抛错给上层换源。全程**静默**。
+ */
+async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): Promise<FrameBootResult> {
   const doc = opts.iframe.contentDocument;
   const win = opts.iframe.contentWindow as StoryPlayerWindow | null;
   if (!doc || !win) throw new Error("StoryPlayer iframe unavailable");
-  const domains = discoverAssetDomains(...Object.values(snapshot.modules), ...Object.values(snapshot.styles));
+  const issues = validateStoryPlayer(snapshot);
+  if (issues.length) throw new Error(issues.join("；"));
+  // harness 用它区分「白屏」与「已在跑（含降级）」。
+  doc.documentElement.setAttribute("data-arkstage-boot", "play");
   // 自带素材（`build/assets.local.json`）：可以解析成 iframe realm 也要用的静态表
   const packAssetsShim = opts.mode === "play" && packAssetShimAvailable() ? packAssetShimCode() : null;
   const cancelled = () => opts.isCancelled?.() || !opts.iframe.isConnected;
@@ -317,6 +381,7 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
   /** entry URL → 已重写的源码；行内注入优先用它（blob: 在部分 WebView2 上被拦）。 */
   const moduleSources = new Map<string, string>();
   const sourceFor = (url: string) => moduleSources.get(url);
+  const domains = discoverAssetDomains(...Object.values(snapshot.modules), ...Object.values(snapshot.styles));
   // 自带素材的静态表：包内文件优先于任何网络/缓存路径。
   const packLocalUrl = (value: unknown): string | null => {
     if (!packAssetsShim) return null;
@@ -328,6 +393,7 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
     if (typeof fn !== "function") return null;
     try { return fn(value) ?? null; } catch { return null; }
   };
+
   let disposed = false;
   win.__arkstageDispose = () => {
     if (disposed) return;
@@ -445,12 +511,12 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
       // 上会以 error 事件失败（只留一句「resource load failed: blob:…」）。两条
       // 路径等价（相对导入已绝对化 + import map 保持模块恒等性）。
       let inlineOnly = Boolean((win as unknown as { __arkstageForceInline?: boolean }).__arkstageForceInline);
-      let index = 0;
-      for (const entry of [...(snapshot.prelude ?? []), snapshot.entry]) {
-        index += 1;
-        const isEntry = entry === snapshot.entry;
+      /** 单个模块的加载阶梯：`viaSrc` → `viaInline`；两级都挂 → 退避 1.5s/3s
+       *  再走一遍（共 2 次重试）。总次数有界，横幅/日志只在最终失败时汇总。 */
+      const indexed = new Map<string, number>();
+      const loadModule = async (entry: string, isEntry: boolean): Promise<void> => {
         const src = imports[opts.mode === "play" ? proxyUrl(entry, domains) : entry];
-        const viaSrc = async () => {
+        const viaSrc = async (): Promise<void> => {
           if (inlineOnly) throw new Error("inline-only");
           await new Promise<void>((resolve, reject) => {
             const script = doc.createElement("script");
@@ -463,13 +529,13 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
           });
         };
         /** 行内模块：完成哨兵写在模块体末尾；入口模块另有 __arkstageAPI 这个真实信号。 */
-        const viaInline = async () => {
-          const source = sourceFor(entry);
-          if (source === undefined) throw new Error("no inlined source");
-          const marker = `__arkstageModuleDone:${index}`;
+        const viaInline = async (): Promise<void> => {
+          const code = sourceFor(entry);
+          if (code === undefined) throw new Error("no inlined source");
+          const marker = `__arkstageModuleDone:${indexed.get(entry) ?? 0}`;
           const script = doc.createElement("script");
           script.type = "module";
-          script.textContent = `${source}\n;globalThis[${JSON.stringify(marker)}]=true;`;
+          script.textContent = `${code}\n;globalThis[${JSON.stringify(marker)}]=true;`;
           doc.body.appendChild(script);
           const deadline = Date.now() + (isEntry ? 30_000 : 10_000);
           while (Date.now() < deadline) {
@@ -482,21 +548,40 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
           if (isEntry && win.__arkstageAPI && win.__arkstageMount) return;
           throw new Error("inline timeout");
         };
-        try {
-          await viaSrc();
-        } catch (first) {
-          inlineOnly = true;
+        let attempt = 0;
+        for (;;) {
+          attempt += 1;
           try {
-            await viaInline();
-            pushLog("info", `[StoryPlayer] ${entry.split("/").pop()}: 行内注入（blob 失败：${String(first)}）`);
-          } catch (second) {
-            const extra = moduleErrors.length ? `（${moduleErrors.slice(0, 2).join(" | ")}）` : "";
-            const source = sourceFor(entry) ?? "";
-            const hint = source.includes("import(") ? "（模块含动态 import：可能是 chunk 解析失败）" : "";
-            pushLog("error", `[StoryPlayer] 模块失败 ${entry} 源长度=${source.length}${hint}`);
-            throw new Error(`StoryPlayer 模块执行失败: ${entry} — ${String(first)} / ${String(second)}${extra}${hint}`);
+            await viaSrc();
+            if (attempt > 1) pushLog("info", `[StoryPlayer] ${entry.split("/").pop()}: 第 ${attempt} 次尝试成功`);
+            return;
+          } catch (first) {
+            inlineOnly = true;
+            try {
+              await viaInline();
+              if (attempt > 1) pushLog("info", `[StoryPlayer] ${entry.split("/").pop()}: 第 ${attempt} 次尝试（行内）成功`);
+              return;
+            } catch (second) {
+              if (cancelled()) return;
+              if (attempt <= ENGINE_RETRY_DELAYS_MS.length) {
+                const wait = ENGINE_RETRY_DELAYS_MS[attempt - 1];
+                pushLog("warn", `[StoryPlayer] 模块 ${entry.split("/").pop()} 加载失败（第 ${attempt} 次）：${String(second)}；${wait / 1000}s 后重试`);
+                await new Promise((resolve) => setTimeout(resolve, wait));
+                continue;
+              }
+              const extra = moduleErrors.length ? `（${moduleErrors.slice(0, 2).join(" | ")}）` : "";
+              const code = sourceFor(entry) ?? "";
+              const hint = code.includes("import(") ? "（模块含动态 import：可能是 chunk 解析失败）" : "";
+              pushLog("error", `[StoryPlayer] 模块失败 ${entry} 源长度=${code.length} 尝试=${attempt}${hint}`);
+              throw new Error(`StoryPlayer 模块执行失败: ${entry} — ${String(first)} / ${String(second)}${extra}${hint}`);
+            }
           }
         }
+      };
+      for (const entry of [...(snapshot.prelude ?? []), snapshot.entry]) {
+        const isEntry = entry === snapshot.entry;
+        indexed.set(entry, (indexed.size ?? 0) + 1);
+        await loadModule(entry, isEntry);
         if (cancelled()) return {};
       }
     } finally {
@@ -542,6 +627,82 @@ export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBoot
     throw new Error("StoryPlayer 资源预加载超时");
   } catch (error) {
     win.__arkstageDispose();
+    throw error;
+  }
+}
+
+/**
+ * 加载策略（BRIEF §0.5「失败静默降级 + 一条人话横幅 + 自动重试 2 次」）：
+ *
+ * 1. 候选 A = `bundle.story_player`（网络/本地由 `enginePack` 的来源标注区分）；
+ * 2. 候选 A：`fetchModuleSource` 预检入口 URL（带 ACAO 的镜像 → `HTTP 500`；
+ *    `static.prts.wiki` 裸 fetch → 网络错误），随后 `bootOnce` 走
+ *    `viaSrc → viaInline → 退避重试 1.5s / 3s`；
+ * 3. A 失败 → 横幅**一条**（URL + HTTP 状态 + 来源）→ 换 pack → cache
+ *    （同一 iframe 重置再起）；
+ * 4. **只有网络版**完整成功（预检通过 + boot 成功）才 `noteNetworkSuccess()`
+ *    清横幅；pack/cache 成功时横幅保留，提示「网络版还没好」。
+ *
+ * 页面不白屏：失败会抛给页面 catch（编辑器/播放器都有 fallback UI），而横幅在
+ * 抛错前已经推过（harness #6 断言 `[data-asset-banner="1"]` + 文案含 HTTP 500）。
+ */
+export async function bootStoryPlayer(opts: FrameBootOptions): Promise<FrameBootResult> {
+  const source = bundleSource(opts.bundle);
+  const snapshot = opts.bundle.story_player!;
+  const issues = validateStoryPlayer(snapshot);
+  if (issues.length) {
+    // 首选快照本身残缺：网络版直接换 pack；本地版如实报错。
+    if (source === "network") {
+      const candidates = await fallbackSnapshots(snapshot);
+      const pack = candidates.find((candidate) => candidate.source === "pack");
+      if (pack) {
+        const label = pack.label ? `内置快照（${pack.label}）` : "内置快照";
+        pushLog("warn", `[StoryPlayer] 首选快照不完整，改用${label}`);
+        announceEngineFailure({ url: snapshot.entry, reason: issues[0] }, label);
+        return bootStoryPlayer({ ...opts, bundle: withSnapshot(opts.bundle, pack.snapshot) });
+      }
+    }
+    throw new Error(issues.join("；"));
+  }
+  const domains = discoverAssetDomains(...Object.values(snapshot.modules), ...Object.values(snapshot.styles));
+  const probe = await probeEntry(snapshot.entry, domains);
+  const failure = probe.ok ? null : probe.error;
+  const report = (fallbackLabel?: string): void => {
+    if (failure) announceEngineFailure(failure, fallbackLabel);
+    else announceEngineFailure({ url: snapshot.entry, reason: "加载超时" }, fallbackLabel);
+  };
+  const failureText = (): string => (failure ? failure.reason : "加载超时");
+
+  // A) 首选候选：`bootOnce` 内部 = viaSrc → viaInline → 1.5s/3s 退避重试。
+  try {
+    const result = await bootOnce(opts, snapshot);
+    if (!failure) noteNetworkSuccess();
+    else if (source === "network") {
+      // 4xx/超时只影响「预检」，但引擎真的起来了：横幅降级为「已自动恢复」。
+      pushEngineStatus(
+        `引擎模块预检失败：${snapshot.entry.split("/").pop()}（${failureText()}）；已自动恢复（重试成功）`,
+        "点「重试」可再验证一次；或在 设置 → 资源 → 下载源 换成镜像",
+      );
+    }
+    return result;
+  } catch (error) {
+    pushLog("warn", `[StoryPlayer] 首选快照启动失败（${source}）：`, error);
+    // B) 换源：pack → disk cache（各一次）。本地候选与首选同代时跳过。
+    const candidates = await fallbackSnapshots(snapshot);
+    for (const candidate of candidates) {
+      const label = candidate.source === "pack" ? `内置快照（${candidate.label ?? "内置"}）` : "本地缓存快照";
+      if (failure) annotateFallback(failure, label);
+      else report(label);
+      try {
+        const result = await bootOnce(opts, candidate.snapshot);
+        // pack/cache 成功 ≠ 网络版成功 → 横幅保留（BRIEF §3.5）。
+        pushLog("info", `[StoryPlayer] ${label} 启动成功（网络版仍不可用）`);
+        return result;
+      } catch (fallbackError) {
+        pushLog("warn", `[StoryPlayer] ${label} 启动失败：`, fallbackError);
+      }
+    }
+    if (!failure) report();
     throw error;
   }
 }
