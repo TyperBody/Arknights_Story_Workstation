@@ -17,3 +17,12 @@
   `storyPlayerBoot.ts(701)`、`StoryEditorPage.tsx(2691/2822/2823/2824)`（P6/P5 未完成，与 P1 无关）。
 - `tools/mirror/versions.json` = 引擎层 25 条、15,238,246 B（含 NotoSans.ttf 8.9 MB + NotoSansHans-Medium.woff2 6.3 MB）。
 - 待 Lead 决定：`.github/workflows/publish-mirror.yml` 与 `scripts/mirror/*` 未写（契约 §1 归 P1，非 task-1 验收项）。
+
+## 收尾补充（lead 追加的两件）
+- `.github/workflows/publish-mirror.yml`（commit `95effd0`）：workflow_dispatch（`include_assets` / `dry_run` / `target_repo` / `target_ref`），
+  Resolve target（默认取 `assetRouting.js` 的 MIRROR_REPO/MIRROR_REF）→ `build-versions.mjs --check` → `publish-engine.mjs --out /tmp/mirror-out`
+  → 用 `MIRROR_TOKEN` clone 目标仓 + rsync + commit（缺 token 只 warning 不红）→ 清单/暂存条数校验 → job summary。
+  本地演练：`MIRROR_OFFLINE=1 node tools/mirror/publish-engine.mjs --out /tmp/x`（只落占位），真实抓取 25 条 / 17.6 MB 已验证。
+- `assetRouting.js`：`SOURCE_HINTS`(jsd/fastly/ghproxy) + `MIRROR_REPO` 注释 + `mirrorUrl()` jsdoc 三处写明
+  **首次使用镜像前必须先跑 publish-mirror**；否则 404 → `buildSourceOrder` 兜底回 `pack`(=官方直链)。
+- selftest 增至 **94/94**（新增 A1 组：工作流存在/手动触发/token 可选/URL 形状/兜底回官方/SOURCE_HINTS 文案）。
