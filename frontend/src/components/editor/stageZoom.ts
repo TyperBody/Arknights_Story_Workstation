@@ -85,7 +85,8 @@ const toZoom = (value: number): number => {
   return number;
 };
 /** 缩放值量化到 1e-4：滚轮连点不积累浮点误差（1+0.1×7 = 1.7000000000000002）。 */
-const quantize = (value: number): number => Math.round(toZoom(value) * 1e4) / 1e4;
+export const quantizeZoom = (value: number): number => Math.round(toZoom(value) * 1e4) / 1e4;
+const quantize = quantizeZoom;
 /** 四位小数（去掉尾零）的字符串；非有限值兜 `0`。 */
 const num = (value: number): string => (Number.isFinite(value) ? String(Math.round(value * 1e4) / 1e4) : "0");
 
@@ -152,7 +153,8 @@ export function viewFor(zoom: number, canvas: ZoomCanvas = STAGE_CANVAS): ZoomVi
   const z = clampZoom(zoom);
   const w = canvas.w / z;
   const h = canvas.h / z;
-  return { x: -(w - canvas.w) / 2, y: -(h - canvas.h) / 2, w, h, zoom: z };
+  // `(cw − w) / 2`（不是 `−(w − cw) / 2`）：zoom = 1 时严格 0，不留 `-0`。
+  return { x: (canvas.w - w) / 2, y: (canvas.h - h) / 2, w, h, zoom: z };
 }
 
 /** `viewFor` 的 `<svg viewBox>` 字符串形态。 */
@@ -162,45 +164,83 @@ export function viewBoxOf(zoom: number, canvas: ZoomCanvas = STAGE_CANVAS): stri
 }
 
 /**
- * 滚轮/按钮缩放的**核心**：把 `delta` 加到 `zoom` 上，并给出保值后的 viewBox
- * 原点。`point` 是**画布坐标**上指针（或缩放中心）的位置。不变式（缩放前后
- * 该点落在同一 CSS 像素）：
+ * 滚轮/按钮缩放的**核心**：把 `delta` 加到 `zoom` 上，给出保值后的 viewBox
+ * 原点。`point` 是**画布坐标**上指针（缩放中心）的位置。
+ *
+ * 不变式（锚点在缩放前后落在同一 CSS 像素）：
  *
  * ```
- * css(p) = pad + (p - view) × unit × zoom = 常数
- * ⇒ view' = p − (p − view) × (zoom / zoom')        // = scale / scale'
+ * css(p) = pad + (p − view) × unit × zoom = 常数
+ * ⇒ view′ = p − (p − view) × (zoom / zoom′)
  * ```
  *
- * `scale' / scale` 在正常宿主上恰是 `zoom' / zoom`；写成 CSS 比例是为了宿主
- * 尺寸退化时也给出有限解。`clamp` 缺省 `clampZoom`（按钮「+1 档」可换）。
+ * `from`（可选）= **当前** viewBox 原点；缺省 `viewFor(zoom)`（居中）。
+ * 调用方（`StagePane` 的滚轮）必须把上一次的返回值当 `from` 传回来，缩放才
+ * 「跟手」；不传则每一档都以居中视口为基准（按钮/`适配` 用这个默认）。
  */
 export function zoomAt(
   zoom: number,
   point: ZoomPoint,
   delta: number,
-  box: ZoomBox,
+  box: ZoomBox = STAGE_CANVAS,
   clamp: (value: number) => number = clampZoom,
+  from?: ZoomPoint | ZoomView | null,
 ): ZoomAtResult {
   const current = clampZoom(zoom);
   const asked = quantize(current + (Number.isFinite(Number(delta)) ? Number(delta) : 0));
   const clamped = Number(clamp(asked));
   const next = clampZoom(Number.isFinite(clamped) ? clamped : DEFAULT_ZOOM);
+  const currentView = originOf(from, current);
   const nextView = viewFor(next);
-  const currentView = viewFor(current);
-  const scale = cssScale(current, box);
-  const nextScale = cssScale(next, box);
-  // scale 与 zoom 成正比（同一 baseUnit）→ 这个比值就是「旧缩放 / 新缩放」。
-  const k = nextScale > 0 ? scale / nextScale : current / (next > 0 ? next : 1);
+  // `view.w = canvas.w / zoom`，而 `1 画布 px = baseUnit × zoom` CSS px ——
+  // 两者互为倒数 ⇒ 「按 view 尺寸比例」与「按 CSS 比例」是同一个数：
+  // 宿主尺寸（`box`）只决定像素大小，不影响保值；`box` 退化(0×0)时同样有限。
+  const k = next > 0 ? current / next : 1;
   const px = Number.isFinite(Number(point?.x)) ? Number(point.x) : 0;
   const py = Number.isFinite(Number(point?.y)) ? Number(point.y) : 0;
-  const x = px - (px - currentView.x) * k;
-  const y = py - (py - currentView.y) * k;
+  // 宿主 0×0（尚未测量 / 被隐藏）时 CSS 空间退化：给「居中视口」这个确定的解。
+  const degenerate = !(cssScale(current, box) > 0 && cssScale(next, box) > 0);
+  const x = degenerate ? nextView.x : px - (px - currentView.x) * k;
+  const y = degenerate ? nextView.y : py - (py - currentView.y) * k;
   return {
     zoom: next,
-    // 数值抖动（1.3 − 0.3×1.3）噪声在 1e-15 量级：量化到 1e-4，几何对拍才稳。
-    x: Number.isFinite(x) && Math.abs(x - nextView.x) > 1e-3 ? Math.round(x * 1e4) / 1e4 : nextView.x,
-    y: Number.isFinite(y) && Math.abs(y - nextView.y) > 1e-3 ? Math.round(y * 1e4) / 1e4 : nextView.y,
+    // 量化到 1e-4：`1.3 − 0.3×1.3` 之类的抖动在 1e-15 量级，几何对拍才稳。
+    x: Number.isFinite(x) ? Math.round(x * 1e4) / 1e4 : nextView.x,
+    y: Number.isFinite(y) ? Math.round(y * 1e4) / 1e4 : nextView.y,
   };
+}
+
+/** `from` → 一个可用的 viewBox 原点（缺省居中；`NaN` 也兜底）。 */
+export function originOf(from: ZoomPoint | ZoomView | null | undefined, zoom: number): ZoomPoint {
+  const view = viewFor(zoom);
+  const x = Number(from?.x);
+  const y = Number(from?.y);
+  return {
+    x: Number.isFinite(x) ? x : view.x,
+    y: Number.isFinite(y) ? y : view.y,
+  };
+}
+
+/**
+ * 缩放锚点：宿主 **CSS px** → 画布坐标（`view` = 当前 viewBox 原点，缺省居中）。
+ * 滚轮的 `event.clientX/Y` 减宿主 `getBoundingClientRect()` 之后喂进来。
+ */
+export function anchorPoint(
+  zoom: number,
+  css: ZoomPoint,
+  box: ZoomBox,
+  canvas: ZoomCanvas = STAGE_CANVAS,
+  view?: ZoomPoint | null,
+): ZoomPoint {
+  const origin = originOf(view, zoom);
+  const unit = cssScale(zoom, box, canvas);
+  const boxUnit = baseUnit(box, canvas);
+  const padX = (Number(box?.w) - canvas.w * boxUnit) / 2;
+  const padY = (Number(box?.h) - canvas.h * boxUnit) / 2;
+  const scale = unit > 0 ? unit : 1;
+  const x = (Number(css?.x) - (Number.isFinite(padX) ? padX : 0)) / scale + origin.x;
+  const y = (Number(css?.y) - (Number.isFinite(padY) ? padY : 0)) / scale + origin.y;
+  return { x: Number.isFinite(x) ? x : origin.x, y: Number.isFinite(y) ? y : origin.y };
 }
 
 /** 滚轮 `deltaY` → 缩放增量：向上（`deltaY < 0`）放大、一格 `WHEEL_STEP`。 */

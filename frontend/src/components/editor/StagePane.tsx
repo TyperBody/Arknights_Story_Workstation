@@ -20,10 +20,13 @@
  * - **拖拽**：pointerup 时发**整段位移**（画布 px）。沿用的引擎语义见
  *   `stageModel.movePatch()`：`[Character]` 的 `xpos…`/`ypos…` 只是滑入起点，
  *   想留住位置要用 `CharacterAction(move)` / `charslot(setpos)` / `character.json` 的 `pos`。
- * - **缩放**：100%（铺满）与 50%（看全 1.25× 边距）两档；缩放只改 viewBox，
- *   几何数值不变（HUD 里显示的仍是画布 px）。
+ * - **缩放**：**连续** 25%…200%（`stageZoom.ts`）：滚轮以**指针为锚**、
+ *   `−`/`＋` 一格 10%、百分比按钮回 100%、`适配` 用 `fitZoom`、`1:1` = 100%。
+ *   缩放**只改 viewBox**，画布 px 几何一个像素都不动（HUD 里显示的仍是画布 px）。
  * - **resolveUrl**：`(key, kind) => url`；不给就用 prts 直链（应用里由调用方
  *   用 `prts-cdn://` 代理改写）。
+ * - **chrome**：可选 `chrome?: PanelChromeProps`（BRIEF §2.2，P4 的
+ *   `inspectorWindow.ts`）；缺失时内容照常渲染。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -44,6 +47,30 @@ import {
   rulesFromModel,
   tableFromModel,
 } from "./stageModel";
+import {
+  DEFAULT_ZOOM,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  STAGE_CANVAS,
+  WHEEL_STEP,
+  anchorPoint,
+  clampZoom,
+  cssScale,
+  fitZoom,
+  viewFor,
+  wheelDelta,
+  zoomAt,
+  zoomPercent,
+  type ZoomView,
+} from "./stageZoom";
+// P4 的窗口壳类型（BRIEF §2.2）。`inspectorWindow.ts` = 纯类型/工具（无 React）。
+// TODO(P4)：若该文件在并行期还没落地，把下面这行换成下面注释里的行内形状即可
+// （`PanelChromeProps` 只有 6 个字段，组件只读 title/ariaLabel/visible/onToggle/onSelect/active）。
+//   export interface PanelChromeProps {
+//     title: string; ariaLabel: string; visible: boolean;
+//     onToggle?: () => void; onSelect?: () => void; active?: boolean;
+//   }
+import type { PanelChromeProps } from "./inspectorWindow";
 
 /** 组件接受的字符（`parseStage` 的产物超集；缺 rect 时自己算）。 */
 export interface StagePaneChar extends StageCharInput {
@@ -82,7 +109,7 @@ export interface StagePaneProps {
   offline?: boolean;
   /** 覆盖 `focus=` 的亮/暗（不给按每个立绘自带的 `dimmed`）。 */
   focusSlots?: Slot[];
-  /** 初始缩放档：`1` = 100%、`0.5` = 50%。 */
+  /** 初始缩放：连续值 `[MIN_ZOOM, MAX_ZOOM]`（`1` = 100%）。窗格内按钮/滚轮写 override。 */
   zoom?: number;
   /** 画栅格 + 槽位虚线（默认开）。 */
   showGuides?: boolean;
@@ -90,10 +117,14 @@ export interface StagePaneProps {
   line?: string | null;
   /** 每次拖拽结束的补丁（供编辑器记录/回写）。 */
   onPatch?: (patch: MovePatch) => void;
+  /**
+   * 窗口壳 chrome（BRIEF §2.2；P4 的 `inspectorWindow.ts`）。
+   * **可选**：不给时内容照常渲染（只少一条 `.sp-chrome`）。
+   */
+  chrome?: PanelChromeProps;
   className?: string;
 }
 
-/** 50% 档看的范围：画布 + 每边 25%（够覆盖 1.25× 画布带）。 */
 /** 安全框（任务给的 1280×720 letterbox：标题 90% / 动作 93%）。 */
 const SAFE_TITLE = { x: STAGE_WIDTH * 0.05, y: STAGE_HEIGHT * 0.05 };
 const SAFE_ACTION = { x: STAGE_WIDTH * 0.035, y: STAGE_HEIGHT * 0.035 };
@@ -102,9 +133,8 @@ const PLACEHOLDER_SIZE = { w: 720, h: 720 };
 
 const SLOT_LABEL: Record<Slot, string> = { l: "l 左", m: "m 中", r: "r 右" };
 
-function clampZoom(value: number): number {
-  return Math.min(2, Math.max(0.25, value));
-}
+/** 一档滚轮/按钮的缩放步长（含 Shift 加速）。 */
+const ZOOM_FAST = 0.25;
 
 function defaultResolveUrl(key: string, kind: "background" | "character" = "background"): string {
   const value = String(key ?? "").trim();
@@ -184,20 +214,28 @@ export function StagePane(props: StagePaneProps) {
     showGuides,
     line,
     onPatch,
+    chrome,
     className,
   } = props;
 
-  // 受控/非受控两用：`zoom`/`showGuides` prop 是**默认值**，窗格内的按钮写 override。
-  const [zoomOverride, setZoomOverride] = useState<number | null>(null);
+  // 受控/非受控两用：`zoom`/`showGuides` prop 是**默认值**，窗格内的按钮/滚轮写 override。
+  const [zoomOverride, setZoomOverride] = useState<ZoomView | null>(null);
   const [guidesOverride, setGuidesOverride] = useState<boolean | null>(null);
+  const [foldedOverride, setFoldedOverride] = useState<boolean | null>(null);
   const [ghost, setGhost] = useState<{ slot: Slot; dx: number; dy: number; key: string } | null>(null);
   const [pending, setPending] = useState<MovePatch | null>(null);
   const [hint, setHint] = useState<string>("");
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const dragRef = useRef<{ slot: Slot; x: number; y: number; dx: number; dy: number; moved: boolean } | null>(null);
-  const zoomState = clampZoom(zoomOverride ?? zoom ?? 1);
+  const zoomState = clampZoom(zoomOverride?.zoom ?? zoom ?? DEFAULT_ZOOM);
   const guides = guidesOverride ?? showGuides ?? true;
+  // chrome：受控（`chrome.visible`）优先；不受控时窗格自己记住折叠。
+  const chromeVisible = chrome?.visible ?? !(foldedOverride ?? false);
+  const toggleChrome = useCallback(() => {
+    if (chrome?.onToggle) chrome.onToggle();
+    else setFoldedOverride((value) => !(value ?? false));
+  }, [chrome]);
 
   // 尺寸测量：拖拽的 CSS→画布换算全靠它。
   useLayoutEffect(() => {
@@ -225,23 +263,67 @@ export function StagePane(props: StagePaneProps) {
   const activeGhost = ghost && ghost.key === charsKey ? ghost : null;
 
   /**
-   * 画布坐标 → viewBox：`zoom = 1` 只露 1280×720；`zoom = 0.5` 外扩一整圈
-   * （1.25× 边距看得见）。
+   * 画布坐标 → viewBox。**缩放只改这里**（画布里的几何 px 一个都不动）：
+   * `zoom = 1` 只露 1280×720；`zoom = 2` 收一半；滚轮缩放后原点由
+   * `stageZoom.zoomAt` 按**锚点保值**给出（不一定居中）。
    */
-  const view = useMemo(() => {
-    const w = STAGE_WIDTH / zoomState;
-    const h = STAGE_HEIGHT / zoomState;
-    const mx = (w - STAGE_WIDTH) / 2;
-    const my = (h - STAGE_HEIGHT) / 2;
-    return { x: -mx, y: -my, w, h };
-  }, [zoomState]);
+  const view = useMemo<ZoomView>(() => {
+    if (zoomOverride) return zoomOverride;
+    return viewFor(zoomState, STAGE_CANVAS);
+  }, [zoomOverride, zoomState]);
 
-  // preserveAspectRatio="meet" → CSS px / viewBox unit 取两个维度里较大的那个。
-  const unit = box.w > 0 && box.h > 0 ? Math.max(view.w / box.w, view.h / box.h) : view.w / STAGE_WIDTH;
+  // preserveAspectRatio="meet" → 1 画布 px = `1 / unit` CSS px（`stageZoom.cssScale` 的逆）。
+  // 拖拽的 CSS→画布换算必须用**当前缩放**：`view.w / box.w` 已含 zoom。
+  const unit = box.w > 0 && box.h > 0 ? 1 / cssScale(zoomState, box, STAGE_CANVAS) : view.w / STAGE_WIDTH;
   const unitRef = useRef(unit);
   useEffect(() => {
     unitRef.current = unit;
   }, [unit]);
+
+  /** 把一次缩放操作的结果写进窗格（viewBox 原点 + zoom 一起）。 */
+  const applyZoom = useCallback((result: { zoom: number; x: number; y: number }) => {
+    const zoom = clampZoom(result.zoom);
+    setZoomOverride({ x: result.x, y: result.y, w: STAGE_WIDTH / zoom, h: STAGE_HEIGHT / zoom, zoom });
+  }, []);
+
+  /** 缩放中心 = 当前视口中心（按钮/适配用；锚点保值退化为「中心不动」）。 */
+  const zoomCenter = useCallback(
+    (step: number) => {
+      const point = { x: view.x + view.w / 2, y: view.y + view.h / 2 };
+      applyZoom(zoomAt(zoomState, point, step, box, clampZoom, view));
+    },
+    [applyZoom, box, view, zoomState],
+  );
+
+  /** 回到 100%/100%（居中）。 */
+  const zoomToDefault = useCallback(() => {
+    setZoomOverride(viewFor(DEFAULT_ZOOM, STAGE_CANVAS));
+  }, []);
+
+  /** `适配`：把 1280×720 完整放进窗格（`fitZoom`，含 0.96 留白），居中。 */
+  const zoomToFit = useCallback(() => {
+    const next = fitZoom({ w: box.w, h: box.h }, { w: STAGE_WIDTH, h: STAGE_HEIGHT });
+    setZoomOverride(viewFor(next, STAGE_CANVAS));
+  }, [box]);
+
+  // 滚轮：**原生监听 + `passive:false`**（React 的 onWheel 在 root 上是 passive，
+  // `preventDefault()` 会被忽略、页面跟着滚）。以**指针**为锚连续缩放。
+  useEffect(() => {
+    const node = boxRef.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      const delta = wheelDelta(event.deltaY) * (event.shiftKey ? ZOOM_FAST / WHEEL_STEP : 1);
+      if (!delta) return;
+      event.preventDefault();
+      const rect = node.getBoundingClientRect();
+      const css = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const size = { w: rect.width, h: rect.height };
+      const point = anchorPoint(view.zoom, css, size, STAGE_CANVAS, view);
+      applyZoom(zoomAt(view.zoom, point, delta, size, clampZoom, view));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [applyZoom, view]);
 
   // 角色表 / 背景规则：props 优先；props 没给（或给的是空表）就自己拉一次上游。
   const [fetched, setFetched] = useState<{ table: CharacterTable; rules: BackgroundRules } | null>(null);
@@ -402,6 +484,7 @@ export function StagePane(props: StagePaneProps) {
       data-stage-pane="1"
       data-stage-zoom={zoomState}
       data-stage-chars={chars.length}
+      data-stage-chrome-visible={chromeVisible ? "1" : "0"}
       style={{
         height: height ?? 232,
         minHeight: 0,
@@ -415,8 +498,48 @@ export function StagePane(props: StagePaneProps) {
         userSelect: "none",
       }}
     >
+      {/* chrome（BRIEF §2.2）：`data-chrome="stage"` + `.sp-chrome` + 折叠 `.sp-fold`。
+          可选 prop（`chrome`）缺失时这条也会渲染（只是没有 `▾` 回调）。 */}
+      <div
+        className={`sp-chrome${chrome?.active ? " is-active" : ""}`}
+        data-chrome="stage"
+        data-active={chrome?.active ? "1" : "0"}
+        data-hidden={chromeVisible ? "0" : "1"}
+        style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 18, padding: "0 2px" }}
+        title={chrome?.ariaLabel ?? "舞台"}
+        onPointerDown={() => chrome?.onSelect?.()}
+      >
+        <span className="sp-chrome-title" style={{ color: "#9fb3c8" }}>{chrome?.title ?? "舞台"}</span>
+        {chrome?.active ? <span className="sp-chrome-dot" style={{ color: "#7a5cff" }}>●</span> : null}
+        <span style={{ flex: "1 1 auto" }} />
+        {chrome?.onToggle || chrome === undefined || foldedOverride !== null ? (
+          <button
+            type="button"
+            className="sp-fold"
+            onClick={toggleChrome}
+            aria-expanded={chromeVisible}
+            aria-label={chrome?.ariaLabel ? `${chromeVisible ? "收起" : "展开"}${chrome.ariaLabel}` : "收起"}
+            style={buttonStyle(false)}
+          >
+            {chromeVisible ? "▾" : "▸"}
+          </button>
+        ) : null}
+      </div>
+
       {/* 画布：16:9 letterbox（宽高由宿主决定，内容等比居中） */}
-      <div ref={boxRef} style={{ position: "relative", flex: "1 1 auto", minHeight: 0, borderRadius: 4, overflow: "hidden", background: "#000" }}>
+      <div
+        ref={boxRef}
+        data-stage-frame="1"
+        style={{
+          position: "relative",
+          flex: "1 1 auto",
+          minHeight: 0,
+          borderRadius: 4,
+          overflow: "hidden",
+          background: "#000",
+          display: chromeVisible ? undefined : "none",
+        }}
+      >
         <svg
           viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
           preserveAspectRatio="xMidYMid meet"
@@ -424,6 +547,7 @@ export function StagePane(props: StagePaneProps) {
           height="100%"
           style={{ display: "block", touchAction: "none" }}
           data-stage-svg="1"
+          data-stage-view={`${Math.round(view.x)},${Math.round(view.y)},${Math.round(view.w)},${Math.round(view.h)}`}
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) {
               setPending(null);
@@ -592,12 +716,52 @@ export function StagePane(props: StagePaneProps) {
           ) : null}
         </svg>
 
-        {/* HUD：工具条 */}
-        <div style={{ position: "absolute", top: 4, right: 4, display: "flex", gap: 4, alignItems: "center" }}>
-          <button type="button" data-stage-action="zoom-1" onClick={() => setZoomOverride(1)} style={buttonStyle(zoomState === 1)} title="铺满窗格（只看 1280×720）">
-            100%
+        {/* HUD：缩放工具条（连续缩放：`−` / 百分比 → 100% / `＋` / `适配` / `1:1`）。
+            既有 `data-stage-action="zoom-1"`（harness 回归用）保留在 1:1 上；
+            `zoom-05` 保留为「50% 一档」（`stage-check.mjs` 的旧断言仍绿）。 */}
+        <div data-stage-hud="zoom" style={{ position: "absolute", top: 4, right: 4, display: "flex", gap: 4, alignItems: "center" }}>
+          <button
+            type="button"
+            data-stage-action="zoom-out"
+            onClick={() => zoomCenter(-WHEEL_STEP)}
+            disabled={zoomState <= MIN_ZOOM + 1e-9}
+            style={buttonStyle(false)}
+            title="缩小 10%（以视口中心为锚）"
+          >
+            −
           </button>
-          <button type="button" data-stage-action="zoom-05" onClick={() => setZoomOverride(0.5)} style={buttonStyle(zoomState === 0.5)} title="看全 1.25× 边距">
+          <button
+            type="button"
+            data-stage-action="zoom-reset"
+            onClick={zoomToDefault}
+            style={buttonStyle(zoomState === DEFAULT_ZOOM)}
+            title="回到 100%（点击百分比）"
+          >
+            {zoomPercent(zoomState)}
+          </button>
+          <button
+            type="button"
+            data-stage-action="zoom-in"
+            onClick={() => zoomCenter(WHEEL_STEP)}
+            disabled={zoomState >= MAX_ZOOM - 1e-9}
+            style={buttonStyle(false)}
+            title="放大 10%（以视口中心为锚）"
+          >
+            ＋
+          </button>
+          <button type="button" data-stage-action="fit" onClick={zoomToFit} style={buttonStyle(false)} title="适配窗格（fitZoom，含留白）">
+            适配
+          </button>
+          <button type="button" data-stage-action="zoom-1" onClick={zoomToDefault} style={buttonStyle(zoomState === DEFAULT_ZOOM)} title="1:1（铺满窗格，只看 1280×720）">
+            1:1
+          </button>
+          <button
+            type="button"
+            data-stage-action="zoom-05"
+            onClick={() => applyZoom(zoomAt(zoomState, { x: view.x + view.w / 2, y: view.y + view.h / 2 }, 0.5 - zoomState, box, clampZoom, view))}
+            style={buttonStyle(Math.abs(zoomState - 0.5) < 1e-9)}
+            title="50%（看全 1.25× 边距）"
+          >
             50%
           </button>
           <button type="button" data-stage-action="guides" onClick={() => setGuidesOverride((value) => !(value ?? guides))} style={buttonStyle(guides)} title="栅格 + 槽位虚线 + 安全框">
@@ -615,8 +779,8 @@ export function StagePane(props: StagePaneProps) {
 
       {/* 状态条 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 20, whiteSpace: "nowrap", overflow: "hidden" }}>
-        <span data-stage-status="zoom">
-          {zoomState === 1 ? "100%" : "50%"} · {box.w > 0 ? `${Math.round(box.w)}×${Math.round(box.h)}` : "—"}
+        <span data-stage-status="zoom" title="缩放百分比 · 窗格 CSS 尺寸" style={{ cursor: "pointer" }} onClick={zoomToDefault}>
+          {zoomPercent(zoomState)} · {box.w > 0 ? `${Math.round(box.w)}×${Math.round(box.h)}` : "—"}
         </span>
         <span data-stage-status="slot" style={{ color: "#f4c430" }}>
           {selectedChar ? `选中 ${selectedChar.slot}：${selectedChar.char.name}` : "未选中"}
