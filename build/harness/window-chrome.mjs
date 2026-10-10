@@ -21,9 +21,19 @@ const check = (label, ok, detail = "") => { results.push({ label, ok, detail });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/snap/bin/chromium", args: ["--no-sandbox", "--disable-dev-shm-usage"] });
 try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
+  // 「书架信息已更新」横幅在 `document.head` 建好前插入会抛（head 为 null）→ 用 head ?? documentElement
+  // 并且**每次**失败后重试；否则它会盖住工具栏、**拦截点击**（`ed-win-check.mjs` 的旧坑）。
   await page.addInitScript(() => {
-    const hide = () => { const s = document.createElement("style"); s.id = "wb-hide-banner"; s.textContent = ".bookshelf-sync-warning,.dl-bar{display:none !important}"; (document.head ?? document.documentElement).appendChild(s); };
-    hide(); setInterval(() => { if (!document.getElementById("wb-hide-banner")) hide(); }, 400);
+    const fix = () => {
+      if (document.getElementById("wb-hide-banner")) return;
+      try {
+        const s = document.createElement("style");
+        s.id = "wb-hide-banner";
+        s.textContent = ".bookshelf-sync-warning,.dl-bar{display:none !important}";
+        (document.head || document.documentElement).appendChild(s);
+      } catch { /* head 还没建好 */ }
+    };
+    fix(); setInterval(fix, 100);
   });
   await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(text)}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });

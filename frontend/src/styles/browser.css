@@ -2159,3 +2159,72 @@
   color: var(--accent);
   background: rgba(244, 196, 48, 0.12);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   演出工作台 2.0（BRIEF-workbench-v1）：`.ed-split` 换成 `Workbench` 的
+   `[data-workbench]` 布局树；这里只放「挂载层面」的几条约束，
+   递归 flex / 分隔条 / 落点提示都在 `components/editor/workbench.css`。
+
+   · `[data-wb-panel]` 的面板块**撑满** slot：`Workbench` 已给 `flex: 1 1 auto`
+     + `minWidth/minHeight`，这里只把页面级尺寸约定补上；
+   · dock 面板（toolpanel / stage）在标题条里**没有** ⧉ / ✕（P4 的壳按
+     `shellKind="dock"` 决定），Map 面板（preview / branch）有 ✕ ← 工具栏开关。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 工作台 + 状态栏的纵向排布：工作台吃掉整页剩余高度。 */
+.wb-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.wb-stage > [data-workbench] {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 面板块：壳（`.ed-win`）自己撑满 slot，内容区各自滚。 */
+[data-workbench] [data-wb-panel] > .ed-win {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* `.ed-code`（编辑区，布局树的 placeholder 叶）：旧的 70% 定宽已废，
+   宽度由 `workbenchStack` 的 `share` 决定；只留一条右分隔线。 */
+[data-workbench] .ed-code {
+  flex: 1 1 auto;
+  width: auto;
+  border-right: 1px solid var(--border);
+}
+
+/* 舞台（dock）：`ed-stage` 原来靠 InspectorWindow 的 dock 高度；给个上限即可。 */
+.ed-stage-dock {
+  min-height: 0;
+}
+
+.ed-stage {
+  height: 232px;
+  max-height: 46vh;
+}
+
+/* 预览（Map）：高度由内联 style（`previewHeight` / 放大 62%）决定。 */
+.ed-preview {
+  height: auto;
+}
+
+/* 分支图（Map）：包一层，让 `.ed-graph` 撑满壳体。 */
+.ed-branch-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.ed-branch-wrap > .ed-graph {
+  flex: 1 1 auto;
+  min-height: 0;
+}

@@ -10,7 +10,18 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
   await page.addInitScript(() => localStorage.removeItem("prts-editor-wb:default"));
-  await page.addInitScript(() => { const hide=()=>{const el=document.getElementById("wb-hide")||Object.assign(document.createElement("style"),{id:"wb-hide"}); el.textContent=".bookshelf-sync-warning,.dl-bar{display:none !important}"; (document.head??document.documentElement).appendChild(el);}; hide(); setInterval(hide,300); });
+  await page.addInitScript(() => {
+    const fix = () => {
+      if (document.getElementById("wb-hide")) return;
+      try {
+        const el = document.createElement("style");
+        el.id = "wb-hide";
+        el.textContent = ".bookshelf-sync-warning,.dl-bar{display:none !important}";
+        (document.head || document.documentElement).appendChild(el);
+      } catch { /* head 还没建好 */ }
+    };
+    fix(); setInterval(fix, 100);
+  });
   await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(text)}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
   await page.waitForTimeout(1500);

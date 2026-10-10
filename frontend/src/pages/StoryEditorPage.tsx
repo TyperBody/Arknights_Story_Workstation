@@ -11,8 +11,32 @@ import {
   type LazyExoticComponent,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import InspectorWindow, { type WindowState } from "../components/editor/InspectorWindow";
-import { clampWindowState, readWindowState } from "../components/editor/windowState";
+import InspectorWindow from "../components/editor/InspectorWindow";
+import { registerWindowSpecs, type PanelChromeProps } from "../components/editor/inspectorWindow";
+import Workbench from "../components/editor/Workbench";
+import {
+  defaultState,
+  has,
+  minimize,
+  normalize,
+  parse,
+  restore,
+  stringify,
+  type PanelId,
+  type WorkbenchState,
+} from "../components/editor/workbenchStack";
+import {
+  DEFAULT_LAYOUT_NAME,
+  PANELS,
+  WINDOW_SPECS,
+  consumeLegacy,
+  isDockPanel,
+  isMapPanel,
+  migrateLegacy,
+  readLayout,
+  saveLayoutNamed,
+  specOf,
+} from "../components/editor/workbenchLayout";
 import { createHistory, diffOf, type HistoryEntry } from "../components/editor/history";
 import { disposeEngineFrame } from "../lib/storyPlayerBoot";
 // engineBoot / localStories 在别处已是**静态**依赖（predownload.ts 等），页面这里
@@ -435,17 +459,33 @@ interface ControllerInspectorProps {
 }
 
 /**
- * 把 dock 状态转成"合理的初始浮动矩形"：屏幕中偏右，四周都留出可拖动余量
- * （右侧至少 200px，用户能立刻往右拖；见 `ed-win-check.mjs` 的位移断言）。
+ * 工作台**一次性引导**（模块级缓存：组件函数里的 `useState` 初始化器会跑两次）：
+ * 1. `migrateLegacy()` —— 旧 `prts-editor-windows:*` **只读一次后删除**（§2.1）；
+ * 2. 读 `prts-editor-wb:default`（`parse` 坏数据 → `defaultState()`）；
+ * 3. 可见清单 = 常驻 dock（`toolpanel` / `stage`）+ 旧状态里**曾经开过**的 Map；
+ * 4. `normalize` 收口（去重 / 折叠单子 split / share clamp）。
  */
-function floatFor(_prev: WindowState, bounds: { w: number; h: number }): WindowState {
-  const w = Math.min(460, Math.max(280, Math.round(bounds.w * 0.3)));
-  const h = Math.min(460, Math.max(220, Math.round(bounds.h * 0.45)));
-  const maxX = Math.max(0, bounds.w - w - 200);
-  const x = Math.max(0, Math.min(maxX, Math.round(bounds.w * 0.5)));
-  const y = Math.max(64, Math.min(Math.max(0, bounds.h - h - 120), Math.round(bounds.h * 0.12)));
-  return { kind: "float", rect: { x, y, w, h } };
+let bootCache: { state: WorkbenchState; visible: PanelId[] } | null = null;
+function workbenchBoot(): { state: WorkbenchState; visible: PanelId[] } {
+  if (bootCache) return bootCache;
+  migrateLegacy();
+  const legacy = consumeLegacy();
+  const visible: PanelId[] = PANELS.filter(isDockPanel);
+  for (const item of legacy) {
+    if (item.panel && isMapPanel(item.panel) && !visible.includes(item.panel)) visible.push(item.panel);
+  }
+  const raw = readLayout(DEFAULT_LAYOUT_NAME);
+  let state = normalize((raw ? parse(raw) : null) ?? defaultState(), visible);
+  for (const item of legacy) {
+    if (!item.panel || !isMapPanel(item.panel)) continue;
+    if (!has(state, item.panel)) state = restore(state, item.panel, "root", "right");
+  }
+  bootCache = { state: normalize(state, visible), visible };
+  return bootCache;
 }
+
+/** 引导结果（模块级，只跑一次）；下面 `StoryEditorPage` 的初始 state 直接取它。 */
+const boot: { state: WorkbenchState; visible: PanelId[] } = workbenchBoot();
 
 /**
  * `../components/editor/*.tsx` → 动态 import 工厂（Vite 静态收集）。
@@ -459,6 +499,7 @@ function floatFor(_prev: WindowState, bounds: { w: number; h: number }): WindowS
 const editorPartLoaders = import.meta.glob([
   "../components/editor/*.tsx",
   "!../components/editor/InspectorWindow.tsx",
+  "!../components/editor/Workbench.tsx",
   "!../components/editor/history.ts",
   "!../components/editor/windowState.ts",
 ]) as Record<string, () => Promise<Record<string, unknown>>>;
@@ -960,16 +1001,13 @@ export default function StoryEditorPage() {
   const [bounds, setBounds] = useState({ w: 0, h: 0 });
   const boundsRef = useRef(bounds);
   boundsRef.current = bounds;
-  /** 三个工具窗口（右栏 / 舞台 / 预览）的停靠-浮动状态。 */
-  const [panelWin, setPanelWin] = useState<WindowState>(
-    () => readWindowState("prts-editor-windows:panel") ?? { kind: "dock", side: "right" }
-  );
-  const [stageWin, setStageWin] = useState<WindowState>(
-    () => readWindowState("prts-editor-windows:stage") ?? { kind: "dock", side: "left" }
-  );
-  const [previewWin, setPreviewWin] = useState<WindowState>(
-    () => readWindowState("prts-editor-windows:preview") ?? { kind: "dock", side: "right" }
-  );
+  /** 工作台：布局树（`prts-editor-wb:default`）+ 树里的面板清单。 */
+  const [wb, setWb] = useState<WorkbenchState>(boot.state);
+  const [visible, setVisible] = useState<PanelId[]>(boot.visible);
+  /** 收起（`▾`）的面板：只切**显示**、不卸载、不进 `minimized`（§2.2）。 */
+  const [folded, setFolded] = useState<PanelId[]>([]);
+  /** 面板「活跃」环（chrome.active）。 */
+  const [selected, setSelected] = useState<PanelId | null>(null);
   /** 撤销 / 重做（覆盖打字、拖立绘、表单、模板、补全——全走 applyEdit/onChange）。 */
   const historyRef = useRef(createHistory({ limit: 200, mergeMs: 500 }));
   const [historySizes, setHistorySizes] = useState({ undo: 0, redo: 0 });
@@ -986,14 +1024,6 @@ export default function StoryEditorPage() {
   const [stageSelected, setStageSelected] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
-  /** 三个工具窗口的显示开关（关闭 = 收进状态栏的「工具窗口…」菜单）。 */
-  const [showPanel, setShowPanel] = useState(true);
-  const [showStage, setShowStage] = useState(true);
-  const [showBranch, setShowBranch] = useState(false);
-  /** 分支图窗口的停靠/浮动状态（默认右侧浮动，跟上其它工具窗口）。 */
-  const [branchWin, setBranchWin] = useState<WindowState>(
-    () => readWindowState("prts-editor-windows:branch") ?? { kind: "float", rect: { x: 0, y: 72, w: 430, h: 420 } }
-  );
   const [stageMoves, setStageMoves] = useState<Array<{ slot: Slot; x: number; y: number }>>([]);
 
   // 模型（editcore 并行交付）：加载完成前先用降级 lint，页面不会白屏。
@@ -1842,6 +1872,10 @@ export default function StoryEditorPage() {
         setPreviewStatus("浏览器预览：本地探针里没有 story_player 快照，将走 PRTS 同步（首次较慢）。");
       }
     }
+    // 预览 = Map：开演时确保它在工作台里（下一帧才有 iframe 宿主）。
+    setVisible((prev) => (prev.includes("preview") ? prev : [...prev, "preview"]));
+    setWb((state) => (has(state, "preview") ? state : restore(state, "preview", "root", "right")));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     const host = hostRef.current;
     if (!host) return;
     closePreview();
@@ -2117,7 +2151,473 @@ export default function StoryEditorPage() {
     [jumpToLine, stageSlotLine]
   );
 
-  // ── 渲染 ──────────────────────────────────────────────────
+  // ── 工作台（§2.1 / §2.3 / §2.4）：容器 `Workbench` + 四块面板 ──────────
+
+  /** 面板在树里吗（工具栏 `on` 态 + 渲染判断共用）。 */
+  const inTree = useCallback((id: PanelId) => visible.includes(id) && has(wb, id), [visible, wb]);
+
+  /** 收起 / 展开：只切**显示**（`chrome.visible`），不动布局树。 */
+  const toggleFold = useCallback((id: PanelId) => {
+    setFolded((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]));
+  }, []);
+
+  /** Map（preview / branch）的工具栏开关：进 / 出工作台树；`force` 顺带打开。 */
+  const mapToggle = useCallback((id: PanelId, force = false) => {
+    setVisible((prev) => {
+      const on = prev.includes(id);
+      const want = force ? true : !on;
+      if (want === on) return prev;
+      setWb((state) => (want ? (has(state, id) ? state : restore(state, id, "root", "right")) : minimize(state, id)));
+      return want ? [...prev, id] : prev.filter((value) => value !== id);
+    });
+  }, []);
+
+  /** 工作台状态变化：受控 + 落盘 `prts-editor-wb:default`。 */
+  const onWorkbenchState = useCallback((next: WorkbenchState) => {
+    setWb(next);
+    saveLayoutNamed(DEFAULT_LAYOUT_NAME, stringify(next));
+  }, []);
+
+  /** P3 的规格表注册给窗口壳（`⧉` / 标题的兜底来源）。 */
+  useEffect(() => {
+    registerWindowSpecs(WINDOW_SPECS);
+  }, []);
+
+  /** chrome（§2.2）：内容组件（StagePane / BranchGraph）用它画自己的 chrome 条。 */
+  const chromeFor = (id: PanelId): PanelChromeProps => ({
+    title: specOf(id).title,
+    ariaLabel: `${specOf(id).title}面板`,
+    visible: !folded.includes(id),
+    onToggle: () => toggleFold(id),
+    onSelect: () => setSelected((prev) => (prev === id ? null : id)),
+    active: selected === id,
+  });
+
+  /** 编辑区（布局树里的 `placeholder` 叶）：行号 + 高亮行 + 等宽正文。 */
+  const renderEditorPane = () => (
+    <div className="ed-code">
+      <div className="ed-code-scroll" ref={scrollerRef}>
+        <div className="ed-gutter" aria-hidden="true" ref={gutterRef} style={{ minHeight: docSize.height }}>
+          {lineStarts.map((_, index) => {
+            const severity = diagnosticsByLine.get(index + 1);
+            return (
+              <span
+                key={index}
+                className={`ed-gutter-line${caret.line === index + 1 ? " current" : ""}${severity ? ` ${severity}` : ""}`}
+                title={lineLabel(text, index + 1)}
+                onClick={() => jumpToLine(index + 1)}
+              >
+                {index + 1}
+              </span>
+            );
+          })}
+        </div>
+        <div
+          className="ed-code-lines"
+          ref={linesRef}
+          style={{
+            // 宽 = max(视口, 最长行)；高 = 行数 × LH + padding。
+            // 横向滚动因此真的生效（`min-width` 撑开 .ed-code-scroll）。
+            width: docSize.width > 0 ? `max(100%, ${Math.ceil(docSize.width) + PAD_X * 2}px)` : "100%",
+            height: docSize.height,
+          }}
+        >
+          <div className="ed-linebar" style={{ top: (caret.line - 1) * LH, height: LH }} />
+          <textarea
+            ref={taRef}
+            className="ed-textarea"
+            value={text}
+            spellCheck={false}
+            wrap="off"
+            aria-label="剧本正文"
+            placeholder={"[Character(name=\"char_002_amiya_1\", fadetime=0.5)]\n[name=\"阿米娅\"]  这边走，博士。"}
+            onChange={(event) => {
+              hiddenRef.current = false;
+              const nextValue = event.target.value;
+              const previous = textRef.current;
+              if (nextValue !== previous) {
+                // `onChange` 只给最终值；用最小 diff 还原"插入了什么"，
+                // 交给历史栈决定合并（连续打字 = 一条）。
+                const change = diffOf(previous, nextValue);
+                commitHistory(
+                  { text: previous, sel: [change.from, change.to] },
+                  { text: nextValue, sel: [change.from + change.insert.length, change.from + change.insert.length] },
+                  change.insert,
+                  "typing"
+                );
+              }
+              setText(nextValue);
+              setDirty(true);
+              textRef.current = nextValue;
+              requestAnimationFrame(syncCaret);
+            }}
+            onSelect={syncCaret}
+            onClick={syncCaret}
+            onKeyUp={syncCaret}
+            onScroll={syncCaret}
+            onMouseMove={(event) => hoverAt(event.clientX, event.clientY)}
+            onMouseLeave={() => setHover(null)}
+            onKeyDown={(event) => {
+              const mod = event.ctrlKey || event.metaKey;
+              if (mod && event.key.toLowerCase() === "s") {
+                event.preventDefault();
+                void doSave();
+                return;
+              }
+              if (mod && (event.key === " " || event.code === "Space")) {
+                event.preventDefault();
+                hiddenRef.current = false;
+                refreshPopupRef.current(false);
+                return;
+              }
+              if (popup) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setPopup((prev) => (prev ? { ...prev, index: (prev.index + 1) % prev.items.length } : prev));
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setPopup((prev) =>
+                    prev ? { ...prev, index: (prev.index - 1 + prev.items.length) % prev.items.length } : prev
+                  );
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  acceptCompletion();
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  hiddenRef.current = true;
+                  setPopup(null);
+                  return;
+                }
+              }
+              if (event.key === "Tab") {
+                if (popup) {
+                  event.preventDefault();
+                  acceptCompletion();
+                  return;
+                }
+                if (tryTabSkeleton()) {
+                  event.preventDefault();
+                }
+              }
+            }}
+          />
+          {/* 不可见的测量锚点：最长行宽 / 前缀像素宽都在这里量（真实 DOM，
+              与 textarea 同字体同字号，保证逐像素对齐）。 */}
+          <span className="ed-anchor" aria-hidden="true" ref={anchorRef} />
+          {popup && (
+            <div className="ed-popup" style={{ left: popup.x, top: popup.y }}>
+              {popup.items.map((item, index) => (
+                <div
+                  key={`${item.label}-${index}`}
+                  className={`ed-popup-item${index === popup.index ? " active" : ""}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    setPopup((prev) => (prev ? { ...prev, index } : prev));
+                    acceptCompletion();
+                  }}
+                >
+                  {/* 有些模型项返回的是 rich 展示对象；统一转字符串后再渲染。 */}
+                  <span>{typeof item.display === "string" ? item.display : String(item.label ?? "")}</span>
+                  {typeof item.detail === "string" && item.detail && <small>{item.detail}</small>}
+                </div>
+              ))}
+            </div>
+          )}
+          {hover && (
+            <div className="ed-hover" style={{ left: hover.x, top: hover.y }}>
+              <div className="ed-hover-title">{String(hover.info.title ?? "指令")}</div>
+              <div>{String(hover.info.summary ?? "（没有说明）")}</div>
+              {hoverParamText(hover.info.param) && (
+                <div className="ed-hover-ref">参数 {hoverParamText(hover.info.param)}</div>
+              )}
+              {hover.info.anchor && <div className="ed-hover-ref">参考：{hover.info.anchor}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {loadState === "ready" && !text.trim() && (
+        <div className="ed-code-empty">
+          这个剧本包里的 <code>{sourceName}</code> 是空的。直接开写，然后 Ctrl+S 保存。
+        </div>
+      )}
+
+      {loadState === "empty" && (
+        <div className="ed-code-empty">
+          <p>
+            空态：<code>{id || "（无包 ID）"}</code> 还没读到剧本。
+          </p>
+          <p>
+            在桌面应用里，请从「同人剧本」页进入；可用 <code>[Cha</code> + Tab 起手，
+            或点右侧「控制器」面板插入骨架。
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
+  /** 工具面板（dock）：诊断 / 控制器 / 剧本信息 + 常驻控制器检视器。 */
+  const renderToolpanel = () => (
+    <div className="ed-panel">
+      <div className="ed-tabs">
+        <button className={`ed-tab${tab === "diag" ? " active" : ""}`} onClick={() => setTab("diag")}>
+          诊断
+          {diagnostics.length > 0 && <span className="ed-tab-count">{diagnostics.length}</span>}
+        </button>
+        <button className={`ed-tab${tab === "palette" ? " active" : ""}`} onClick={() => setTab("palette")}>
+          控制器
+        </button>
+        <button className={`ed-tab${tab === "info" ? " active" : ""}`} onClick={() => setTab("info")}>
+          剧本信息
+        </button>
+      </div>
+
+      <div className="ed-panel-body">
+        {/* 控制器检视器（task-9 交付）：常驻在面板顶部，整行改参数。 */}
+        {showInspector && (
+          <div className="ed-inspector" data-editor-part="inspector">
+            {ControllerInspectorPart ? (
+              <Suspense fallback={<div className="ed-inspector-empty">正在载入控制器检视器…</div>}>
+                <ControllerInspectorPart
+                  model={model ?? null}
+                  line={caretLineText}
+                  lineIndex={caretLineIndex}
+                  onApply={onInspectorApply}
+                  height={190}
+                />
+              </Suspense>
+            ) : (
+              <div className="ed-inspector-empty">
+                第 {caret.line} 行：<code>{caretLineText || "（空行）"}</code>
+                <br />
+                （控制器检视器由并行任务交付；文件落盘后自动挂载）
+              </div>
+            )}
+          </div>
+        )}
+        {tab === "diag" && (
+          <>
+            {!model && <p className="ed-hint">编辑器模型尚未加载：当前只做基础统计（未知指令按模型就绪后复核）。</p>}
+            {diagnostics.length === 0 ? (
+              <div className="ed-diag-ok">没有发现问题（{controllerCount} 条控制器 / {doc.stats?.decisions ?? 0} 个决策点）。</div>
+            ) : (
+              <div className="ed-diag">
+                {diagnostics.map((item, index) => (
+                  <button
+                    key={`${item.line}-${item.code}-${index}`}
+                    className={`ed-diag-item ${item.severity}`}
+                    onClick={() => (item.line ? jumpToLine(item.line) : undefined)}
+                    title={`跳到第 ${item.line || "?"} 行：${item.message}`}
+                  >
+                    <span className="ed-diag-code">
+                      {String(item.code)}
+                      {item.line ? ` L${item.line}` : ""}
+                    </span>
+                    <span>
+                      {item.message}
+                      {item.fix ? <small className="ed-diag-fix">{`修法：${String(item.fix)}`}</small> : null}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === "palette" && (
+          <div className="ed-palette">
+            <p className="ed-hint">点击插入骨架到光标处（Tab 也能补全半截控制器）。</p>
+            {!model && <p className="ed-hint">降级模式：使用内置骨架表；编辑器模型就绪后改为完整指令表。</p>}
+            {paletteGroups.map((group) => (
+              <div className="ed-palette-group" key={group.category}>
+                <h3>{group.label}</h3>
+                <div className="ed-palette-grid">
+                  {group.items.map((entry) => (
+                    <button
+                      key={`${group.category}-${entry.command}`}
+                      className={`ed-palette-btn${entry.tier ? ` tier-${entry.tier}` : ""}`}
+                      onClick={() => insertPalette(entry)}
+                      title={entry.summary || entry.example || entry.canonical || entry.command}
+                    >
+                      {entry.canonical ?? entry.command}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "info" && (
+          <div className="ed-info">
+            <p className="ed-hint">pack.json 的字段；「保存剧本信息」只写 pack.json（「保存」会连正文一起写）。</p>
+            <label className="ed-field">
+              <span>标题 title</span>
+              <input
+                className="ed-input"
+                value={meta.title}
+                onChange={(event) => setMeta((prev) => ({ ...prev, title: event.target.value }))}
+              />
+            </label>
+            <label className="ed-field">
+              <span>章节 chapter</span>
+              <input
+                className="ed-input"
+                value={meta.chapter}
+                onChange={(event) => setMeta((prev) => ({ ...prev, chapter: event.target.value }))}
+              />
+            </label>
+            <label className="ed-field">
+              <span>简介 description</span>
+              <input
+                className="ed-input"
+                value={meta.description}
+                onChange={(event) => setMeta((prev) => ({ ...prev, description: event.target.value }))}
+              />
+            </label>
+            <label className="ed-field">
+              <span>分支点 branchPoints（逗号分隔）</span>
+              <input
+                className="ed-input"
+                value={meta.branchPoints}
+                onChange={(event) => setMeta((prev) => ({ ...prev, branchPoints: event.target.value }))}
+              />
+            </label>
+            <button className="ed-btn" onClick={() => void saveMetaOnly()} disabled={busy === "meta"}>
+              {busy === "meta" ? "保存中…" : "保存剧本信息"}
+            </button>
+
+            <div className="ed-source">
+              <div>
+                「源文件」：<code>{sourceName}</code>
+              </div>
+              <em>
+                {sourceName === "script.txt"
+                  ? "读取顺序 script.txt → source/probe.txt。"
+                  : sourceName === "source/probe.txt"
+                    ? "script.txt 不存在，正文来自 source/probe.txt；保存也写回它（并在需要时创建目录）。"
+                    : "来自 URL 的 ?text=（只读演示）；桌面应用内按 script.txt → source/probe.txt 的顺序读取。"}
+              </em>
+              <em>包 ID：{id || "（无）"}（{readOnly ? "浏览器只读演示" : "Tauri 运行中"}）</em>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  /** 舞台（dock，task-10）：演到光标行时的画面；拖立绘 = 改该行 `x=`/`y=`。 */
+  const renderStagePane = () => (
+    <div className="ed-stage" data-editor-part="stage" style={{ height: 232 }}>
+      <div className="ed-stage-host" ref={stageHostRef}>
+        {StagePanePart ? (
+          <Suspense fallback={<em className="ed-stage-host-empty">正在载入舞台…</em>}>
+            <StagePanePart
+              chars={stageState.chars}
+              background={stageState.background}
+              height={214}
+              onMove={onStageMove}
+              onSelect={onStageSelect}
+              selected={stageSelected}
+            />
+          </Suspense>
+        ) : (
+          <em className="ed-stage-host-empty">
+            舞台预览由并行任务交付（frontend/src/components/editor/StagePane.tsx）；文件落盘后自动挂载。
+            当前解析：{stageState.chars.length} 个立绘 / 背景 {backgroundLabel(stageState.background)}
+          </em>
+        )}
+      </div>
+    </div>
+  );
+
+  /** 预览（Map）：iframe 宿主 + 重载 / 放大 / 关闭。 */
+  const renderPreviewPane = () => (
+    <div
+      className={`ed-preview${previewFull ? " full" : ""}`}
+      style={{ height: previewFull ? "62%" : previewHeight }}
+    >
+      <div className="ed-preview-resize" onPointerDown={onDragStart} title="拖动调整高度" />
+      <div className="ed-preview-bar">
+        <span>预览</span>
+        <span className="grow">{previewStatus}</span>
+        <button
+          className="ed-btn"
+          onClick={() => void openPreview(previewUpto > 0 ? previewUpto : undefined)}
+        >
+          重新载入预览
+        </button>
+        <button className="ed-btn" onClick={() => setPreviewFull((value) => !value)}>
+          {previewFull ? "还原" : "放大"}
+        </button>
+        <button className="ed-btn" onClick={() => { closePreview(); setPreviewOpen(false); }}>
+          关闭
+        </button>
+      </div>
+      <div className="ed-preview-frame" ref={hostRef} />
+    </div>
+  );
+
+  /** 分支图（Map，task-16）：点节点跳行；图上分叉 = 一次可撤销的整体替换。 */
+  const renderBranchPane = () => (
+    <div className="ed-branch-wrap">
+      {BranchGraphPart ? (
+      <Suspense fallback={<div className="ed-inspector-empty">正在载入分支图…</div>}>
+        <BranchGraphPart
+          text={text}
+          caretLine={caret.line}
+          onJumpToLine={(line: number) => jumpToLine(line)}
+          onPatch={(nextText: string, line?: number) => {
+            // 图上改分支 = 一次"整体替换"（撤销可回到改前）。
+            const before: HistoryEntry = { text: textRef.current, sel: [0, 0] };
+            const after: HistoryEntry = { text: nextText, sel: [0, 0] };
+            if (nextText === before.text) return;
+            commitHistory(before, after, "");
+            textRef.current = nextText;
+            pendingSel.current = [0, 0];
+            setText(nextText);
+            setDirty(true);
+            if (line) jumpToLine(line);
+          }}
+          onClose={() => mapToggle("branch")}
+          height={bounds.h - 220}
+        />
+      </Suspense>
+    ) : (
+      <div className="ed-inspector-empty">
+        分支图由并行任务交付（<code>frontend/src/components/editor/BranchGraph.tsx</code>）；文件落盘后自动挂载。
+        当前 {doc.stats?.decisions ?? 0} 个决策点 / {doc.stats?.combos ?? 0} 条组合。
+      </div>
+      )}
+    </div>
+  );
+
+  /** 面板内容分发（`Workbench.renderPanel`）。 */
+  const renderPanelFor = (id: PanelId) => {
+    const body =
+      id === "toolpanel" ? renderToolpanel() : id === "stage" ? renderStagePane() : id === "preview" ? renderPreviewPane() : renderBranchPane();
+    return (
+      <InspectorWindow
+        title={specOf(id).title}
+        state={{ kind: "dock", side: id === "stage" ? "left" : "right" }}
+        onChange={() => undefined}
+        shellKind={isMapPanel(id) ? "map" : "dock"}
+        bounds={bounds}
+        minW={specOf(id).minW}
+        minH={specOf(id).minH}
+        chrome={chromeFor(id)}
+        onClose={isMapPanel(id) ? () => mapToggle(id) : undefined}
+      >
+        {body}
+      </InspectorWindow>
+    );
+  };
 
   const title = meta.title || id || "（未命名剧本）";
 
@@ -2141,8 +2641,11 @@ export default function StoryEditorPage() {
           </button>
           <button
             className="ed-btn"
-            onClick={() => void openPreview()}
-            title="用当前编辑内容直接开演整篇（不必先保存）"
+            onClick={() => {
+              mapToggle("preview", true);
+              void openPreview();
+            }}
+            title="用当前编辑内容直接开演整篇（不必先保存；预览 = Map，开演时自动放进工作台）"
           >
             预览
           </button>
@@ -2154,40 +2657,23 @@ export default function StoryEditorPage() {
             {showInspector ? "收起检视器" : "检视器"}
           </button>
           <button
-            className={`ed-btn${showBranch ? " on" : ""}`}
-            onClick={() => setShowBranch((value) => !value)}
+            className={`ed-btn${inTree("branch") ? " on" : ""}`}
+            onClick={() => mapToggle("branch")}
             disabled={!BranchGraphPart}
             title={
               BranchGraphPart
-                ? "分支图（按 Decision/Predicate 画剧情走向；点击节点跳到该行）"
+                ? "分支图 = Map：按 Decision/Predicate 画剧情走向；开/关都在工作台里（拖标题条可拼接）"
                 : "分支图由并行任务交付；文件落盘后自动可用"
             }
           >
             ⌥ 分支图
           </button>
           <button
-            className="ed-btn"
-            onClick={() => {
-              // 关掉了就先恢复显示（回到 dock），否则在浮动/停靠之间切换。
-              if (!showPanel) {
-                setShowPanel(true);
-                setPanelWin({ kind: "dock", side: "right" });
-                return;
-              }
-              setPanelWin((prev) =>
-                prev.kind === "dock" ? floatFor(prev, bounds) : { kind: "dock", side: "right" }
-              );
-            }}
-            title="右栏工具面板：显示 · 浮动 / 停靠（也可双击它的标题条；✕ 关闭）"
+            className={`ed-btn${inTree("preview") ? " on" : ""}`}
+            onClick={() => mapToggle("preview")}
+            title="预览 = Map：把它放进 / 移出工作台（开演用左边的「预览」按钮）"
           >
-            {showPanel ? "⧉ 面板" : "面板"}
-          </button>
-          <button
-            className="ed-btn"
-            onClick={() => setShowStage((value) => !value)}
-            title="显示/隐藏舞台"
-          >
-            {showStage ? "收起舞台" : "舞台"}
+            预览面板
           </button>
           <button
             className="ed-btn"
@@ -2283,377 +2769,18 @@ export default function StoryEditorPage() {
         </div>
       )}
 
-      <div className="ed-split">
-        <div className="ed-code">
-          <div className="ed-code-scroll" ref={scrollerRef}>
-            <div className="ed-gutter" aria-hidden="true" ref={gutterRef} style={{ minHeight: docSize.height }}>
-              {lineStarts.map((_, index) => {
-                const severity = diagnosticsByLine.get(index + 1);
-                return (
-                  <span
-                    key={index}
-                    className={`ed-gutter-line${caret.line === index + 1 ? " current" : ""}${severity ? ` ${severity}` : ""}`}
-                    title={lineLabel(text, index + 1)}
-                    onClick={() => jumpToLine(index + 1)}
-                  >
-                    {index + 1}
-                  </span>
-                );
-              })}
-            </div>
-            <div
-              className="ed-code-lines"
-              ref={linesRef}
-              style={{
-                // 宽 = max(视口, 最长行)；高 = 行数 × LH + padding。
-                // 横向滚动因此真的生效（`min-width` 撑开 .ed-code-scroll）。
-                width: docSize.width > 0 ? `max(100%, ${Math.ceil(docSize.width) + PAD_X * 2}px)` : "100%",
-                height: docSize.height,
-              }}
-            >
-              <div className="ed-linebar" style={{ top: (caret.line - 1) * LH, height: LH }} />
-              <textarea
-                ref={taRef}
-                className="ed-textarea"
-                value={text}
-                spellCheck={false}
-                wrap="off"
-                aria-label="剧本正文"
-                placeholder={"[Character(name=\"char_002_amiya_1\", fadetime=0.5)]\n[name=\"阿米娅\"]  这边走，博士。"}
-                onChange={(event) => {
-                  hiddenRef.current = false;
-                  const nextValue = event.target.value;
-                  const previous = textRef.current;
-                  if (nextValue !== previous) {
-                    // `onChange` 只给最终值；用最小 diff 还原"插入了什么"，
-                    // 交给历史栈决定合并（连续打字 = 一条）。
-                    const change = diffOf(previous, nextValue);
-                    commitHistory(
-                      { text: previous, sel: [change.from, change.to] },
-                      { text: nextValue, sel: [change.from + change.insert.length, change.from + change.insert.length] },
-                      change.insert,
-                      "typing"
-                    );
-                  }
-                  setText(nextValue);
-                  setDirty(true);
-                  textRef.current = nextValue;
-                  requestAnimationFrame(syncCaret);
-                }}
-                onSelect={syncCaret}
-                onClick={syncCaret}
-                onKeyUp={syncCaret}
-                onScroll={syncCaret}
-                onMouseMove={(event) => hoverAt(event.clientX, event.clientY)}
-                onMouseLeave={() => setHover(null)}
-                onKeyDown={(event) => {
-                  const mod = event.ctrlKey || event.metaKey;
-                  if (mod && event.key.toLowerCase() === "s") {
-                    event.preventDefault();
-                    void doSave();
-                    return;
-                  }
-                  if (mod && (event.key === " " || event.code === "Space")) {
-                    event.preventDefault();
-                    hiddenRef.current = false;
-                    refreshPopupRef.current(false);
-                    return;
-                  }
-                  if (popup) {
-                    if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      setPopup((prev) => (prev ? { ...prev, index: (prev.index + 1) % prev.items.length } : prev));
-                      return;
-                    }
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      setPopup((prev) =>
-                        prev ? { ...prev, index: (prev.index - 1 + prev.items.length) % prev.items.length } : prev
-                      );
-                      return;
-                    }
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      acceptCompletion();
-                      return;
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      hiddenRef.current = true;
-                      setPopup(null);
-                      return;
-                    }
-                  }
-                  if (event.key === "Tab") {
-                    if (popup) {
-                      event.preventDefault();
-                      acceptCompletion();
-                      return;
-                    }
-                    if (tryTabSkeleton()) {
-                      event.preventDefault();
-                    }
-                  }
-                }}
-              />
-              {/* 不可见的测量锚点：最长行宽 / 前缀像素宽都在这里量（真实 DOM，
-                  与 textarea 同字体同字号，保证逐像素对齐）。 */}
-              <span className="ed-anchor" aria-hidden="true" ref={anchorRef} />
-              {popup && (
-                <div className="ed-popup" style={{ left: popup.x, top: popup.y }}>
-                  {popup.items.map((item, index) => (
-                    <div
-                      key={`${item.label}-${index}`}
-                      className={`ed-popup-item${index === popup.index ? " active" : ""}`}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        setPopup((prev) => (prev ? { ...prev, index } : prev));
-                        acceptCompletion();
-                      }}
-                    >
-                      {/* 有些模型项返回的是 rich 展示对象；统一转字符串后再渲染。 */}
-                      <span>{typeof item.display === "string" ? item.display : String(item.label ?? "")}</span>
-                      {typeof item.detail === "string" && item.detail && <small>{item.detail}</small>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {hover && (
-                <div className="ed-hover" style={{ left: hover.x, top: hover.y }}>
-                  <div className="ed-hover-title">{String(hover.info.title ?? "指令")}</div>
-                  <div>{String(hover.info.summary ?? "（没有说明）")}</div>
-                  {hoverParamText(hover.info.param) && (
-                    <div className="ed-hover-ref">参数 {hoverParamText(hover.info.param)}</div>
-                  )}
-                  {hover.info.anchor && <div className="ed-hover-ref">参考：{hover.info.anchor}</div>}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {loadState === "ready" && !text.trim() && (
-            <div className="ed-code-empty">
-              这个剧本包里的 <code>{sourceName}</code> 是空的。直接开写，然后 Ctrl+S 保存。
-            </div>
-          )}
-
-          {loadState === "empty" && (
-            <div className="ed-code-empty">
-              <p>
-                空态：<code>{id || "（无包 ID）"}</code> 还没读到剧本。
-              </p>
-              <p>
-                在桌面应用里，请从「同人剧本」页进入；可用 <code>[Cha</code> + Tab 起手，
-                或点右侧「控制器」面板插入骨架。
-              </p>
-            </div>
-          )}
-        </div>
-
-        {showPanel && (
-        <InspectorWindow
-          title="工具面板"
-          state={panelWin}
-          onChange={(next) => setPanelWin(clampWindowState(next, bounds))}
-          minW={280}
-          minH={200}
-          bounds={bounds}
-          storageKey="prts-editor-windows:panel"
-          onClose={() => setShowPanel(false)}
-        >
-        <div className="ed-panel">
-          <div className="ed-tabs">
-            <button className={`ed-tab${tab === "diag" ? " active" : ""}`} onClick={() => setTab("diag")}>
-              诊断
-              {diagnostics.length > 0 && <span className="ed-tab-count">{diagnostics.length}</span>}
-            </button>
-            <button className={`ed-tab${tab === "palette" ? " active" : ""}`} onClick={() => setTab("palette")}>
-              控制器
-            </button>
-            <button className={`ed-tab${tab === "info" ? " active" : ""}`} onClick={() => setTab("info")}>
-              剧本信息
-            </button>
-          </div>
-
-          <div className="ed-panel-body">
-            {/* 控制器检视器（task-9 交付）：常驻在面板顶部，整行改参数。 */}
-            {showInspector && (
-              <div className="ed-inspector" data-editor-part="inspector">
-                {ControllerInspectorPart ? (
-                  <Suspense fallback={<div className="ed-inspector-empty">正在载入控制器检视器…</div>}>
-                    <ControllerInspectorPart
-                      model={model ?? null}
-                      line={caretLineText}
-                      lineIndex={caretLineIndex}
-                      onApply={onInspectorApply}
-                      height={190}
-                    />
-                  </Suspense>
-                ) : (
-                  <div className="ed-inspector-empty">
-                    第 {caret.line} 行：<code>{caretLineText || "（空行）"}</code>
-                    <br />
-                    （控制器检视器由并行任务交付；文件落盘后自动挂载）
-                  </div>
-                )}
-              </div>
-            )}
-            {tab === "diag" && (
-              <>
-                {!model && <p className="ed-hint">编辑器模型尚未加载：当前只做基础统计（未知指令按模型就绪后复核）。</p>}
-                {diagnostics.length === 0 ? (
-                  <div className="ed-diag-ok">没有发现问题（{controllerCount} 条控制器 / {doc.stats?.decisions ?? 0} 个决策点）。</div>
-                ) : (
-                  <div className="ed-diag">
-                    {diagnostics.map((item, index) => (
-                      <button
-                        key={`${item.line}-${item.code}-${index}`}
-                        className={`ed-diag-item ${item.severity}`}
-                        onClick={() => (item.line ? jumpToLine(item.line) : undefined)}
-                        title={`跳到第 ${item.line || "?"} 行：${item.message}`}
-                      >
-                        <span className="ed-diag-code">
-                          {String(item.code)}
-                          {item.line ? ` L${item.line}` : ""}
-                        </span>
-                        <span>
-                          {item.message}
-                          {item.fix ? <small className="ed-diag-fix">{`修法：${String(item.fix)}`}</small> : null}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {tab === "palette" && (
-              <div className="ed-palette">
-                <p className="ed-hint">点击插入骨架到光标处（Tab 也能补全半截控制器）。</p>
-                {!model && <p className="ed-hint">降级模式：使用内置骨架表；编辑器模型就绪后改为完整指令表。</p>}
-                {paletteGroups.map((group) => (
-                  <div className="ed-palette-group" key={group.category}>
-                    <h3>{group.label}</h3>
-                    <div className="ed-palette-grid">
-                      {group.items.map((entry) => (
-                        <button
-                          key={`${group.category}-${entry.command}`}
-                          className={`ed-palette-btn${entry.tier ? ` tier-${entry.tier}` : ""}`}
-                          onClick={() => insertPalette(entry)}
-                          title={entry.summary || entry.example || entry.canonical || entry.command}
-                        >
-                          {entry.canonical ?? entry.command}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {tab === "info" && (
-              <div className="ed-info">
-                <p className="ed-hint">pack.json 的字段；「保存剧本信息」只写 pack.json（「保存」会连正文一起写）。</p>
-                <label className="ed-field">
-                  <span>标题 title</span>
-                  <input
-                    className="ed-input"
-                    value={meta.title}
-                    onChange={(event) => setMeta((prev) => ({ ...prev, title: event.target.value }))}
-                  />
-                </label>
-                <label className="ed-field">
-                  <span>章节 chapter</span>
-                  <input
-                    className="ed-input"
-                    value={meta.chapter}
-                    onChange={(event) => setMeta((prev) => ({ ...prev, chapter: event.target.value }))}
-                  />
-                </label>
-                <label className="ed-field">
-                  <span>简介 description</span>
-                  <input
-                    className="ed-input"
-                    value={meta.description}
-                    onChange={(event) => setMeta((prev) => ({ ...prev, description: event.target.value }))}
-                  />
-                </label>
-                <label className="ed-field">
-                  <span>分支点 branchPoints（逗号分隔）</span>
-                  <input
-                    className="ed-input"
-                    value={meta.branchPoints}
-                    onChange={(event) => setMeta((prev) => ({ ...prev, branchPoints: event.target.value }))}
-                  />
-                </label>
-                <button className="ed-btn" onClick={() => void saveMetaOnly()} disabled={busy === "meta"}>
-                  {busy === "meta" ? "保存中…" : "保存剧本信息"}
-                </button>
-
-                <div className="ed-source">
-                  <div>
-                    「源文件」：<code>{sourceName}</code>
-                  </div>
-                  <em>
-                    {sourceName === "script.txt"
-                      ? "读取顺序 script.txt → source/probe.txt。"
-                      : sourceName === "source/probe.txt"
-                        ? "script.txt 不存在，正文来自 source/probe.txt；保存也写回它（并在需要时创建目录）。"
-                        : "来自 URL 的 ?text=（只读演示）；桌面应用内按 script.txt → source/probe.txt 的顺序读取。"}
-                  </em>
-                  <em>包 ID：{id || "（无）"}（{readOnly ? "浏览器只读演示" : "Tauri 运行中"}）</em>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        </InspectorWindow>
-        )}
+      <div className="wb-stage">
+        <Workbench
+          state={wb}
+          visible={visible}
+          onState={onWorkbenchState}
+          layoutName={DEFAULT_LAYOUT_NAME}
+          onHide={(panel: PanelId) => mapToggle(panel)}
+          renderHolder={() => renderEditorPane()}
+          renderPanel={(panel: PanelId) => renderPanelFor(panel)}
+        />
       </div>
 
-      {/* 分支图（task-16 交付）：Decision/Predicate 的走向图；点节点跳行。 */}
-      {showBranch && (
-        <InspectorWindow
-          title="分支图"
-          state={branchWin}
-          onChange={(next) => setBranchWin(clampWindowState(next, bounds, 320, 200))}
-          minW={320}
-          minH={200}
-          bounds={bounds}
-          storageKey="prts-editor-windows:branch"
-          icon="⌥"
-          onClose={() => setShowBranch(false)}
-        >
-          {BranchGraphPart ? (
-            <Suspense fallback={<div className="ed-inspector-empty">正在载入分支图…</div>}>
-              <BranchGraphPart
-                text={text}
-                caretLine={caret.line}
-                onJumpToLine={(line: number) => jumpToLine(line)}
-                onPatch={(nextText: string, line?: number) => {
-                  // 图上改分支 = 一次"整体替换"（撤销可回到改前）。
-                  const before: HistoryEntry = { text: textRef.current, sel: [0, 0] };
-                  const after: HistoryEntry = { text: nextText, sel: [0, 0] };
-                  if (nextText === before.text) return;
-                  commitHistory(before, after, "");
-                  textRef.current = nextText;
-                  pendingSel.current = [0, 0];
-                  setText(nextText);
-                  setDirty(true);
-                  if (line) jumpToLine(line);
-                }}
-                onClose={() => setShowBranch(false)}
-                height={bounds.h - 220}
-              />
-            </Suspense>
-          ) : (
-            <div className="ed-inspector-empty">
-              分支图由并行任务交付（<code>frontend/src/components/editor/BranchGraph.tsx</code>）；文件落盘后自动挂载。
-              当前 {doc.stats?.decisions ?? 0} 个决策点 / {doc.stats?.combos ?? 0} 条组合。
-            </div>
-          )}
-        </InspectorWindow>
-      )}
 
       {/* 插入向导（task-9 交付）：分类 → 指令 → 参数 → 预览 → 插入到光标。 */}
       {wizardOpen && ControllerWizardPart && (
@@ -2675,81 +2802,6 @@ export default function StoryEditorPage() {
             </Suspense>
           </div>
         </div>
-      )}
-
-      {/* 舞台（task-10 交付）：按「演到光标行」的状态画出 16:9 画面；
-          拖动立绘 = 改该行 `x=`/`y=`。文件缺失时只显示占位行。 */}
-      {showStage && (
-      <InspectorWindow
-        title="舞台"
-        state={stageWin}
-        onChange={(next) => setStageWin(clampWindowState(next, bounds, 280, 160))}
-        minW={280}
-        minH={160}
-        bounds={bounds}
-        storageKey="prts-editor-windows:stage"
-        icon="🎬"
-        onClose={() => setShowStage(false)}
-      >
-      <div className="ed-stage" data-editor-part="stage" style={stageWin.kind === "dock" ? { height: 232 } : { height: "100%" }}>
-        <div className="ed-stage-host" ref={stageHostRef}>
-          {StagePanePart ? (
-            <Suspense fallback={<em className="ed-stage-host-empty">正在载入舞台…</em>}>
-              <StagePanePart
-                chars={stageState.chars}
-                background={stageState.background}
-                height={214}
-                onMove={onStageMove}
-                onSelect={onStageSelect}
-                selected={stageSelected}
-              />
-            </Suspense>
-          ) : (
-            <em className="ed-stage-host-empty">
-              舞台预览由并行任务交付（frontend/src/components/editor/StagePane.tsx）；文件落盘后自动挂载。
-              当前解析：{stageState.chars.length} 个立绘 / 背景 {backgroundLabel(stageState.background)}
-            </em>
-          )}
-        </div>
-      </div>
-      </InspectorWindow>
-      )}
-
-      {previewOpen && (
-        <InspectorWindow
-          title="预览"
-          state={{ kind: "dock", side: previewWin.kind === "dock" ? previewWin.side : "right" }}
-          onChange={(next) => setPreviewWin(clampWindowState(next, bounds, 320, 200))}
-          minW={320}
-          minH={200}
-          bounds={bounds}
-          storageKey="prts-editor-windows:preview"
-          onClose={() => { closePreview(); setPreviewOpen(false); }}
-        >
-        <div
-          className={`ed-preview${previewFull ? " full" : ""}${previewWin.kind === "float" ? " float" : ""}`}
-          style={previewWin.kind === "float" ? { height: "100%" } : { height: previewFull ? "62%" : previewHeight }}
-        >
-          <div className="ed-preview-resize" onPointerDown={onDragStart} title="拖动调整高度" />
-          <div className="ed-preview-bar">
-            <span>预览</span>
-            <span className="grow">{previewStatus}</span>
-            <button
-              className="ed-btn"
-              onClick={() => void openPreview(previewUpto > 0 ? previewUpto : undefined)}
-            >
-              重新载入预览
-            </button>
-            <button className="ed-btn" onClick={() => setPreviewFull((value) => !value)}>
-              {previewFull ? "还原" : "放大"}
-            </button>
-            <button className="ed-btn" onClick={() => { closePreview(); setPreviewOpen(false); }}>
-              关闭
-            </button>
-          </div>
-          <div className="ed-preview-frame" ref={hostRef} />
-        </div>
-        </InspectorWindow>
       )}
 
       <div className="ed-status">
