@@ -254,8 +254,20 @@ export function mirrorUrl(source, key, custom) {
 }
 
 /**
- * 试源顺序：首选源 → `pack` → `prts` → jsd → fastly → ghproxy（选了 `custom` 时
- * 自定义源排在最前）。`pack`/`prts` 是同一份官方直链，只保留先出现的那个。
+ * 快照里的**引擎键**前缀：`prts:static.prts.wiki/widgets/production/StoryPlayer.<hash>.js`。
+ * （`prts` 之外的 `ui:` 是早期草稿的写法，`parseKey` 不认 —— 当前只用 `prts:`。）
+ */
+export const MIRROR_KEY_PREFIX = PRTS_SCHEME;
+
+/** 该 key 是否**可镜像**（`pack:` key 不算；不在 `MIRRORABLE_HOSTS` 的 host 不算）。 */
+export function isMirrorable(key) {
+  const part = parseKey(key);
+  return Boolean(part && part.scheme !== "pack" && isMirrorableHost(part.host));
+}
+
+/**
+ * 试源顺序：首选源 → （自定义）→ 官方 → 各镜像，去掉展开成**同一 URL** 的重复项
+ * 与该 key 不适用的源。首选源**永远排第一**（BRIEF §3.3：固定单一源时先按它试）。
  *
  * @param {string} [preferred]
  * @returns {string[]}
@@ -271,6 +283,26 @@ export function buildSourceOrder(preferred) {
   const prtsAt = order.indexOf("prts");
   const dup = packAt >= 0 && prtsAt >= 0 ? (packAt < prtsAt ? "prts" : "pack") : null;
   return order.filter((id) => id !== dup);
+}
+
+/**
+ * 按**首选源**重排整条链（与 `buildSourceOrder` 同义，参数多一个 key）。
+ * 供「固定单一源 / 自动回退」两种模式共用；`sources` 显式给出时不再重排。
+ */
+export function orderFor(_key, preferred, opts = {}) {
+  if (Array.isArray(opts.sources) && opts.sources.length) return [...opts.sources];
+  return buildSourceOrder(preferred);
+}
+
+/** 兼容别名：`rewriteUrl(raw, source)` = `mirrorUrl(source, raw)`。 */
+export function rewriteUrl(a, b, custom) {
+  const [source, key] = SOURCE_IDS.includes(a) ? [a, b] : [b, a];
+  return mirrorUrl(source, key, custom);
+}
+
+/** 兼容别名（BRIEF §2.6 的 `mirrorUrl(source, raw)` 参数序）。 */
+export function assetUrl(source, key, custom) {
+  return mirrorUrl(source, key, custom);
 }
 
 /**
