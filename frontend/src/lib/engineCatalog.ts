@@ -47,9 +47,13 @@ export interface CatalogSummary {
   entries: number;
   engine: number;
   byKind: Record<CatalogKind, number>;
+  /** `src/akstage/engineCatalog.js::catalogSummary()` 的版本串（`catalog:<n>`）。 */
   version: string;
-  generatedAt: string;
-  sources: string[];
+  /** 可走镜像的 host（`assetRouting.js::MIRRORABLE_HOSTS`）；JS 实现里叫 `mirrorableHosts`。 */
+  mirrorableHosts?: readonly string[];
+  /** 目录首条的生成时间（可选：离线目录不带）。 */
+  generatedAt?: string;
+  sources: readonly string[];
 }
 
 /** 源目录（进程内缓存；含引擎代、上游 3 表、剧情变量、背景、立绘）。 */
