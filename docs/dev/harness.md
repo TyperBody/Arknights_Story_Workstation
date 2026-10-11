@@ -33,7 +33,7 @@
 | ⑩ | **编辑器键位 = VSCode**（Tab 插 `\t`、Enter 自动缩进、Backspace 跳 tab stop）+ 脚本文本**语法着色层**与 textarea 逐像素对齐（`tab-size: 8`、Tab 宽 = 8 字符格、行 top 误差 0px、光标像素误差 ≤ 1px、DOM span ↔ 内核 `tokenizeLine` 逐 span 对拍） | `_editor-tab-hl-check.mjs`（31） | editor |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
-`npm run test:harness` 当前 = **20 个 harness**（workbench 8 / branch 1 / engine 2 / assets 3 / shell 6 / player 1）。
+`npm run test:harness` 当前 = **28 个 harness**（workbench 8 / branch 1 / engine 2 / assets 3 / shell 6 / player 2 / editor 6）。
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
 
