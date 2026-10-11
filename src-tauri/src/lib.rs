@@ -385,6 +385,13 @@ pub fn run() {
                 ),
                 Err(error) => log::warn!("[library] seed failed: {error}"),
             }
+            // Bundled starter asset set (P9): copy the shipped files into the data
+            // root on every boot (idempotent) so upgrades get them too.
+            match assets::seed_starter_sync(app.handle()) {
+                Ok(copied) if copied > 0 => log::info!("[starter] boot sync copied={copied}"),
+                Ok(_) => {}
+                Err(error) => log::warn!("[starter] boot sync failed: {error}"),
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

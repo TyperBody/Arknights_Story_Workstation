@@ -189,6 +189,28 @@ Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust �
 
 > ⚠️ 已知限制：Linux 的 WebKitGTK 可能缺少 mp3/ogg 编解码器导致**音频不出声**，画面正常；Windows / macOS 自带编解码器无此问题。
 
+### 随包素材：起步素材集（P9）
+
+`src-tauri/resources/assets/starter/`（287 个文件 / 14.6 MB）是**策展**过的常用素材：
+7 张 UI 小图（PNG）+ 120 张高频背景 + 160 张主要角色立绘（PNG → WebP q78/q85）。
+它让自创剧情不再「每次打开都联网拉资料」。
+
+- 生成/校验：`node scripts/fanfic/fetch-starter-assets.mjs`（`--check` 离线、`--budget=25MB`、
+  `--only=core|background|portrait`、`--force`）。选择规则**确定性**：按剧情语料的
+  `[Background(image=…)]` / `[Character|charslot(name=…)]` 频次降序；语料目录同
+  `scripts/fanfic/stage-selftest.mjs`（`AKSTAGE_CORPUS_DIR` 可覆盖）。
+- 清单：`curated.json`（key/group/bytes/sha256）+ `bundles.json`（canonical key → 文件名）。
+  三者（含 `SOURCES.md` 出处）由脚本一次生成，`build/harness/starter-assets.mjs` 全量回归。
+- **随包**：`tauri.conf.json` 的 `bundle.resources` 带上 `resources/assets/starter`（**只加这一条**，
+  不给每张图写 `include_bytes!`）。启动时 `seed_starter_sync`（幂等）把文件复制到
+  `<资源目录>/assets/starter/`；开发者直接 `cargo build` 时 `bundle.resources` 也把资源放到
+  `target/release/resources/`（探针据此模拟打包布局）。
+- **命中顺序**：`prts-cdn://` 覆盖层先查 `assets/starter/`、再查 `assets/sample/`
+  （`bundled_asset_keys()` 合并两份清单，`packAssets.ts` 自动继承）；两边都没有 → 本地媒体缓存 →
+  按「下载源」源链取字节并缓存。
+- 设置 →「缓存管理」显示 `随包素材：N 张 / X MB`（`starter_set_info`），资源目录缺文件时可
+  「补齐随包素材」（`starter_set_sync`）。
+
 ## CI / Release
 
 - **CI**（`.github/workflows/ci.yml`）：每次 push / PR 运行静态检查；push 时额外为各平台构建安装包并作为 Workflow 产物上传（即「CI 版」）。

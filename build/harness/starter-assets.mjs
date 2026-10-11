@@ -81,5 +81,16 @@ t("⑤ tauri.conf.json 声明了随包 resources", /"resources":\s*\[[\s\S]*reso
 const settings = readFileSync(join(ROOT, "frontend/src/pages/SettingsPage.tsx"), "utf8");
 t("⑥ 设置页有「随包素材」一行 + 补齐按钮", /随包素材/.test(settings) && /starter_set_sync/.test(settings) && /STARTER_GROUP_LABELS/.test(settings));
 
+// ⑦ 可选：原生（Xvfb + 真 WebKitGTK）跑一遍 seed + 覆盖层
+if (process.argv.includes("--native")) {
+  try {
+    const out = execFileSync("node", [join(ROOT, "build/harness/native-source-probe.mjs")], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+    const seeded = /ok   起步素材集 seed 到资源目录/.test(out);
+    t("⑦ 原生 seed（native-source-probe）", seeded, out.trim().split("\n").filter((l) => l.startsWith("ok   起步")).join(" | "));
+  } catch (error) {
+    t("⑦ 原生 seed（native-source-probe）", false, String(error.message).slice(0, 200));
+  }
+}
+
 console.log(`\n${pass} pass / ${fail} fail`);
 if (fail) process.exitCode = 1;

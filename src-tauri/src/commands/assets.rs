@@ -637,13 +637,6 @@ fn seed_library_at(library: &std::path::Path) -> Result<SeededInfo, String> {
         // 顺带落一份「资源目录」可见的样例素材（`<root>/assets/sample/`，含 SOURCES.md）。
         if let Some(root) = library.parent().and_then(|p| p.parent()) {
             let _ = seed_sample_assets(root);
-            // 起步素材集（P9）：随包文件复制进资源目录（幂等）。随包资源缺失时
-            // `seed_starter_assets` 返回 0，不报错。
-            match seed_starter_assets(root, assets_resource_dir().as_deref()) {
-                Ok(copied) if copied > 0 => log::info!("[starter] seeded {copied} file(s)"),
-                Ok(_) => {}
-                Err(error) => log::warn!("[starter] seed failed: {error}"),
-            }
         }
         seeded = 1;
     }
@@ -658,6 +651,23 @@ fn seed_library_at(library: &std::path::Path) -> Result<SeededInfo, String> {
 pub fn seed_library_sync() -> Result<SeededInfo, String> {
     let library = resolve_library_dir(&crate::data_root::data_root())?;
     seed_library_at(&library)
+}
+
+/// 启动时的**起步素材集**同步（P9）：把安装包 resources 里的文件复制进
+/// `<资源目录>/assets/starter/`。**每次启动都跑**（幂等：同大小即跳过），
+/// 这样老用户升级到带起步素材集的版本也会自动拿到，而不只是首启。
+/// 随包资源缺失（开发运行 / 未按 `bundle.resources` 打包）→ 返回 0，不报错。
+pub fn seed_starter_sync(app: &tauri::AppHandle) -> Result<usize, String> {
+    let root = crate::data_root::data_root();
+    let source = starter_resource_dir(app).or_else(assets_resource_dir);
+    let copied = seed_starter_assets(&root, source.as_deref())?;
+    if copied > 0 {
+        log::info!(
+            "[starter] seeded {copied} file(s) → {}",
+            root.join("assets").join("starter").display()
+        );
+    }
+    Ok(copied)
 }
 
 /// 内置样例自带的 8 份素材（文件名 → 字节）。编译期内置（`include_bytes!`），
@@ -847,6 +857,7 @@ pub(crate) fn assets_resource_dir() -> Option<std::path::PathBuf> {
 }
 
 /// 自检/测试用：起步素材集 seed 的入口（显式给 source 目录）。
+#[cfg(test)]
 pub(crate) fn seed_starter_assets_at(
     root: &std::path::Path,
     source: &std::path::Path,

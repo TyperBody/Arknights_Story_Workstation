@@ -9,7 +9,7 @@
 //
 // 运行：`node build/harness/native-source-probe.mjs`（Xvfb + dbus-run-session）。
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +34,18 @@ for (const tool of ["Xvfb", "xdotool"]) {
 
 mkdirSync(dataDir, { recursive: true });
 rmSync(join(dataDir, "media"), { recursive: true, force: true });
+rmSync(join(dataDir, "assets", "starter"), { recursive: true, force: true });
+
+// 起步素材集（P9）：`bundle.resources` 由 **bundler** 复制到 resource_dir；直接
+// `cargo build` 不会有这一步，所以这里模拟打包布局（与 `tauri build` 一致），
+// 让 seed 路径也在原生探针里跑一遍。
+const starterSrc = resolve(repo, "src-tauri/resources/assets/starter");
+const starterDst = join(dirname(app), "resources/assets/starter");
+if (existsSync(starterSrc) && !existsSync(starterDst)) {
+  mkdirSync(dirname(starterDst), { recursive: true });
+  cpSync(starterSrc, starterDst, { recursive: true });
+  console.log(`info 已把起步素材集放到 exe 旁（模拟打包布局）：${starterDst}`);
+}
 
 async function launch(logName, offline) {
   const env = [
@@ -89,6 +101,17 @@ try {
   t("store 顶层只有 host 目录（镜像 URL 不改落盘形状）",
     topDirs.length > 0 && topDirs.every((d) => d.includes(".")),
     `${topDirs.join(",")} | production: ${storeFiles.length} file(s)`);
+
+  // ①b 起步素材集 seed（P9）：随包资源 → `<data>/assets/starter/`（含清单）。
+  const starterDir = join(dataDir, "assets", "starter");
+  const starterImages = existsSync(starterDir)
+    ? readdirSync(starterDir).filter((n) => /\.(png|webp|jpe?g)$/i.test(n)).length
+    : 0;
+  const onlineLog = readFileSync(logPath, "utf8");
+  t("起步素材集 seed 到资源目录（P9）", starterImages >= 200 && existsSync(join(starterDir, "bundles.json")),
+    `${starterImages} 张 @ ${starterDir}`);
+  t("seed 走的是随包 resources（日志）", /\[starter\] seeded|\[starter\] sync/.test(onlineLog),
+    (onlineLog.match(/\[starter\][^\n]*/g) ?? []).slice(0, 2).join(" | ") || "无");
 
   // ② 断网二跑：覆盖层 + 本地缓存必须够用（不再联网）。
   logPath = await launch("offline.log", true);
