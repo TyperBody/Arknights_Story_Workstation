@@ -11,6 +11,8 @@
 | 7 | 设计里可换下载镜像源 | `node tools/mirror/mirror-selftest.mjs` + 设置页 | ✅ 94/94；设置「下载源」下拉 + 自定义模板；镜像仓未发布前自动回退 |
 | 8 | 并发拉满 | `demo-check` ⑦、`src-tauri/src/download.rs` | ✅ 下载并发默认 12（1…32）、manifest 10、默认不限速 |
 
+| 9 | 用户追加：「要打包素材，不希望自创剧情每次打开都要下载」 | `npm run test:starter`（17）+ `scripts/fanfic/selfcontained-check.mjs`（原生 PASSED） | ✅ 287 张 / 14.6 MB 随包（`bundle.resources`）+ 覆盖层优先 + 每启 seed |
+
 ## 汇总命令（Lead 最终跑）
 
 ```
@@ -25,6 +27,9 @@ node build/harness/window-chrome.mjs     # 5/5
 node build/harness/workbench-drag.mjs     # 3/3
 node build/harness/branch-shot.mjs        # 59/0
 node build/harness/engine-failure.mjs     # 2/2
+npm run test:harness                     # 15 个 harness（scripts/harness/run.mjs）
+npm run test:starter                     # 17/17
+node scripts/fanfic/selfcontained-check.mjs  # 原生 WebKitGTK：PASSED（在线 8/8 + 断网 8/8 overlay）
 node build/ctx/… tools/mirror/mirror-selftest.mjs   # 94/94
 ```
 

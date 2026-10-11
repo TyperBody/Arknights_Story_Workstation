@@ -121,18 +121,28 @@ function installPlayerChrome(win: StoryPlayerWindow, mode: PlayerChrome): void {
   // - 收起态 `pointer-events:none`，卡片收不到 `pointerenter`，所以显示走
   //   `pointermove` 的**几何**命中（指针落在底栏矩形内）；隐藏走 `pointerout`
   //   离开卡片（含指针移出 iframe → `pointerleave`）。
+  /** 底栏当前是不是「收起」——以**根类**为准。 */
+  const isHidden = (): boolean => !doc.documentElement.classList.contains(CHROME_OPEN);
+  /** 把卡片类同步到当前状态（卡片是引擎异步挂载的：出现时才补上）。 */
+  const paint = (): void => {
+    const hidden = isHidden();
+    doc.querySelectorAll(CARD).forEach((node) => node.classList.toggle(CHROME_HIDDEN, hidden));
+  };
   const setHidden = (hidden: boolean): void => {
     doc.documentElement.classList.add(CHROME_AUTO);
     doc.documentElement.classList.toggle(CHROME_OPEN, !hidden);
-    doc.querySelectorAll(CARD).forEach((node) => node.classList.toggle(CHROME_HIDDEN, hidden));
+    paint();
   };
+  /** 跨 realm（引擎 iframe）判定：`instanceof Node` 会恒 false，按 `nodeType` 鸭子类型。 */
   const inCard = (target: EventTarget | null): boolean => {
     const card = cardOf();
-    return Boolean(card && target instanceof Node && card.contains(target));
+    const node = target as Node | null;
+    if (!card || !node || typeof node.nodeType !== "number") return false;
+    return card === node || card.contains(node);
   };
   const onMove = (event: Event): void => {
     const card = cardOf();
-    if (!card || !card.classList.contains(CHROME_HIDDEN)) return;
+    if (!card || !isHidden()) return;
     const { clientX, clientY } = event as PointerEvent;
     const rect = card.getBoundingClientRect();
     if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
@@ -147,6 +157,7 @@ function installPlayerChrome(win: StoryPlayerWindow, mode: PlayerChrome): void {
     if (inCard(event.target) && !inCard((event as PointerEvent).relatedTarget)) setHidden(true);
   };
   doc.addEventListener("pointermove", onMove, { passive: true });
+  doc.addEventListener("pointermove", paint, { passive: true });
   doc.addEventListener("pointerover", onOver, { passive: true });
   doc.addEventListener("pointerout", onOut, { passive: true });
   doc.addEventListener("pointerleave", () => setHidden(true), { passive: true });
