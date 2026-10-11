@@ -224,6 +224,71 @@ export function deleteLayout(name: string): void {
   if (readRaw(WB_KEY_ACTIVE) === clean) writeRaw(WB_KEY_ACTIVE, DEFAULT_LAYOUT_NAME);
 }
 
+// ── 视图状态（面板开关 / 浮动窗 / 折叠）──────────────────────────────
+//
+// 为什么**不**和布局文本合并：布局串只描述"树里怎么分屏"（`workbenchStack`
+// 的 `stringify`/`parse`，格式对用户可见）；"哪几个 Map 面板开着""哪个窗浮着"
+// 是**另一个维度**，塞进串里会污染格式，也让旧串解析变复杂。所以单开一条
+// `prts-editor-wb:view`（JSON），只做"记忆"。
+
+/** 视图状态键。 */
+export const WB_KEY_VIEW = "prts-editor-wb:view";
+
+/** 面板视图状态（持久化形状；坏数据逐字段回落）。 */
+export interface WorkbenchView {
+  /** 树里（可见）的面板。 */
+  visible: string[];
+  /** 浮动窗矩形：`panelId → {x,y,w,h}`。 */
+  floats: Record<string, { x: number; y: number; w: number; h: number }>;
+  /** 收起（`▾`）的面板。 */
+  folded: string[];
+}
+
+/** 读视图状态；没存过 / 坏 JSON → `null`（调用方用默认）。 */
+export function readView(): WorkbenchView | null {
+  const raw = readRaw(WB_KEY_VIEW);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<WorkbenchView>;
+    const rect = (value: unknown): { x: number; y: number; w: number; h: number } | null => {
+      if (!value || typeof value !== "object") return null;
+      const v = value as Record<string, unknown>;
+      const num = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? n : null);
+      const [x, y, w, h] = [num(v.x), num(v.y), num(v.w), num(v.h)];
+      if (x === null || y === null || w === null || h === null) return null;
+      return { x, y, w, h };
+    };
+    const floats: WorkbenchView["floats"] = {};
+    if (parsed.floats && typeof parsed.floats === "object") {
+      for (const [id, value] of Object.entries(parsed.floats)) {
+        const r = rect(value);
+        if (r) floats[id] = r;
+      }
+    }
+    return {
+      visible: Array.isArray(parsed.visible) ? parsed.visible.filter((id): id is string => typeof id === "string") : [],
+      floats,
+      folded: Array.isArray(parsed.folded) ? parsed.folded.filter((id): id is string => typeof id === "string") : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 写视图状态。 */
+export function saveView(view: Partial<WorkbenchView>): void {
+  const next: WorkbenchView = {
+    visible: Array.isArray(view.visible) ? view.visible : [],
+    floats: view.floats ?? {},
+    folded: Array.isArray(view.folded) ? view.folded : [],
+  };
+  try {
+    writeRaw(WB_KEY_VIEW, JSON.stringify(next));
+  } catch {
+    // 落库失败只是"这次没记住"
+  }
+}
+
 /** 活跃布局名（没存过 → `default`）。 */
 export function activeLayout(): string {
   const raw = (readRaw(WB_KEY_ACTIVE) ?? "").trim();

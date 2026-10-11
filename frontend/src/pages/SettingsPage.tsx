@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LOCALES, LOCALE_LABELS, useLocale, setLocale, translate, type Locale } from "../i18n/index.ts";
 import { isDebugConsoleEnabled, setDebugPref, debugBuildDefault } from "../lib/debugSettings";
-import { getPlayerChrome, isHidePlayerBack, setHidePlayerBack, setPlayerChrome, type PlayerChrome } from "../lib/uiSettings";
+import { getPlayerChrome, isHidePlayerBack, isPlayerChromeHover, setHidePlayerBack, setPlayerChrome, setPlayerChromeHover, type PlayerChrome } from "../lib/uiSettings";
 import { getItem, setItem } from "../lib/stateStore";
 import { isAndroid } from "../lib/platform";
 import { getDownloadSettings, setDownloadSettings } from "../lib/predownload";
@@ -101,6 +101,7 @@ export default function SettingsPage() {
   const [debugConsole, setDebugConsole] = useState(isDebugConsoleEnabled());
   const [hidePlayerBack, setHidePlayerBackState] = useState(isHidePlayerBack());
   const [playerChrome, setPlayerChromeState] = useState<PlayerChrome>(getPlayerChrome());
+  const [chromeHover, setChromeHoverState] = useState(isPlayerChromeHover());
   // Download tuning: concurrency + bandwidth limit (shown in KB/s; 0 = unlimited).
   // 并发默认 12（1…32）、manifest 并发默认 10（1…16）—— 均可在 `prts-app-settings` 里改，
   // 未设置时用 `DEFAULT_SETTINGS`；老用户已保存的 Rust 端设置优先（见 useEffect）。
@@ -278,7 +279,7 @@ export default function SettingsPage() {
     showMsg(next ? "已隐藏播放器内的返回按钮（用系统返回手势）" : "已显示播放器内的返回按钮");
   };
 
-  /** 「播放器底栏」三档：自动隐藏 → 隐藏 → 显示 → 自动隐藏。 */
+  /** 「播放器底栏」三档：显示 → 隐藏 → 自动隐藏 → 显示。 */
   const cyclePlayerChrome = () => {
     const order: PlayerChrome[] = ["show", "auto", "hide"];
     const next = order[(order.indexOf(playerChrome) + 1) % order.length];
@@ -287,7 +288,7 @@ export default function SettingsPage() {
     showMsg(next === "show"
       ? "播放器底栏：始终显示"
       : next === "auto"
-        ? "播放器底栏：自动隐藏（默认；底栏常藏，指针移上去才显示）"
+        ? (chromeHover ? "播放器底栏：自动隐藏（底栏常藏，指针移上去才显示）" : "播放器底栏：自动隐藏（永久隐藏；可在下面打开「悬停显示」）")
         : "播放器底栏：隐藏（可用「文本」面板查看对话）");
   };
 
@@ -587,9 +588,28 @@ export default function SettingsPage() {
             {playerChrome === "show"
               ? "播放时始终显示底部控制条（播放模式 / 播放速度那一行）"
               : playerChrome === "auto"
-                ? "默认；底栏常藏，指针移上去才显示"
+                ? (chromeHover ? "底栏常藏，指针移上去才显示" : "默认；底栏永久隐藏，画面更干净")
                 : "播放时隐藏底部控制条，画面更干净"}
           </span>
+          {/* 「悬停显示」开关：默认关（= 永久隐藏）。只在「自动隐藏」档下有意义。 */}
+          {playerChrome === "auto" && (
+            <button
+              className="nav-btn"
+              data-chrome-hover={chromeHover ? "on" : "off"}
+              aria-pressed={chromeHover}
+              onClick={() => {
+                const next = !chromeHover;
+                setPlayerChromeHover(next);
+                setChromeHoverState(next);
+                showMsg(next
+                  ? "播放器底栏：指针移上去才显示"
+                  : "播放器底栏：永久隐藏（指针移上去也不出现）");
+              }}
+              title="「自动隐藏」档下：打开则指针移到底栏才显示；关闭则底栏永久隐藏"
+            >
+              悬停显示：{chromeHover ? "开" : "关"}
+            </button>
+          )}
         </div>
       </div>
 

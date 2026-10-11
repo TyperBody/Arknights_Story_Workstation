@@ -3,7 +3,7 @@ import { captureIframe, pushLog } from "./debugLog";
 import { getItem } from "./stateStore";
 import { PROXY_BASE, discoverAssetDomains, proxyUrl, rewriteAllCdnUrls } from "./proxy";
 import { packAssetCount, packAssetMissCount, packAssetShimAvailable, packAssetShimCode, resolvePackAsset as resolvePackAssetLive } from "./packAssets";
-import { getPlayerChrome, type PlayerChrome } from "./uiSettings";
+import { getPlayerChrome, isPlayerChromeHover, type PlayerChrome } from "./uiSettings";
 import {
   announceEngineFailure,
   annotateFallback,
@@ -100,6 +100,69 @@ const CHROME_AUTO = "ark-chrome-auto";
 const CHROME_OPEN = "ark-chrome-open";
 /** 收起（隐藏）类：卡片自己带一份，隐藏态的 `pointer-events:none` 也在 CSS 里。 */
 const CHROME_HIDDEN = "ark-chrome-hidden";
+/** `auto` 且"悬停显示"打开时的根类（`ark-chrome-auto` 之上再加一层）。 */
+const CHROME_HOVER = "ark-chrome-hover";
+
+/** 舞台基准分辨率（引擎 `mount()` 就是 `width:1280,height:720`）。 */
+const STAGE_W = 1280;
+const STAGE_H = 720;
+
+/**
+ * **舞台比例（cover）**：铺满容器、按比例放大、多余裁掉 —— 绝不拉伸。
+ *
+ * 引擎 `mount()` 固定按 1280×720 建帧缓冲（`renderer.resize(1280,720,dpr)`），再把
+ * canvas 设成 `width:100%;height:100%` —— **比例完全由父容器决定**。21:9 的预览槽位
+ * 里 16:9 的画面就被横向拉长（用户："预览的舞台会扭曲"）。
+ *
+ * 做法：量 `section` 的可用盒子，算 **cover 盒**
+ * （`scale = max(w/1280, h/720)` → `1280·scale × 720·scale`），写进 CSS 变量
+ * `--ark-stage-w/h`；canvas/video 的居中定位与尺寸在注入的 CSS 里（`!important`
+ * 压过引擎内联值），`overflow:hidden` 裁掉多余部分。`ResizeObserver` +
+ * `window.resize` 跟随；引擎异步挂载 → 再用 `MutationObserver` 触发一次重测。
+ */
+export function installStageFit(win: StoryPlayerWindow, doc: Document): void {
+  try {
+    const sectionOf = (): HTMLElement | null => doc.querySelector<HTMLElement>(".story-player > section");
+    const apply = (): void => {
+      try {
+        const section = sectionOf();
+        if (!section) return;
+        const w = section.clientWidth;
+        const h = section.clientHeight;
+        if (!w || !h) return;
+        const scale = Math.max(w / STAGE_W, h / STAGE_H); // cover：取大 → 铺满
+        section.style.setProperty("--ark-stage-w", `${Math.round(STAGE_W * scale)}px`);
+        section.style.setProperty("--ark-stage-h", `${Math.round(STAGE_H * scale)}px`);
+      } catch {
+        // 量不到就保持 100%（旧行为），不影响播放
+      }
+    };
+    const realm = win as unknown as {
+      ResizeObserver?: typeof ResizeObserver;
+      MutationObserver?: typeof MutationObserver;
+    };
+    let observer: ResizeObserver | null = null;
+    const observe = (): void => {
+      const section = sectionOf();
+      if (!section || observer || !realm.ResizeObserver) return;
+      observer = new realm.ResizeObserver(apply);
+      observer.observe(section);
+    };
+    const tick = (): void => {
+      observe();
+      apply();
+    };
+    tick();
+    if (realm.MutationObserver) {
+      const mo = new realm.MutationObserver(() => tick());
+      mo.observe(doc.documentElement, { childList: true, subtree: true });
+    }
+    (doc.defaultView ?? win).addEventListener("resize", apply);
+    (doc.defaultView ?? win).addEventListener("orientationchange", apply);
+  } catch {
+    // 舞台比例是"锦上添花"：失败也不该影响播放。
+  }
+}
 
 function installPlayerChrome(win: StoryPlayerWindow, mode: PlayerChrome): void {
   if (mode === "show") return;
@@ -157,6 +220,16 @@ function installPlayerChrome(win: StoryPlayerWindow, mode: PlayerChrome): void {
     // `relatedTarget` 仍在底栏内（卡片子元素之间移动）就不收。
     if (inCard(event.target) && !inCard((event as PointerEvent).relatedTarget)) setHidden(true);
   };
+  // 悬停开关：`off`（默认）→ 只加 `ark-chrome-auto`（CSS 直接 `opacity:0`，指针
+  // 命中也不亮）；`on` → 再加 `ark-chrome-hover`，由 `ark-chrome-open` 决定显示。
+  if (!isPlayerChromeHover()) {
+    doc.documentElement.classList.remove(CHROME_HOVER);
+    // 永久隐藏：不装监听（`paint` 也省了），并且清掉可能残留的展开态。
+    doc.documentElement.classList.add(CHROME_AUTO);
+    setHidden(true);
+    return;
+  }
+  doc.documentElement.classList.add(CHROME_HOVER);
   doc.addEventListener("pointermove", onMove, { passive: true });
   doc.addEventListener("pointermove", paint, { passive: true });
   doc.addEventListener("pointerover", onOver, { passive: true });
@@ -521,19 +594,32 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
       }
       const chrome = getPlayerChrome();
       const layout = doc.createElement("style");
+      // ⚠️ 舞台比例：**铺满容器 + 按比例裁切（cover）**，绝不拉伸。
+      //    引擎 `mount()` 固定 `renderer.resize(1280,720,dpr)` 并把 canvas 设成
+      //    `width:100%;height:100%` —— 画面比例完全由**父元素**决定。原先把
+      //    `section` 写成 `flex:1;aspect-ratio:auto`（任意宽高比）→ 21:9 的槽位里
+      //    16:9 的画面被横向拉长（"预览的舞台会扭曲"）。现在由 `.ark-stage-fit`
+      //    包装层给出 16:9 盒子：`cover` 时按容器**取大**一维铺满（多余裁掉），
+      //    `contain` 时取小（留黑边）。
       layout.textContent = `html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
         .story-player{height:100dvh!important;padding:0!important;gap:0!important}
-        .story-player>section{flex:1;min-height:0;max-width:none!important;aspect-ratio:auto!important}
+        .story-player>section{flex:1;min-height:0;max-width:none!important;aspect-ratio:auto!important;position:relative;overflow:hidden}
+        /* 画面盒：CSS 变量 --ark-stage-w/h 由 installStageFit 按 cover 算出（1280:720）；
+           !important 用来压过引擎内联的 canvas.style.width=100%。 */
+        .story-player>section>canvas,.story-player>section>video{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:var(--ark-stage-w,100%)!important;height:var(--ark-stage-h,100%)!important;display:block}
         .story-player>.n-card{flex:none;max-width:none!important;border-radius:0}
         .story-player .n-card__content{padding:6px 10px!important}
         /* 播放器底栏：显示 / 自动隐藏（默认，纯隐藏：指针移上去才显示）/ 隐藏
            —— 见 uiSettings.ts。auto 档：收起时卡片 .ark-chrome-hidden（透明度 +
            不接收指针）；显示由 html.ark-chrome-open 决定（指针命中底栏矩形即加）。 */
+        /* auto = 底栏常藏。默认（无 .ark-chrome-hover）= **永久隐藏**：指针命中也不亮。
+           打开设置里的「悬停显示」（html.ark-chrome-hover）后，才由 .ark-chrome-open 决定。 */
         html.ark-chrome-auto .story-player>.n-card.ark-chrome-hidden{opacity:0;pointer-events:none;transition:opacity .2s}
-        html.ark-chrome-auto.ark-chrome-open .story-player>.n-card[aria-label="播放控制"]{opacity:1!important;pointer-events:auto!important}
+        html.ark-chrome-auto.ark-chrome-hover.ark-chrome-open .story-player>.n-card[aria-label="播放控制"]{opacity:1!important;pointer-events:auto!important}
         html.ark-chrome-hide .story-player>.n-card[aria-label="播放控制"]{display:none!important}`;
       doc.head.appendChild(layout);
       installPlayerChrome(win, chrome);
+      installStageFit(win, doc);
     }
     // 逐模块加载时保留失败原因：`<script type="module">` 的 error 事件不带
     // 细节，所以同时挂 window.onerror/unhandledrejection，把真正的原因带回

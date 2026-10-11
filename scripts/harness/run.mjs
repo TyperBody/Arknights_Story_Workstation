@@ -30,6 +30,7 @@ const GROUPS = {
     ["workbench-drag.mjs", "③ 拼接/换位/调尺寸 + 落盘"],
     ["wb-selftest.mjs", "③ 布局模型纯函数（62 断言 + fuzz）"],
     ["layout-named.mjs", "③ 命名布局：另存为/切换/重置/删除 + 刷新保持"],
+    ["state-db-frontend.mjs", "③ 排版/开关落 **SQLite**（hydrate→首帧→拖→刷新仍在）"],
   ],
   branch: [
     ["branch-shot.mjs", "④ dify 风 DAG（零重叠 + 分层 + 截图）"],
@@ -48,6 +49,8 @@ const GROUPS = {
     ["p4-shell-probe.mjs", "窗口壳交互（折叠/⧉/拖动/缩放/✕）"],
     ["preview-bar-oneline.mjs", "② 预览条恒单行（拖窄 + 多行报错都不撑高）"],
     ["preview-fill-probe.mjs", "② 预览填满壳；放大=整页覆盖层，还原可退"],
+    ["stage-aspect.mjs", "⑨ 舞台比例：cover 注入 + 悬停开关（纯静态）"],
+    ["stage-fit.mjs", "⑨ 舞台比例：任意容器仍是 16:9 且覆盖（真 chromium）"],
   ],
   player: [
     ["player-chrome.mjs", "播放器底栏三档（auto=默认纯隐藏/指针几何命中/hide）"],

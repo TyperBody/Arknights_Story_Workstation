@@ -36,15 +36,19 @@ import {
   deleteLayout,
   isDockPanel,
   isMapPanel,
+  isPanelId,
   listLayouts,
   loadLayout,
   migrateLegacy,
   readLayout,
+  readView,
   saveLayoutNamed,
+  saveView,
   specOf,
 } from "../components/editor/workbenchLayout";
 import { createHistory, diffOf, type HistoryEntry } from "../components/editor/history";
 import ScriptHighlight from "../components/editor/ScriptHighlight";
+import { autoIndentOnEnter, outdentOnBackspace } from "../components/editor/vscodeKeys";
 import { disposeEngineFrame } from "../lib/storyPlayerBoot";
 // engineBoot / localStories 在别处已是**静态**依赖（predownload.ts 等），页面这里
 // 改成静态 import 后，Rollup 的 "INEFFECTIVE_DYNAMIC_IMPORT"（同一模块既静态
@@ -291,9 +295,9 @@ interface EditorModel {
 
 /** 「区域缩进」的降级实现：模型缺失（/ 半截）时也能用；模型就绪后以模型为准。
  *
- * 只改行首空白，所以与 `editorModel` 的语义一致：`Decision` 顶格、它的
- * `Predicate` 一级、线路体两级；`indent`/`outdent` 一格 = 两个空格。 */
-const INDENT_UNIT = "  ";
+ * 只改行首空白，单元 = **一个 `\t` 字符**（与 task-6 的 `INDENT_UNIT` 同；
+ * 显示宽度 8 列 = CSS 的 `tab-size: 8`）。 */
+const INDENT_UNIT = "\t";
 
 function fallbackRegionIndent(text: string): { text: string; changed: number; lines: number } {
   const rows = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
@@ -344,153 +348,12 @@ function fallbackIndentLines(
   const body = src.slice(first, last).split("\n").map((line) => {
     lines += 1;
     if (grow) return INDENT_UNIT + line;
-    const lead = /^[ \t]+/.exec(line)?.[0] ?? "";
-    if (!lead) return line;
-    let used = 0;
-    let width = 0;
-    for (const ch of lead) {
-      if (width >= INDENT_UNIT.length) break;
-      width += ch === "\t" ? 4 : 1;
-      used += 1;
-    }
-    return line.slice(used);
+    // 反缩进：先吃掉行首**连续空格**，再吃掉一个 `\t`（与 task-6 的 outdent 同）。
+    const spaces = /^ */.exec(line)?.[0] ?? "";
+    if (spaces) return line.slice(spaces.length);
+    return line.startsWith("\t") ? line.slice(1) : line;
   });
   return { text: src.slice(0, first) + body.join("\n") + src.slice(last), caret: { from: lo, to: hi }, lines };
-}
-
-// ─── VSCode 式 Tab / Enter / Backspace（task-7 的纯函数）────────────────────
-//
-// 三件事与 `tab-size: 8`（CSS）配套：
-//   1. `tryTabSkeleton` 之后 Tab 插**一个 `\t` 字符**（浏览器原生按 8 列跳到
-//      下一个 tab stop；`.ed-anchor` 也已 tab-size: 8，所以像素测量不错位）。
-//   2. Enter = "沿用缩进"（VSCode 的 editor.autoIndent），见下。
-//   3. Backspace = 空白才起作用：先删空白，再按 8 列网格回退一格（VSCode 的
-//      "Backspace 到上一个 tab stop"）。
-//
-// 下面的纯函数都只吃 `(text, offset)`，**不碰 DOM**，方便单测与 harness 对拍。
-
-const TAB_SIZE = 8;
-
-/** `[Cmd(...)]` 的行首命令名（去 `@tag`、去行首空白）；旁白/非指令 = `null`。 */
-function lineHeadCommand(line: string): string | null {
-  const bare = String(line ?? "").replace(/^[ \t]+/, "");
-  if (!bare.startsWith("[")) return null;
-  const close = bare.indexOf("]");
-  if (close === -1) return null;
-  const head = bare.slice(1, close);
-  if (/^\s*name\s*=/.test(head)) return "dialog";
-  const open = head.indexOf("(");
-  const name = (open === -1 ? head : head.slice(0, open)).split("@")[0].trim();
-  return /^[A-Za-z_]\w*$/.test(name) ? name.toLowerCase() : null;
-}
-
-/** 视觉列（Tab 跳 8 列网格）；`start` 是行首在 `text` 里的偏移。 */
-function visualColumn(text: string, start: number, offset: number, tabSize = TAB_SIZE): number {
-  let column = 0;
-  for (let index = start; index < offset; index += 1) {
-    const code = text.codePointAt(index) ?? 0;
-    if (code === 9) column += tabSize - (column % tabSize);
-    else column += code > 0x2e80 ? 2 : 1;
-  }
-  return column;
-}
-
-/** 行首在 `text` 里的偏移。 */
-function lineStartAt(text: string, offset: number): number {
-  return text.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
-}
-
-/** 行尾（不含 `\n`）在 `text` 里的偏移。 */
-function lineEndAt(text: string, offset: number): number {
-  const at = text.indexOf("\n", offset);
-  return at === -1 ? text.length : at;
-}
-
-/**
- * Enter 的自动缩进（VSCode `editor.autoIndent: "full"` 的简化版，只做行首
- * 空白）：
- * - `[Decision]` → 新行**多一级**（1 个 `\t`；它的 `[Predicate]` 应当在其
- *   区域内一级）；
- * - `[Predicate]` → 新行**多一级**（= 线路体）；
- * - 下一行已存在且是 `[Predicate]`/`[End]`/`[endtip]` → 新行**与其同级**
- *   （在下一行前回车 = 补一条同级线路头，而不是缩进到线路体里）；
- * - 其余 → 沿用当前行的**完整行首缩进**（逐字符照抄，Tab/空格混合不失真）。
- *
- * 返回要插到 `offset` 处的文本（`"\n"` + 缩进；无缩进时就是 `"\n"`）。
- * @param text 全文 @param offset 光标（`selectionStart === selectionEnd`）
- */
-export function autoIndentOnEnter(text: string, offset: number): string {
-  const src = String(text ?? "");
-  const at = Math.max(0, Math.min(src.length, Math.trunc(Number(offset) || 0)));
-  const start = lineStartAt(src, at);
-  const end = lineEndAt(src, at);
-  const line = src.slice(start, end);
-  const lead = /^[ \t]*/.exec(line)?.[0] ?? "";
-  const command = lineHeadCommand(line);
-
-  // 下一行（非空行则看它的命令名：补线路头 / 收尾时**同级**）。
-  let nextLead = "";
-  let nextCommand: string | null = null;
-  if (end < src.length) {
-    const nextStart = end + 1;
-    const nextEnd = lineEndAt(src, nextStart);
-    const nextLine = src.slice(nextStart, nextEnd);
-    nextLead = /^[ \t]*/.exec(nextLine)?.[0] ?? "";
-    nextCommand = lineHeadCommand(nextLine);
-  }
-  const atRouteGate = nextCommand === "predicate" || nextCommand === "end" || nextCommand === "endtip";
-
-  let indent: string;
-  if (command === "decision" || command === "predicate") {
-    indent = `${lead}\t`; // 新行多一级（线路体 / 线路头）
-  } else if (atRouteGate) {
-    // 与下一行同级：`Decision` 的线路头是一级、路线体是两级，这里就用它的
-    // 命令名对齐（`Predicate` → 一级；`End`/`endtip` → 0 级）。
-    indent = nextCommand === "predicate" ? nextLead || "\t" : nextLead;
-  } else {
-    indent = lead; // 沿用当前行的完整行首缩进（逐字符）
-  }
-  if (line.trim() === "") indent = lead; // 空行：只沿用现有空白，不多加
-  return `\n${indent}`;
-}
-
-/**
- * Backspace 的"跳 tab stop"：光标左边**只有空白**（到行首为止）时，把这段
- * 空白删到上一个 8 列 tab stop —— 即从 `offset` 往左找出**最长**的
- * `[start, offset)` 使「`text[start]` 是行首或 Tab」且
- * `visualColumn(start → offset) ≡ 0 (mod 8)`：删掉后光标正好落在 8 列网格上。
- *
- * 光标左边有非空白（正常打字）、或删除后会跨到**行首之前**时返回 `null`
- * —— 交回浏览器原生 Backspace。
- *
- * @returns `{from, to}`（删 `[from, to)`，光标落在 `from`）或 `null`
- */
-export function outdentOnBackspace(
-  text: string,
-  offset: number,
-  tabSize = TAB_SIZE
-): { from: number; to: number } | null {
-  const src = String(text ?? "");
-  const to = Math.max(0, Math.min(src.length, Math.trunc(Number(offset) || 0)));
-  const start = lineStartAt(src, to);
-  if (to === start) return null; // 行首：交给浏览器（删换行）
-  const chunk = src.slice(start, to);
-  if (/[^ \t]/.test(chunk)) return null; // 左边有非空白：正常删字符
-  const size = Math.max(1, Math.trunc(Number(tabSize) || TAB_SIZE));
-  let column = 0;
-  for (let index = start; index < to; index += 1) column += src[index] === "\t" ? size - (column % size) : 1;
-  const stop = column - (column % size || size); // 上一个 tab stop 的**列号**
-  // 行首空白里找「累计视觉宽 ≤ stop」的**最靠右**位置：删掉它右边这段，
-  // 光标正好落在（或落在不超过）该 tab stop 上；Tab 会整格跳过，空格逐列。
-  let from = start;
-  let width = 0;
-  for (let index = start; index < to; index += 1) {
-    width += src[index] === "\t" ? size - (width % size) : 1;
-    if (width <= stop) from = index + 1;
-    else break;
-  }
-  if (from >= to) return null;
-  return { from, to };
 }
 
 
@@ -698,28 +561,69 @@ interface ControllerInspectorProps {
  * 3. 可见清单 = 常驻 dock（`toolpanel` / `stage`）+ 旧状态里**曾经开过**的 Map；
  * 4. `normalize` 收口（去重 / 折叠单子 split / share clamp）。
  */
-let bootCache: { state: WorkbenchState; visible: PanelId[] } | null = null;
-function workbenchBoot(): { state: WorkbenchState; visible: PanelId[] } {
+interface WorkbenchBoot {
+  state: WorkbenchState;
+  visible: PanelId[];
+  floats: Partial<Record<PanelId, FloatRect>>;
+  folded: PanelId[];
+}
+let bootCache: WorkbenchBoot | null = null;
+function workbenchBoot(): WorkbenchBoot {
   if (bootCache) return bootCache;
   migrateLegacy();
   const legacy = consumeLegacy();
+  // ① 视图状态（面板开关 / 浮动窗 / 折叠）：**先读**它，再据此 `normalize` 布局树。
+  //    顺序很关键：若先 `normalize(state, [dock…])`，树里的 Map 面板会被当成
+  //    "不该在树里"而被移出 → 分隔条份额被重排（用户看到的"宽度也回默认了"）。
+  const view = readView();
   const visible: PanelId[] = PANELS.filter(isDockPanel);
+  for (const raw of view?.visible ?? []) {
+    const id = raw as PanelId;
+    if (isPanelId(id) && !visible.includes(id)) visible.push(id);
+  }
   for (const item of legacy) {
     if (item.panel && isMapPanel(item.panel) && !visible.includes(item.panel)) visible.push(item.panel);
   }
   // 活跃布局优先：换过命名布局的会话刷新后仍应回到它的形状（`active` 缺失 → default）。
   const raw = readLayout(activeLayout()) ?? readLayout(DEFAULT_LAYOUT_NAME);
   let state = normalize((raw ? parse(raw) : null) ?? defaultState(), visible);
+  for (const id of visible) {
+    // 视图状态说"开着"，但树里没有（例如手动清过键）→ 补回右侧。
+    if (isMapPanel(id) && !has(state, id)) state = restore(state, id, "root", "right");
+  }
   for (const item of legacy) {
     if (!item.panel || !isMapPanel(item.panel)) continue;
     if (!has(state, item.panel)) state = restore(state, item.panel, "root", "right");
   }
-  bootCache = { state: normalize(state, visible), visible };
+  const floats: Partial<Record<PanelId, FloatRect>> = {};
+  for (const [id, rect] of Object.entries(view?.floats ?? {})) {
+    if (isPanelId(id)) floats[id] = rect;
+  }
+  const folded: PanelId[] = (view?.folded ?? []).filter((id): id is PanelId => isPanelId(id) && visible.includes(id));
+  bootCache = { state: normalize(state, visible), visible, floats, folded };
   return bootCache;
 }
 
-/** 引导结果（模块级，只跑一次）；下面 `StoryEditorPage` 的初始 state 直接取它。 */
-const boot: { state: WorkbenchState; visible: PanelId[] } = workbenchBoot();
+/** 视图状态（面板开关 / 浮动窗 / 折叠）落盘：**每次变化都写**。 */
+function persistView(visible: PanelId[], floats: Partial<Record<PanelId, FloatRect>>, folded: PanelId[]): void {
+  try {
+    saveView({ visible, floats, folded });
+  } catch {
+    // 落库失败只是"这次没记住"
+  }
+}
+
+/**
+ * 引导结果：**首次渲染时**才跑（`bootCache` 保证只跑一次）。
+ *
+ * ⚠️ 不能写成模块级 `const boot = workbenchBoot()`：本页被 `App.tsx` **静态** import，
+ * 求值发生在 `main.tsx` 的 `await hydrate()` **之前** —— 那时 `state.db` 还没进内存，
+ * 布局必然回落默认值（"排版每次打开都重置"的根因）。放到 `useState` 初始化器里，
+ * 时序就是「hydrate → 渲染」。
+ */
+function workbenchBootOnce(): WorkbenchBoot {
+  return workbenchBoot();
+}
 
 /**
  * `../components/editor/*.tsx` → 动态 import 工厂（Vite 静态收集）。
@@ -1237,20 +1141,28 @@ export default function StoryEditorPage() {
   const [bounds, setBounds] = useState({ w: 0, h: 0 });
   const boundsRef = useRef(bounds);
   boundsRef.current = bounds;
-  /** 工作台：布局树（`prts-editor-wb:<active>`）+ 树里的面板清单。 */
-  const [wb, setWb] = useState<WorkbenchState>(boot.state);
-  const [visible, setVisible] = useState<PanelId[]>(boot.visible);
+  /** 工作台：布局树（`prts-editor-wb:<active>`）+ 树里的面板清单。
+   *  **惰性初始化**：首次渲染时才读 `stateStore`（`main.tsx` 已 `await hydrate()`），
+   *  这样 `state.db` 里的排版一定先于首帧进内存。 */
+  const [wb, setWb] = useState<WorkbenchState>(() => workbenchBootOnce().state);
+  const [visible, setVisible] = useState<PanelId[]>(() => workbenchBootOnce().visible);
   /** 最新值的只读镜像：布局回调（切换/另存）要用，但不该因此重建。 */
   const wbRef = useRef(wb);
   wbRef.current = wb;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  /** 浮动窗 / 折叠 / 活跃布局名的只读镜像（`setState` 回调里要读最新值，且不进依赖）。 */
+  const floatsRef = useRef<Partial<Record<PanelId, FloatRect>>>({});
+  const foldedRef = useRef<PanelId[]>([]);
+  const activeLayoutRef = useRef<string>(DEFAULT_LAYOUT_NAME);
   /** 收起（`▾`）的面板：只切**显示**、不卸载、不进 `minimized`（§2.2）。 */
-  const [folded, setFolded] = useState<PanelId[]>([]);
+  const [folded, setFolded] = useState<PanelId[]>(() => workbenchBootOnce().folded);
+  foldedRef.current = folded;
   /** 面板「活跃」环（chrome.active）。 */
   const [selected, setSelected] = useState<PanelId | null>(null);
   /** Map 面板按 `⧉` 浮出工作台时的矩形（`undefined` = 在树里）。 */
-  const [floats, setFloats] = useState<Partial<Record<PanelId, FloatRect>>>({});
+  const [floats, setFloats] = useState<Partial<Record<PanelId, FloatRect>>>(() => workbenchBootOnce().floats);
+  floatsRef.current = floats;
   /** 撤销 / 重做（覆盖打字、拖立绘、表单、模板、补全——全走 applyEdit/onChange）。 */
   const historyRef = useRef(createHistory({ limit: 200, mergeMs: 500 }));
   const [historySizes, setHistorySizes] = useState({ undo: 0, redo: 0 });
@@ -2499,19 +2411,35 @@ export default function StoryEditorPage() {
   /** 面板在树里吗（工具栏 `on` 态 + 渲染判断共用）。 */
   const inTree = useCallback((id: PanelId) => visible.includes(id) && has(wb, id), [visible, wb]);
 
-  /** 收起 / 展开：只切**显示**（`chrome.visible`），不动布局树。 */
+  /** 收起 / 展开：只切**显示**（`chrome.visible`），不动布局树；状态进视图持久化。 */
   const toggleFold = useCallback((id: PanelId) => {
-    setFolded((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]));
+    setFolded((prev) => {
+      const next = prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id];
+      persistView(visibleRef.current, floatsRef.current, next);
+      return next;
+    });
   }, []);
 
-  /** Map（preview / branch）的工具栏开关：进 / 出工作台树；`force` 顺带打开。 */
+  /**
+   * Map（preview / branch）的工具栏开关：进 / 出工作台树；`force` 顺带打开。
+   *
+   * **两处都要落盘**：① 布局树（`prts-editor-wb:<active>`，树变了）；
+   * ② 视图状态（`prts-editor-wb:view`，开关变了）—— 少了 ② 就是
+   * 「关掉/打开的分支图，重开页面又变回去」。
+   */
   const mapToggle = useCallback((id: PanelId, force = false) => {
     setVisible((prev) => {
       const on = prev.includes(id);
       const want = force ? true : !on;
       if (want === on) return prev;
-      setWb((state) => (want ? (has(state, id) ? state : restore(state, id, "root", "right")) : minimize(state, id)));
-      return want ? [...prev, id] : prev.filter((value) => value !== id);
+      const nextVisible = want ? [...prev, id] : prev.filter((value) => value !== id);
+      setWb((state) => {
+        const nextState = want ? (has(state, id) ? state : restore(state, id, "root", "right")) : minimize(state, id);
+        saveLayoutNamed(activeLayoutRef.current, stringify(nextState));
+        return nextState;
+      });
+      persistView(nextVisible, floatsRef.current, foldedRef.current);
+      return nextVisible;
     });
   }, []);
 
@@ -2522,6 +2450,7 @@ export default function StoryEditorPage() {
    */
   const [layoutNames, setLayoutNames] = useState<string[]>(() => listLayouts());
   const [activeLayoutName, setActiveLayoutName] = useState<string>(() => activeLayout());
+  activeLayoutRef.current = activeLayoutName;
   const [layoutPick, setLayoutPick] = useState<string>(DEFAULT_LAYOUT_NAME);
 
   /** 切换（或另存为）布局：文本 → `normalize` → 工作台；坏文本回落默认。 */
@@ -3101,10 +3030,13 @@ export default function StoryEditorPage() {
             x: loose(next.rect.x, -(Math.max(spec.minW, next.rect.w) - 80), Math.max(0, usable.w - 80)),
             y: loose(next.rect.y, -40, Math.max(0, usable.h - 40)),
           };
-          return { ...prev, [id]: rect };
+          const nextFloats = { ...prev, [id]: rect };
+          persistView(visibleRef.current, nextFloats, foldedRef.current);
+          return nextFloats;
         }
         const copy = { ...prev };
         delete copy[id];
+        persistView(visibleRef.current, copy, foldedRef.current);
         return copy;
       });
     },

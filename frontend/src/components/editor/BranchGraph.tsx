@@ -121,7 +121,7 @@ const ROLE_COLORS: Record<string, string> = {
 /** 无 Decision 时的人话提示（= zh-Hans 原文；harness 逐字断言，en-US 见 `editor.branch.emptyHint`）。 */
 const EMPTY_HINT_DEFAULT = "这个剧本还没有分支：插入 [Decision] 后这里会画出走向";
 /** 滚轮每格的缩放倍率（clamp 到 `LAYOUT_ZOOM_MIN..MAX`）。 */
-const ZOOM_STEP = 1.12;
+const ZOOM_STEP = 1.08;
 /** 画布四周的最小可视留白（「适配」用）。 */
 const FIT_PAD = 18;
 /** 分叉表格的行数范围。 */
@@ -272,22 +272,46 @@ export default function BranchGraph({
     return () => window.removeEventListener("keydown", onKey);
   }, [fit]);
 
-  /** 滚轮 = 以指针为锚缩放（0.2…2）。 */
-  const onWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+  /**
+   * 滚轮 = 以指针为锚缩放（`LAYOUT_ZOOM_MIN..MAX`）。
+   *
+   * ⚠️ 必须用**原生** `addEventListener(..., { passive: false })`：React 19 的
+   * `onWheel` 走 root 上的**委托**、默认 `passive`，`preventDefault()` 只会在控制台
+   * 报 `Unable to preventDefault inside passive event listener invocation.` 而**不生效**
+   * —— 滚轮于是同时滚动了外层面板/页面，"缩放很难用"（StagePane 早先踩过同一个坑）。
+   * 用 ref 存最新 handler，避免每次 `view` 变化都重挂监听。
+   */
+  const wheelRef = useRef<(event: WheelEvent) => void>(() => {});
+  const handleWheel = (event: WheelEvent) => {
     if (!layout.nodes.length) return;
+    if (event.ctrlKey && !event.altKey) return; // Ctrl+滚轮 = 浏览器缩放，让给它
     event.preventDefault();
     const host = panRef.current;
     if (!host) return;
     const rect = host.getBoundingClientRect();
     const px = event.clientX - rect.left;
     const py = event.clientY - rect.top;
-    const factor = event.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP;
+    // 触控板/高分辨率滚轮给的是小数 delta → 按比例缩放，一格 ≈ ZOOM_STEP。
+    const steps = clamp(Math.abs(event.deltaY) / 100, 0.4, 3);
+    const factor = Math.pow(event.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP, steps);
     const zoom = clamp(current.zoom * factor, LAYOUT_ZOOM_MIN, LAYOUT_ZOOM_MAX);
     if (zoom === current.zoom) return;
     const wx = (px - current.x) / current.zoom;
     const wy = (py - current.y) / current.zoom;
     applyView({ key: boxKey, zoom: r(zoom), x: r(px - wx * zoom), y: r(py - wy * zoom) });
-  }, [applyView, boxKey, current, layout.nodes.length]);
+  };
+  // 最新 handler 存进 ref（**在 effect 里**赋值：render 期写 ref 会被 lint 拦）；
+  // 挂载只做一次，handler 永远读最新闭包。
+  useEffect(() => {
+    wheelRef.current = handleWheel;
+  });
+  useEffect(() => {
+    const host = panRef.current;
+    if (!host) return;
+    const handler = (event: WheelEvent) => wheelRef.current(event);
+    host.addEventListener("wheel", handler, { passive: false });
+    return () => host.removeEventListener("wheel", handler);
+  }, []);
 
   /** 拖空白 = 平移（卡片 / 按钮上按下不算）。 */
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
@@ -440,7 +464,6 @@ export default function BranchGraph({
           className="ed-graph-pan"
           data-branch-pan="1"
           ref={attachPan}
-          onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
