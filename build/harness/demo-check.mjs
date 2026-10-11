@@ -71,6 +71,10 @@ try {
       setInterval(tick, 400);
     }
   });
+  // 冷启动预热：vite 首次 transform + 懒加载部件在 headless 下可能 >3s；
+  // 先空跑一次首页把 dev server 的模块图热起来，再进编辑页（避免误报"部件缺失"）。
+  await page.goto(`${DEV}/`, { waitUntil: "domcontentloaded", timeout: 90_000 }).catch(() => {});
+  await page.waitForTimeout(500);
   await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(SCRIPT)}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
   await page.waitForSelector("textarea.ed-textarea", { timeout: 30000 });
   await killBanners(page);
