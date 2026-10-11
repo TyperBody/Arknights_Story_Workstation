@@ -62,13 +62,21 @@ function fakeStorage(seed = {}) {
     _dump: () => Object.fromEntries(map),
   };
 }
+const store = await import("../../frontend/src/lib/stateStore.ts");
+/** 重置：localStorage + `stateStore` 的内存镜像（scope 级）都要干净。 */
 const installStorage = (seed) => {
   const storage = fakeStorage(seed);
   globalThis.localStorage = storage;
+  for (const scope of ["workspace", "ui", "player", "app", "library"]) {
+    for (const key of store.listKeys(scope)) store.removeItem(scope, key);
+  }
   return storage;
 };
 
 // ── 载入被测模块（Node 原生类型剥离：`import` 直接吃 `.ts`） ──
+// `workbenchLayout.ts` 现在经 `stateStore.ts` 读写（`state_db_*`），而 `stateStore`
+// 依赖 `@tauri-apps/api/core` 的 `invoke` —— Node 里没有 Tauri，靠下面的内存版
+// 存储 + 无 Tauri 判定走 `localStorage` 分支（这就是被测的"降级"语义）。
 const stack = await import("../../frontend/src/components/editor/workbenchStack.ts");
 const layout = await import("../../frontend/src/components/editor/workbenchLayout.ts");
 const {
@@ -413,7 +421,7 @@ t("layoutKey：default 走无名键、其余加名字", () => {
   assert.equal(layout.layoutKey("我的布局"), "prts-editor-wb:我的布局");
   assert.equal(layout.WB_KEY_ACTIVE, "prts-editor-wb:active");
 });
-t("saveLayout/readLayout/listLayouts/activeLayout（内存 localStorage）", () => {
+t("saveLayout/readLayout/listLayouts/activeLayout（stateStore → localStorage 降级）", () => {
   installStorage({});
   assert.equal(layout.listLayouts().length, 0);
   assert.equal(layout.activeLayout(), "default");

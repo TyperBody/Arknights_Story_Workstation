@@ -117,3 +117,40 @@ npm run test:editor && npm run test:stage             # 编辑器 / 舞台内核
 - **回归**：`node build/harness/_i18n-check.mjs`（运行时查找/插值/回退/持久化，7 断言）、
   `node build/harness/_i18n-ui-check.mjs`（切到 en-US 后编辑器页文案，17 断言；截图
   `build/harness/shots/editor-{zh,en}.png`）。
+
+## 状态持久化（2026-10-12）：`state.db`（SQLite）
+
+**为什么换**：`localStorage` 活在 WebView 的 session 里 —— 清缓存、换 WebView、重装、
+Android「清除数据」都会丢；而**排版 / 面板开关 / 语言 / 播放器设置 / 已读**是**用户状态**。
+现在全部存 `<资源目录>/state.db`（`src-tauri/src/state_db.rs`，`kv(scope,key,value,updated_at)`
+一张表），`cache/`+`media/`+`assets/` 才是缓存 —— **清缓存不动记忆**，换盘/换机带上
+`state.db` 即带走全部状态。
+
+| scope | 键（沿用旧名） | 内容 |
+| --- | --- | --- |
+| `workspace` | `prts-editor-wb:default` / `:<name>` / `:active` / `:view` | 布局树文本 + 活跃布局名 + **视图状态**（`{visible,floats,folded}`） |
+| `ui` | `prts-player-chrome`、`prts-player-chrome-hover`、`prts-hide-player-back`、`prts-nickname` | 播放器底栏 / 悬停开关 / 返回按钮 / 昵称 |
+| `player` | `prts-debug-console`、`prts-download-settings` | 调试控制台、下载器设置镜像 |
+| `app` | `prts-app-settings`、`prts-language` | 下载源/并发/限速、界面语言 |
+| `library` | `arkstage-read-stories`、`arkstage-last-watched` | 已读、上次观看 |
+
+前端唯一入口 `frontend/src/lib/stateStore.ts`：`hydrate()` 一次拉整个 scope 进内存
+（`state_db_snapshot`，**同步读**语义不变）→ `getItem/setItem`；写按 50ms 合并、
+`state_db_set_many` 一次 IPC。**降级三级**：无 Tauri → `localStorage`；DB 打开失败 →
+`localStorage`（`stateBackend()` 可查）；都没有 → 纯内存。旧 `localStorage` 值在
+`hydrate()` 里按 scope 调一次 `state_db_import`（**DB 已有则不覆盖**，标记
+`prts-state-migrated:<scope>`）。
+
+⚠️ **两个必须的时序/写法**（否则"排版每次打开都重置"会复现）：
+1. `main.tsx` 里 `await hydrate()` **在 `ReactDOM.render` 之前**；
+2. 页面不得在模块顶层读布局 —— 编辑器页的 `workbenchBoot()` 是**惰性**的
+   （`useState(() => workbenchBootOnce())`），因为 `App.tsx` 的静态 import 在 hydrate 之前求值。
+
+**面板开关 / 浮动窗**走 `prts-editor-wb:view`（JSON），与布局串**分开**：布局串只描述
+"树里怎么分屏"（格式对用户可见）；`visible/floats/folded` 是另一个维度。`workbenchBoot()`
+**先读视图**再 `normalize(树, visible)` —— 顺序反了会让树里的 Map 面板被移出、份额被重排
+（症状：宽度也回默认）。
+
+回归：`build/harness/state-db-frontend.mjs`（7，假 Tauri 桥 + 真 chromium）、
+`build/harness/state-db.mjs`（原生：真 Tauri 启动 + 重启仍在；`--unit` 纯断言）、
+`cargo test --release --lib state_db`（2：UPSERT/scope 隔离、坏库重建）。

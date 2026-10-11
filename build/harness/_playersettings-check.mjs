@@ -85,7 +85,9 @@ setHidden(true); // installPlayerChrome 末尾的初始态
 `;
 
 const CSS_HIDDEN = 'html.ark-chrome-auto .story-player>.n-card.ark-chrome-hidden{opacity:0;pointer-events:none;transition:opacity .2s}';
-const CSS_OPEN = 'html.ark-chrome-auto.ark-chrome-open .story-player>.n-card[aria-label="播放控制"]{opacity:1!important;pointer-events:auto!important}';
+// 「悬停显示」是**开关**（`uiSettings.isPlayerChromeHover`，默认关 = 永久隐藏）：
+// 只有 `html.ark-chrome-hover` 在时，`.ark-chrome-open` 才会把底栏点亮。
+const CSS_OPEN = 'html.ark-chrome-auto.ark-chrome-hover.ark-chrome-open .story-player>.n-card[aria-label="播放控制"]{opacity:1!important;pointer-events:auto!important}';
 const CSS_HIDE = 'html.ark-chrome-hide .story-player>.n-card[aria-label="播放控制"]{display:none!important}';
 const LAYOUT_RULES = [CSS_HIDDEN, CSS_OPEN, CSS_HIDE].join("\n");
 

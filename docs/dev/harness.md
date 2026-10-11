@@ -2,6 +2,8 @@
 
 > 每个 harness 都有两个等价入口：`node scripts/harness/<name>.mjs`（推荐，随源码走）
 > 与 `node build/harness/<name>.mjs`（真身；`build/` 是中间产物目录）。**自带断言、自带退出码、可单独跑**。
+> 本机**记忆**存 `state.db`（SQLite，`<资源目录>/`）：原生层回归 `build/harness/state-db.mjs`
+> （真 Tauri 启动 → 日志 `[state] sqlite ready` → 库落资源目录 → 重启仍在；`--unit` 只跑纯断言）。
 > 断言有效性自检：`build/harness/preview-bar-regress-check.mjs`（人为恢复旧样式 → bar 42px → 319px，
 > 证明 `preview-bar-oneline.mjs` 不是空跑；只做一次性验证，不在 runner 里）。
 > 一条命令跑全套：`npm run test:harness`（= `node scripts/harness/run.mjs`；`--list` 看清单，
@@ -18,17 +20,19 @@
 | ② | toolpanel/stage 无 ⧉✕；preview/branch = Map | `window-chrome.mjs`（5） | workbench |
 | ③ | 拼接/换位/调尺寸 + 落盘 | `workbench-drag.mjs`（3）、`wb-selftest.mjs`（62） | workbench |
 | ③ | **命名布局**（另存为 / 切换 / 重置 / 删除 / 刷新保持） | `layout-named.mjs`（9） | workbench |
+| ③ | **排版落 SQLite**（hydrate 先于首帧 → 拖 → 刷新仍在；旧 localStorage 一次性迁移） | `state-db-frontend.mjs`（7） | workbench |
 | ④ | dify 风 DAG（零重叠/分层/适配）+ 截图 | `branch-shot.mjs`（59）、`t6-visual-check.mjs` | branch |
 | ⑤ | 单条横幅（URL+HTTP 状态）+ 不白屏 | `engine-failure.mjs`（2）、`engine-failure-min.mjs`（4） | engine |
 | ⑥ | 随包起步素材集（287 张/14.6 MB） | `starter-assets.mjs`（17；`--native` 18） | assets |
 | ⑦ | 下载源真正生效（Rust 源链 + 镜像 URL 形状 + 设置推送） | `rust-mirror-live.mjs`（13）、`live-download.mjs`（3） | assets |
 | — | 窗口壳（折叠/⧉/拖动/缩放/✕） | `p4-shell-unit.mjs`（10）、`p4-shell-probe.mjs`（11） | shell |
-| — | 播放器底栏三档（`auto` = 默认纯隐藏；指针命中即显示） | `player-chrome.mjs`（10） | player |
+| — | 播放器底栏三档（`auto` = 默认**永久隐藏**；「悬停显示」是设置里的独立开关） | `player-chrome.mjs`（10）、`stage-aspect.mjs`（含开关断言） | player |
 | ② | **预览条恒单行**（面板拖窄 / 状态里带 `\n` 的多行 loader 报错都不把 bar 撑高） | `preview-bar-oneline.mjs`（6） | shell |
 | ② | **预览填满壳 + 放大/还原**（槽位/浮动窗不留白；「放大」= `.full` 整页覆盖层，可退） | `preview-fill-probe.mjs`（4） | shell |
+| ⑨ | **舞台比例 = cover**（铺满 + 裁切，绝不拉伸） | `stage-aspect.mjs`（8）、`stage-fit.mjs`（7） | shell |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
-`npm run test:harness` 当前 = **18 个 harness**（workbench 7 / branch 1 / engine 2 / assets 3 / shell 4 / player 1）。
+`npm run test:harness` 当前 = **20 个 harness**（workbench 8 / branch 1 / engine 2 / assets 3 / shell 6 / player 1）。
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
 

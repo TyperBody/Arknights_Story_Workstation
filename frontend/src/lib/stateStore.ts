@@ -84,9 +84,13 @@ function ls(): Storage | null {
   }
 }
 
-/** 各模块历史键 + 本 store 直接读写时的 localStorage 回退键（同名，便于互认）。 */
-function legacyKey(scope: StateScope, key: string): string {
-  return key.includes(":") ? key : `${scope}:${key}`;
+/**
+ * `localStorage` 兜底用的键名 = **各模块的历史键原名**（`prts-player-chrome` 等）。
+ * 不加 `scope:` 前缀：这样"无 Tauri 的浏览器 dev"与旧版本**逐字节兼容**，
+ * 一次性迁移（`state_db_import` 按前缀捞）也能原样识别。
+ */
+function legacyKey(_scope: StateScope, key: string): string {
+  return key;
 }
 
 /**

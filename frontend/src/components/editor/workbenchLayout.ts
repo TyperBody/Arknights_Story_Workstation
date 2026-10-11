@@ -17,7 +17,7 @@
  * 本文件零 React：`localStorage` 缺失（Node / 隐私模式）时全部是安全空操作。
  */
 
-import { getItem, listKeys, removeItem, setItem, hydrate } from "../../lib/stateStore";
+import { getItem, listKeys, removeItem, setItem, hydrate } from "../../lib/stateStore.ts";
 import type { PanelId } from "./workbenchStack";
 
 export type { PanelId };
