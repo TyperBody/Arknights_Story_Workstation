@@ -161,6 +161,13 @@ scripts/run-tests.sh     # 以上全部
 
 `test-e2e.sh` 需要 `Xvfb`、`xdotool`、ImageMagick，且需联网（prts.wiki）；它会临时清空本地缓存以保证结果确定。详见 [`scripts/README.md`](../scripts/README.md)。
 
+### 验收 harness（`scripts/harness/`）
+
+`npm run test:harness`（= `node scripts/harness/run.mjs`）一条命令跑完整套无头验收；
+`--list` 看清单，也可只跑某组（`… run.mjs workbench`）或某项（`… run.mjs branch-shot`）。
+每个 harness 也可单独 `node scripts/harness/<name>.mjs`；真身在 `build/harness/*.mjs`。
+需求 → harness 的完整映射与「写后即用 / 写坏不崩」规则见 [`docs/dev/harness.md`](dev/harness.md)。
+
 ### 下载源 / 镜像（「设置 → 下载源」）
 
 同一份模板表存在两处，**必须逐字符一致**：`src/akstage/assetRouting.js::MIRRORS`
