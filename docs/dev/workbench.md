@@ -51,6 +51,7 @@
 | 区域缩进（`[Decision]` 线路层级） | ![indent](images/indent-region.png) |
 | 舞台裁剪（150% 摘掉 clip = 素材带，对照见 `images/stage-clip-150-unclipped.png`） | ![clip](images/stage-clip-150.png) |
 | 编辑器英文界面（`prts-language=en-US`） | ![en](images/editor-en.png) |
+| 脚本文本语法着色 + Tab 缩进（8 列） | ![hl](images/editor-highlight.png) |
 | 编辑器舞台 150%（裁剪后：16:9，素材不再成条） | ![stage150](images/stage-editor-150.png) |
 
 ## 4. 回归

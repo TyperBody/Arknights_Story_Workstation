@@ -31,6 +31,7 @@
 | ② | **预览填满壳 + 放大/还原**（槽位/浮动窗不留白；「放大」= `.full` 整页覆盖层，可退） | `preview-fill-probe.mjs`（4） | shell |
 | ⑨ | **舞台比例 = cover**（铺满 + 裁切，绝不拉伸） | `stage-aspect.mjs`（8）、`stage-fit.mjs`（7） | shell |
 | ⑩ | **编辑器键位 = VSCode**（Tab 插 `\t`、Enter 自动缩进、Backspace 跳 tab stop）+ 脚本文本**语法着色层**与 textarea 逐像素对齐（`tab-size: 8`、Tab 宽 = 8 字符格、行 top 误差 0px、光标像素误差 ≤ 1px、DOM span ↔ 内核 `tokenizeLine` 逐 span 对拍） | `_editor-tab-hl-check.mjs`（31） | editor |
+| ⑪ | **Tab = 8 列 / `tokenizeLine` 内核**（VSCode 键位语义、plan 幂等、span 不变量；全语料 200,372 行抽样 bad=0） | `indentTokens-selftest.mjs`（165）、`editorIndent-selftest.mjs`（124） | `npm run test:editor` |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
 `npm run test:harness` 当前 = **28 个 harness**（workbench 8 / branch 1 / engine 2 / assets 3 / shell 6 / player 2 / editor 6）。
