@@ -9,7 +9,7 @@
 |---|---|---|
 | 1 | 舞台缩放只有 100%/50% | ✅ `stageZoom.ts` 连续缩放（0.25…2，滚轮以指针为锚 + `−＋/适配/1:1/百分比`），只改 `viewBox` |
 | 2 | 检视器在工具面板 → 不该有「脱离」按钮；是显示/隐藏 | ✅ `toolpanel`/`stage` 常驻 dock（`.ed-win-btn` = 0）；「检视器」= 面板内折叠区；`preview`/`branch` = Map | 
-| 3 | 不能拼接工作区 / 自由调换位置 | ✅ `Workbench` + `workbenchStack`（拖边缘分屏、中心换位、分隔条调尺寸、`prts-editor-wb:*` 持久化） |
+| 3 | 不能拼接工作区 / 自由调换位置 | ✅ `Workbench` + `workbenchStack`（拖边缘分屏、中心换位、分隔条调尺寸）；**命名布局**可另存为/切换/重置/删除，刷新保持 |
 | 4 | 分支图不能移动 / 排版难看 | ✅ dify 风 DAG（`layoutGraph` 分层 + 正交折线 + 零重叠 + `⤢ 适配` + 平移缩放） |
 | 5 | `data:text/javascript` 资源加载失败噪音 | ✅ `pack→cache→网络` + 2 次退避重试 + **单条**人话横幅（URL + HTTP 状态）；`data:`/`blob:` 静默 |
 | 6 | 不要每次爬 / 要缓存 / 素材随包 | ✅ 随包 `resources/engine/v1` 3.4 MB（`include_bytes!`）+ 磁盘 cache（`widget-bundle-v7`）+ **随包起步素材集 287 张 / 14.6 MB**（core 7 + 背景 120 + 立绘 160，按剧情语料频次策展；`bundle.resources`）→ 自创剧情**不再每次联网** |
@@ -26,7 +26,7 @@ npm run test:editor                 # 168 + 149
 npm run test:stage                  # 82
 npm run test:mirror                 # 121/121 + rust-mirror-live 13 + live-download 3
 npm run test:starter                # 17/17（`--native` 追加真 WebKitGTK seed 断言 → 18）
-npm run test:harness                # 14 个 harness 全绿（scripts/harness/run.mjs；见 docs/dev/harness.md）
+npm run test:harness                # 16 个 harness 全绿（scripts/harness/run.mjs；见 docs/dev/harness.md）
 node scripts/fanfic/fetch-starter-assets.mjs --check   # 287 张 / 15,301,040 B / problems=[]
 npm run test:workbench             # demo-check 22/22 · stage-zoom 38 · window-chrome 5/5 · workbench-drag 3/3 · branch-shot 59 · engine-failure 2/2
 npm run test:workbench:model       # 62/62
