@@ -23,7 +23,10 @@ import { fileURLToPath } from "node:url";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const unitOnly = process.argv.includes("--unit");
 const display = process.env.PRTS_DISPLAY ?? ":97";
-const app = resolve(process.env.PRTS_APP ?? "build/toolchain/target-linux/release/app");
+// ⚠️ 默认用 `target/release`（刚 rebuild 的那个）：`frontendDist`（`build/dist`）是
+// **编译期**嵌进二进制的，所以"前端刚改完、只 `npm run build`"时必须重新 cargo build；
+// `target-linux/` 是给桌面包用的旧二进制，可能嵌着老前端。
+const app = resolve(process.env.PRTS_APP ?? "build/toolchain/target/release/app");
 const dataDir = resolve(process.env.PRTS_STATE_DATA ?? "/tmp/prts-state-check");
 const outDir = resolve("build/fanfic/state-db");
 const logs = [];
