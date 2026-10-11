@@ -69,6 +69,25 @@ const click = async (x, y, wait = 1.6) => {
   sh(`DISPLAY=${display} xdotool mousemove ${x} ${y} click 1`);
   await sleep(wait * 1000);
 };
+
+/** 屏幕指纹：两次截图内容是否不同（`import` → `sha1sum`）。 */
+const screenHash = () =>
+  spawnSync("sh", ["-c", `DISPLAY=${display} import -window root png:- 2>/dev/null | sha1sum | cut -c1-12`], { encoding: "utf8" }).stdout.trim();
+
+/**
+ * **导航点击**：先按标定坐标点一次；若画面没变（说明落空——例如 GTK 客户端标题栏
+ * 把内容整体下移了 ~30px），就带 ±30px 的纵向偏移各重试一次。
+ * 返回实际生效的偏移量（0 / 30 / -30），`null` = 三次都没变。
+ */
+const clickNav = async (x, y, wait = 1.6) => {
+  for (const dy of [0, 30, -30]) {
+    const before = screenHash();
+    sh(`DISPLAY=${display} xdotool mousemove ${x} ${y + dy} click 1`);
+    await sleep(wait * 1000);
+    if (screenHash() !== before) return dy;
+  }
+  return null;
+};
 const findWindow = () => sh(`DISPLAY=${display} xdotool search --name 方舟 2>/dev/null | head -1`).stdout.trim();
 
 /** 起一次应用；`deadNet` 时把 HTTP(S)_PROXY 指向死端口（离线）。 */
@@ -150,17 +169,20 @@ if (!findWindow()) {
 
 /** 播放样例：首页 → 同人剧本 → ▶ → 推进到杜宾 / 选项 / 分支 / 合流。 */
 async function playThrough(tag) {
-  await click(599, 415, 3);      // 首页 → 同人剧本
-  await click(461, 168, 12);     // ▶ 播放
+  // 前两步是**导航**（必须落到按钮上）→ 用自适应点击并记下生效偏移；
+  // 后面都是"点画面推进对话"，偏移沿用同一个即可。
+  const dy = (await clickNav(599, 415, 3)) ?? 0;   // 首页 → 同人剧本
+  note(`${tag}: 点击偏移 dz=${dy}`);
+  await clickNav(461, 168 + dy, 12);               // ▶ 播放
   shot(join(outDir, "shots", `${tag}-1-first.png`));
   await sleep(5000);
-  await click(512, 430, 3.5);
+  await click(512, 430 + dy, 3.5);
   shot(join(outDir, "shots", `${tag}-2-doberm.png`));   // [Character(char_130_doberm_ex)] 立绘
-  for (let i = 0; i < 4; i += 1) await click(512, 430, 3);
+  for (let i = 0; i < 4; i += 1) await click(512, 430 + dy, 3);
   shot(join(outDir, "shots", `${tag}-3-decision.png`));
-  await click(512, 249, 4);      // 选「跟着她走」
+  await click(512, 249 + dy, 4);   // 选「跟着她走」
   shot(join(outDir, "shots", `${tag}-4-branch.png`));   // 阿米娅 + bg_forest
-  for (let i = 0; i < 2; i += 1) await click(512, 430, 3);
+  for (let i = 0; i < 2; i += 1) await click(512, 430 + dy, 3);
   shot(join(outDir, "shots", `${tag}-5-merge.png`));    // 合流：陈 + bg_forest
 }
 
@@ -168,8 +190,16 @@ for (const pass of [{ name: "online", deadNet: false }, { name: "offline", deadN
   console.log(`\n== pass ${pass.name} (${pass.deadNet ? "network dead" : "network ok"}) ==`);
   const run = await launch(`pass-${pass.name}.log`, pass.deadNet);
   if (!run.window) { fail(`${pass.name}: no app window`); continue; }
+  // 无 WM 时 GTK 可能把窗口摆在屏幕中央（曾是 (128,150)），下面的像素点击是按
+  // **默认窗口尺寸 1024×600 贴左上角**标定的 → 这里只把窗口**挪到 (0,0)**，
+  // 千万**别改尺寸**（一改版面就变，点击坐标全废）。
+  sh(`DISPLAY=${display} xdotool windowmove --sync ${run.window} 0 0 2>/dev/null`);
   sh(`DISPLAY=${display} xdotool windowactivate --sync ${run.window} 2>/dev/null`);
   await sleep(7000);
+  // 引擎横幅（`[data-asset-banner]`，P6 的静默降级提示）会占据顶部 ~35px 并把整页内容
+  // 下推 → 下面按默认版面标定的像素点击会整体落空。先点它的 ✕ 关掉（1024×600 时约 (994,54)）。
+  await clickNav(994, 24, 1.0);
+  await clickNav(994, 24, 1.0);
   note(`${pass.name}: seeded ${installedAssets()} bundled .webp (library + sample)`);
   if (installedAssets() < expectedKeys.length * 2) fail(`${pass.name}: seed wrote only ${installedAssets()} files`);
   await playThrough(pass.name);
