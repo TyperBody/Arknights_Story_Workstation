@@ -1,9 +1,11 @@
+import { getItem, setItem } from "./stateStore";
 import { useSyncExternalStore } from "react";
 
 /**
  * 应用级设置（下载源 / 并发 / 限速 / 引擎自更新 / 横幅关闭记录）。
  *
- * 存储：`localStorage: prts-app-settings`（单个 JSON 对象）。
+ * 存储：**SQLite `state.db`**（`scope=app`, key=`prts-app-settings`，单个 JSON 对象；
+ * 由 `stateStore` 统一读写，无 Tauri/DB 坏时自动回落 `localStorage` 同名键）。
  * 纪律（BRIEF §3.2 / §3.3）：
  * - **坏数据永不抛**：坏 JSON、缺字段、类型不对、越界 → 逐字段回落默认值；
  * - 读取/写入都用 try/catch 包住（隐私模式 / 存储被禁时也能用，只是不持久）；
@@ -125,10 +127,9 @@ function parseText(text: string | null): AppSettings {
 
 /** 当前设置（**总是**返回一份完整、可用的对象；模块级缓存 + 原始串比对）。 */
 export function getAppSettings(): AppSettings {
-  if (typeof localStorage === "undefined") return cacheLoaded ? cache : DEFAULT_SETTINGS;
   let text: string | null = null;
   try {
-    text = localStorage.getItem(STORAGE_KEY);
+    text = getItem("app", STORAGE_KEY);
   } catch {
     text = cacheRaw; // 存储不可用：沿用内存里的最后一版
   }
@@ -154,9 +155,9 @@ export function setAppSettings(patch: Partial<AppSettings>): AppSettings {
   cacheRaw = text;
   cacheLoaded = true;
   try {
-    localStorage.setItem(STORAGE_KEY, text);
+    setItem("app", STORAGE_KEY, text);
   } catch {
-    /* 配额满 / 隐私模式：内存里仍然生效 */
+    /* 落库失败 / 隐私模式：内存里仍然生效 */
   }
   listeners.forEach((l) => l());
   return next;

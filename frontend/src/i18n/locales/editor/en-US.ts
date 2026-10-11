@@ -260,10 +260,11 @@ export default {
   preview: {
     title: "Preview",
     frameTitle: "Script preview",
-    resizeTitle: "Drag to resize the height",
     reload: "Reload preview",
     full: "Shrink",
     zoom: "Expand",
+    zoomTitle: "Expand the preview to the whole page (click again to shrink)",
+    fullTitle: "Shrink back to the workbench position",
     close: "Close",
     preparing: "Preparing the preview…",
     preparingCut: "Preparing the preview (cut at line {{line}})…",
@@ -454,5 +455,13 @@ export default {
     noDecision:
       "The caret is not inside a [Decision] region: select the lines you want to indent first.",
     noChange: "This region is already indented: nothing to change.",
+    tabHint: "Tab = one 8-column indent (a tab character); Enter keeps the indent; Backspace outdents to the previous tab stop.",
+  },
+
+  // ── Script syntax highlighting (wired up by task-7) ────────────
+  highlight: {
+    legend: "Colors: command / argument / text",
+    description:
+      "Command names, argument keys, strings, numbers, speakers, narration and comments are colored by kind; the highlight layer stays pixel-aligned with the text.",
   },
 };

@@ -260,10 +260,11 @@ export default {
   preview: {
     title: "预览",
     frameTitle: "剧本预览",
-    resizeTitle: "拖动调整高度",
     reload: "重新载入预览",
     full: "还原",
     zoom: "放大",
+    zoomTitle: "把预览放大到整页（再点还原）",
+    fullTitle: "还原到工作台原来的位置",
     close: "关闭",
     preparing: "正在准备预览…",
     preparingCut: "正在准备预览（截到第 {{line}} 行）…",
@@ -450,5 +451,13 @@ export default {
     title: "把 [Decision] 区域的每条线路重排成层级缩进；只为可读，送引擎前会自动去掉行首空白",
     noDecision: "光标不在 [Decision] 区域里：先选中要缩进的行再点「缩进区域」。",
     noChange: "这一区域已经是缩进好的：没有需要改的行。",
+    tabHint: "Tab = 8 列缩进（一个 Tab 字符）；Enter 自动沿用缩进；Backspace 回退到上一 tab stop。",
+  },
+
+  // ── 脚本文本语法着色（task-7 接线）────────────────────────────
+  highlight: {
+    legend: "着色：指令 / 参数 / 文本",
+    description:
+      "指令名、参数名、字符串、数字、说话人、旁白文本、注释按类着色；着色层与正文逐像素对齐。",
   },
 };

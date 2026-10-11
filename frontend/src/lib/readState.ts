@@ -1,13 +1,14 @@
 // Tracks which stories the user has opened in the player ("read"), so the
 // bookshelf can distinguish read vs unread chapters. Persisted in localStorage
 // (independent of the download cache — a story can be read without being cached,
-// or cached without being read).
+// or cached without being read). 存 SQLite `state.db`，scope=library.
 
 const KEY = "arkstage-read-stories";
+import { getItem, setItem } from "./stateStore";
 
 export function getReadStories(): Set<string> {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = getItem("library", KEY);
     return new Set(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
     return new Set();
@@ -20,7 +21,7 @@ export function markRead(pageTitle: string): void {
     const s = getReadStories();
     if (s.has(pageTitle)) return;
     s.add(pageTitle);
-    localStorage.setItem(KEY, JSON.stringify([...s]));
+    setItem("library", KEY, JSON.stringify([...s]));
   } catch {
     /* storage unavailable — read state is best-effort */
   }
@@ -32,7 +33,7 @@ const LAST_KEY = "arkstage-last-watched";
 
 export function getLastWatched(): string | null {
   try {
-    return localStorage.getItem(LAST_KEY);
+    return getItem("library", LAST_KEY);
   } catch {
     return null;
   }
@@ -40,7 +41,7 @@ export function getLastWatched(): string | null {
 
 export function setLastWatched(pageTitle: string): void {
   try {
-    localStorage.setItem(LAST_KEY, pageTitle);
+    setItem("library", LAST_KEY, pageTitle);
   } catch {
     /* best-effort */
   }

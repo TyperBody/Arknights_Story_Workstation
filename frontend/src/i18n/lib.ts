@@ -8,6 +8,8 @@
  */
 
 /** 支持的语言（顺序 = 语言开关里的展示顺序）。 */
+import { getItem, setItem } from "../lib/stateStore";
+
 export const LOCALES = ["zh-Hans", "en-US"] as const;
 
 export type Locale = (typeof LOCALES)[number];
@@ -119,8 +121,11 @@ export interface I18n {
 }
 
 /**
- * 建一个 i18n 实例：`resources` + `localStorage: prts-language` 记忆 + 变更订阅。
- * 无 `localStorage`（Node / 隐私模式）时全部是安全空操作，语言只在内存里。
+ * 建一个 i18n 实例：`resources` + 语言记忆（`state.db` 的 `scope=app`，
+ * 键仍是 `prts-language`；无 Tauri / DB 坏 → 自动回落 `localStorage`）+ 变更订阅。
+ *
+ * 纯 Node（selftest / checker）里 `stateStore` 只在内存里记 —— 语言仍可切换，
+ * 只是不跨进程保留（与旧 `localStorage` 缺席时的行为一致）。
  */
 export function createI18n(
   resources: Record<string, Record<string, unknown>>,
@@ -129,18 +134,26 @@ export function createI18n(
   const listeners = new Set<() => void>();
   let current: Locale = DEFAULT_LOCALE;
 
-  const store = (): Storage | null => {
-    try {
-      const g = globalThis as { window?: { localStorage?: Storage }; localStorage?: Storage };
-      const ls = g.window?.localStorage ?? g.localStorage;
-      return ls && typeof ls.getItem === "function" ? ls : null;
-    } catch {
-      return null; // 某些 WebView 隐私模式下访问 localStorage 会抛
-    }
+  /** 存储适配：`state.db`（scope=app）+ localStorage 兜底，全部 try/catch。 */
+  const store = {
+    read(): string | null {
+      try {
+        return getItem("app", storageKey);
+      } catch {
+        return null; // 隐私模式 / 存储被禁
+      }
+    },
+    write(value: string): void {
+      try {
+        setItem("app", storageKey, value);
+      } catch {
+        /* 写失败：内存里已生效 */
+      }
+    },
   };
 
   try {
-    const saved = store()?.getItem(storageKey);
+    const saved = store.read();
     if (isLocale(saved)) current = saved;
   } catch {
     // 读失败按缺省语言
@@ -156,11 +169,7 @@ export function createI18n(
     getLocale: () => current,
     setLocale(next) {
       current = isLocale(next) ? next : DEFAULT_LOCALE;
-      try {
-        store()?.setItem(storageKey, current);
-      } catch {
-        // 写失败：内存里已切换，刷新后回落默认。
-      }
+      store.write(current);
       listeners.forEach((listener) => listener());
     },
     subscribe(listener) {

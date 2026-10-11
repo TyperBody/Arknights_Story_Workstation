@@ -61,6 +61,7 @@ regex = "1"
 # via the `cc` crate, the exact cross-compile path `ring` already uses for Android.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 webp = "0.3"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

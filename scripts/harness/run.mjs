@@ -46,6 +46,8 @@ const GROUPS = {
   shell: [
     ["p4-shell-unit.mjs", "窗口壳纯逻辑（兜底表/注册表/resolveChrome）"],
     ["p4-shell-probe.mjs", "窗口壳交互（折叠/⧉/拖动/缩放/✕）"],
+    ["preview-bar-oneline.mjs", "② 预览条恒单行（拖窄 + 多行报错都不撑高）"],
+    ["preview-fill-probe.mjs", "② 预览填满壳；放大=整页覆盖层，还原可退"],
   ],
   player: [
     ["player-chrome.mjs", "播放器底栏三档（auto=默认纯隐藏/指针几何命中/hide）"],

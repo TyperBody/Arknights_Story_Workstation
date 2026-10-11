@@ -17,6 +17,7 @@
  * 本文件零 React：`localStorage` 缺失（Node / 隐私模式）时全部是安全空操作。
  */
 
+import { getItem, listKeys, removeItem, setItem, hydrate } from "../../lib/stateStore";
 import type { PanelId } from "./workbenchStack";
 
 export type { PanelId };
@@ -108,7 +109,14 @@ export function layoutKey(name: string): string {
   return clean === DEFAULT_LAYOUT_NAME ? WB_KEY_DEFAULT : `${WB_KEY_PREFIX}${clean}`;
 }
 
-/** 无 `localStorage`（Node / 隐私模式 / `file://`）时返回 null。 */
+// 工作台布局是**渲染期同步读**：模块加载时就把 `scope=workspace` 拉进内存
+// （`hydrate()` 幂等；无 Tauri 时同步完成）。
+void hydrate();
+
+/**
+ * `localStorage` 适配（**仅供旧键迁移**：`migrateLegacy` 读 `prts-editor-windows:*`，
+ * 那些键在新版本里只可能存在于旧 WebView 的 localStorage；迁移后即删）。
+ */
 function store(): Storage | null {
   try {
     const g = globalThis as { window?: { localStorage?: Storage }; localStorage?: Storage };
@@ -120,7 +128,8 @@ function store(): Storage | null {
   }
 }
 
-function readRaw(key: string): string | null {
+/** 迁移专用：从 **localStorage** 读旧键（不经过 DB；`prts-editor-windows:*` 是旧版遗留）。 */
+function readLegacyRaw(key: string): string | null {
   try {
     return store()?.getItem(key) ?? null;
   } catch {
@@ -128,32 +137,48 @@ function readRaw(key: string): string | null {
   }
 }
 
+/** 迁移专用：删 localStorage 里的旧键。 */
+function removeLegacyRaw(key: string): void {
+  try {
+    store()?.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 读写落到 `stateStore`（`state.db`，scope=workspace）——**不是** `localStorage`：
+ * 工作台排版属于"记忆"，清缓存/换 WebView 不该丢。无 Tauri / DB 坏时
+ * `stateStore` 自动回落 `localStorage`（同一批键名）。
+ */
+function readRaw(key: string): string | null {
+  try {
+    return getItem("workspace", key);
+  } catch {
+    return null;
+  }
+}
+
 function writeRaw(key: string, value: string): void {
   try {
-    store()?.setItem(key, value);
+    setItem("workspace", key, value);
   } catch {
-    // 配额满 / 隐私模式：持久化只是便利，不是功能。
+    // 落库失败 / 隐私模式：持久化只是便利，不是功能（内存里仍生效）。
   }
 }
 
 function removeRaw(key: string): void {
   try {
-    store()?.removeItem(key);
+    removeItem("workspace", key);
   } catch {
     // 同上
   }
 }
 
+/** scope=workspace 里现有的键（DB 的 `state_db_snapshot` 已在 hydrate 时进内存）。 */
 function allKeys(): string[] {
-  const ls = store();
-  if (!ls) return [];
   try {
-    const out: string[] = [];
-    for (let i = 0; i < ls.length; i += 1) {
-      const key = ls.key(i);
-      if (typeof key === "string") out.push(key);
-    }
-    return out;
+    return listKeys("workspace");
   } catch {
     return [];
   }
@@ -357,33 +382,53 @@ export function migrateLegacy(previousStorageKeys?: string[]): void {
     const explicit = previousStorageKeys != null;
     const keys = explicit
       ? [...new Set(previousStorageKeys.map((key) => String(key)))]
-      : allKeys().filter((key) => key.startsWith(LEGACY_KEY_PREFIX));
+      : legacyKeysFromStore().filter((key) => key.startsWith(LEGACY_KEY_PREFIX));
     if (!keys.length) {
       pendingLegacy = []; // 没有旧键 → 「待迁移」结果也清空（第二次调用后不留残影）
       return;
     }
-    if (!explicit && readRaw(MIGRATION_MARK) === "1") {
+    if (!explicit && (readLegacyRaw(MIGRATION_MARK) === "1" || readRaw(MIGRATION_MARK) === "1")) {
       // 已经迁过：仍把残留键清干净（例如用户从旧版本回滚又升级）。
-      for (const key of keys) removeRaw(key);
+      for (const key of keys) removeLegacyRaw(key);
       return;
     }
     const found: LegacyWindow[] = [];
     for (const key of keys) {
-      const parsed = parseLegacy(readRaw(key));
+      const parsed = parseLegacy(readLegacyRaw(key));
       if (!parsed) continue;
       found.push({ key, panel: legacyPanelOf(key), state: parsed });
     }
     pendingLegacy = found;
-    for (const key of keys) removeRaw(key);
-    writeRaw(MIGRATION_MARK, "1");
+    for (const key of keys) removeLegacyRaw(key);
+    try {
+      store()?.setItem(MIGRATION_MARK, "1");
+    } catch {
+      /* 迁移标记写不进也只是下次再跑一次（幂等） */
+    }
   } catch {
     // 迁移失败不影响启动。
   }
 }
 
-/** 迁移是否已跑过（测试/诊断用）。 */
+/** 迁移专用：localStorage 里现有的键（**不**经过 DB）。 */
+function legacyKeysFromStore(): string[] {
+  const ls = store();
+  if (!ls) return [];
+  try {
+    const out: string[] = [];
+    for (let i = 0; i < ls.length; i += 1) {
+      const key = ls.key(i);
+      if (typeof key === "string") out.push(key);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** 迁移是否已跑过（测试/诊断用）：localStorage 或 DB 任一有标记即算。 */
 export function legacyMigrated(): boolean {
-  return readRaw(MIGRATION_MARK) === "1";
+  return readLegacyRaw(MIGRATION_MARK) === "1" || readRaw(MIGRATION_MARK) === "1";
 }
 
 /** 旧选项 → 新布局建议（P5 可以直接拿去 `move`）：返回「面板 → 落点 zone」。 */

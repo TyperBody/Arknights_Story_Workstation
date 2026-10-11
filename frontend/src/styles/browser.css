@@ -1408,6 +1408,95 @@
   pointer-events: none;
 }
 
+/* ── 脚本文本语法着色（task-7）──────────────────────────────────────────
+   kind → 颜色。默认给**深色**一套（应用的默认主题）；`:root` 变量放在
+   这里（browser.css 在 global.css 之后加载，且全局只有这里定义 `--hl-*`）。
+   ⚠️ 编辑器正文的**文字必须可见**：着色层在下、textarea 文字 `transparent`。
+   色板与 kind 集合（task-6 的 `tokenizeLine` 契约）一一对应。 */
+:root {
+  --hl-controller: #82aaff; /* 指令名 */
+  --hl-arg: #c792ea;        /* 参数名 */
+  --hl-string: #c3e88d;     /* 字符串字面量 */
+  --hl-number: #f78c6c;     /* 数字 */
+  --hl-bool: #ffcb6b;       /* true / false */
+  --hl-semicolon: #89ddff;  /* `;` 分隔（值列表） */
+  --hl-speaker: #ffcb6b;    /* `[name="X"]` 的说话人 */
+  --hl-text: #d7dae0;       /* 旁白 / 对白正文 */
+  --hl-comment: #6a737d;    /* `// …` */
+  --hl-bracket: #8792a2;    /* `[` `]` `(` `)` */
+  --hl-indent: #3f4550;     /* 行首空白 */
+  --hl-bare: #d7dae0;       /* 兜底 */
+  --hl-severity-error: #ff8a80;
+  --hl-severity-warning: #ffd54f;
+}
+
+/* 着色层：与 `.ed-textarea` **同字体/字号/行高/padding/white-space/tab-size**，
+   绝对定位在 textarea **之下**（textarea 文字透明）。整层 `pointer-events:none`，
+   鼠标事件全给 textarea；`overflow: visible` 保证不裁掉（宽度由 `.ed-code-lines`
+   的 `min-width` 决定，测量锚点 `.ed-anchor` 仍照常工作）。 */
+.ed-hl {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  margin: 0;
+  padding: 0 10px 24px;
+  overflow: visible;
+  pointer-events: none;
+  user-select: none;
+  background: transparent;
+  border: 0;
+  white-space: pre;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 21px;
+  tab-size: 8;
+  -moz-tab-size: 8;
+}
+
+.ed-hl[data-hl-readonly="1"] {
+  display: none;
+}
+
+.ed-hl-line {
+  display: block;
+  height: 21px;
+  min-height: 21px;
+  white-space: pre;
+}
+
+.ed-hl-line[data-hl-severity="error"] {
+  text-decoration: underline wavy var(--hl-severity-error);
+  text-decoration-skip-ink: none;
+}
+
+.ed-hl-line[data-hl-severity="warning"] {
+  text-decoration: underline wavy var(--hl-severity-warning);
+  text-decoration-skip-ink: none;
+}
+
+/* 高亮层里的换行占位（`\n` 不参与排版，宽度 0；只为 DOM 语义/对拍可读）。 */
+.ed-hl-eol {
+  display: inline;
+}
+
+/* kind → 颜色。`...-*-key` 别名留给「同一个 kind 在不同位置」的细分
+   （参数名 vs 值、`[name=]` 的说话人 vs 普通字符串）。 */
+.hl-controller { color: var(--hl-controller); }
+.hl-argKey { color: var(--hl-arg); }
+.hl-string { color: var(--hl-string); }
+.hl-number { color: var(--hl-number); }
+.hl-bool { color: var(--hl-bool); }
+.hl-semicolon { color: var(--hl-semicolon); }
+.hl-speaker { color: var(--hl-speaker); }
+.hl-text { color: var(--hl-text); }
+.hl-comment { color: var(--hl-comment); font-style: italic; }
+.hl-bracket { color: var(--hl-bracket); }
+.hl-indent { color: var(--hl-indent); }
+.hl-bare { color: var(--hl-bare); }
+
+/* `[Decision(…)]` 的字符串值（选项列表）加一点强调：与参数值同色但更亮。 */
+.hl-string.hl-decision-option { font-weight: 600; }
+
 .ed-textarea {
   position: relative;
   z-index: 1;
@@ -1426,23 +1515,28 @@
   resize: none;
   overflow: hidden;
   white-space: pre;
-  color: var(--text-primary);
+  color: transparent;
   caret-color: var(--accent);
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 21px;
-  tab-size: 4;
+  /* 8 列一个 tab（VSCode 默认）：`.ed-hl` / `.ed-anchor` 必须同值，
+     否则 Tab 行在着色层与正文之间错位。 */
+  tab-size: 8;
+  -moz-tab-size: 8;
 }
 
 .ed-textarea::selection {
   background: rgba(244, 196, 48, 0.28);
 }
 
+/* readonly（纯 Vite 只读演示）时不着色：颜色交回 textarea，保证**仍然可读**。 */
 .ed-textarea[readonly] {
   color: var(--text-primary);
 }
 
-/* 测量锚点：不可见，只用来算光标像素位置（用于补全弹窗 / 悬停帮助）。 */
+/* 测量锚点：不可见，只用来算光标像素位置（用于补全弹窗 / 悬停帮助）。
+   ⚠️ `tab-size` 必须与 textarea 一致（Tab 行的像素宽度全靠它）。 */
 .ed-anchor {
   position: absolute;
   top: 0;
@@ -1453,6 +1547,8 @@
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 21px;
+  tab-size: 8;
+  -moz-tab-size: 8;
   pointer-events: none;
 }
 
@@ -1819,43 +1915,28 @@
   gap: 6px;
 }
 
-/* ── 预览：可拖拽高度的演出面板 ─────────────────────────────────────── */
+/* ── 预览：填满宿主（工作台槽位 / 浮动窗）的演出面板 ───────────────── */
 
 .ed-preview {
-  flex: none;
+  flex: 1 1 auto;
   position: relative;
   display: flex;
   flex-direction: column;
-  height: 340px;
-  min-height: 140px;
+  min-height: 0;
   background: #000;
   border-top: 1px solid var(--border);
 }
 
+/* 「放大」= 整页覆盖层（与浮动窗正交：退出只需摘掉 `.full`）。
+   用 fixed 而不是浮动 rect：rect 的坐标系是 `[data-wb-panel]` 槽位，
+   到不了整页。 */
 .ed-preview.full {
-  height: 62%;
-}
-
-.ed-preview-resize {
-  position: absolute;
-  top: -4px;
-  left: 0;
-  right: 0;
-  height: 8px;
-  z-index: 8;
-  cursor: ns-resize;
-}
-
-.ed-preview-resize::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 50%;
-  width: 54px;
-  height: 3px;
-  margin-left: -27px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.28);
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  min-height: 0;
+  height: auto;
+  border-top: 0;
 }
 
 .ed-preview-bar {
@@ -2242,9 +2323,12 @@
   min-height: 64px;
 }
 
-/* 预览（Map）：高度由内联 style（`previewHeight` / 放大 62%）决定。 */
+/* 预览（Map）：**撑满壳**（`.wb-shell` / 浮动窗）。高度由工作台的 split
+   `share` 或浮动窗 rect 决定；「放大 / 还原」把浮动窗拉到整页并还原。 */
 .ed-preview {
+  flex: 1 1 auto;
   height: auto;
+  min-height: 0;
 }
 
 /* 分支图（Map）：包一层，让 `.ed-graph` 撑满壳体。 */

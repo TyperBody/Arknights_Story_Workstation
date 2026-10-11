@@ -1,6 +1,7 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { PROXY_BASE, discoverAssetDomains, proxyUrl, rewriteAllCdnUrls } from "./proxy";
 import { captureIframe, pushLog } from "./debugLog";
+import { getItem } from "./stateStore";
 import { scenarioLinkOverrides, type ScenarioLinkOverride } from "./BookshelfMetadataContext";
 import { bootStoryPlayer } from "./storyPlayerBoot";
 import type { StoryPlayerSnapshot } from "./storyPlayerAdapter";
@@ -141,7 +142,7 @@ export async function bootEngineInFrame(opts: FrameBootOptions): Promise<FrameBo
   if (!idoc || !iwin) throw new Error("iframe realm unavailable");
 
   // MediaWiki shim must exist before engine scripts read mw.config.
-  const nickname = localStorage.getItem("prts-nickname") || null;
+  const nickname = getItem("ui", "prts-nickname") || null;
   iwin.mw = { config: { get: (k: string) => (k === "wgUserName" ? nickname : null) } };
 
   // === Build the engine document ===

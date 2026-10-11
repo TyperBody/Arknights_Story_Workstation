@@ -2,6 +2,8 @@
 
 > 每个 harness 都有两个等价入口：`node scripts/harness/<name>.mjs`（推荐，随源码走）
 > 与 `node build/harness/<name>.mjs`（真身；`build/` 是中间产物目录）。**自带断言、自带退出码、可单独跑**。
+> 断言有效性自检：`build/harness/preview-bar-regress-check.mjs`（人为恢复旧样式 → bar 42px → 319px，
+> 证明 `preview-bar-oneline.mjs` 不是空跑；只做一次性验证，不在 runner 里）。
 > 一条命令跑全套：`npm run test:harness`（= `node scripts/harness/run.mjs`；`--list` 看清单，
 > 也可只跑某组：`… run.mjs shell assets` / 某项：`… run.mjs branch-shot`）。
 > 浏览器段需要 dev server：`( nohup npm run dev > /tmp/arkstage-vite.log 2>&1 & )`（:5174）。
@@ -22,9 +24,11 @@
 | ⑦ | 下载源真正生效（Rust 源链 + 镜像 URL 形状 + 设置推送） | `rust-mirror-live.mjs`（13）、`live-download.mjs`（3） | assets |
 | — | 窗口壳（折叠/⧉/拖动/缩放/✕） | `p4-shell-unit.mjs`（10）、`p4-shell-probe.mjs`（11） | shell |
 | — | 播放器底栏三档（`auto` = 默认纯隐藏；指针命中即显示） | `player-chrome.mjs`（10） | player |
+| ② | **预览条恒单行**（面板拖窄 / 状态里带 `\n` 的多行 loader 报错都不把 bar 撑高） | `preview-bar-oneline.mjs`（6） | shell |
+| ② | **预览填满壳 + 放大/还原**（槽位/浮动窗不留白；「放大」= `.full` 整页覆盖层，可退） | `preview-fill-probe.mjs`（4） | shell |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
-`npm run test:harness` 当前 = **16 个 harness**（workbench 7 / branch 1 / engine 2 / assets 3 / shell 2 / player 1）。
+`npm run test:harness` 当前 = **18 个 harness**（workbench 7 / branch 1 / engine 2 / assets 3 / shell 4 / player 1）。
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
 

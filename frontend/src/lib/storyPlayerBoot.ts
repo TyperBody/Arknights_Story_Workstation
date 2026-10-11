@@ -1,5 +1,6 @@
 import type { FrameBootOptions, FrameBootResult, WidgetBundle } from "./engineBoot";
 import { captureIframe, pushLog } from "./debugLog";
+import { getItem } from "./stateStore";
 import { PROXY_BASE, discoverAssetDomains, proxyUrl, rewriteAllCdnUrls } from "./proxy";
 import { packAssetCount, packAssetMissCount, packAssetShimAvailable, packAssetShimCode, resolvePackAsset as resolvePackAssetLive } from "./packAssets";
 import { getPlayerChrome, type PlayerChrome } from "./uiSettings";
@@ -447,7 +448,7 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
   doc.documentElement.setAttribute("data-arkstage-boot", bootState);
   doc.title = opts.title;
   doc.getElementById("datas_txt")!.textContent = opts.script;
-  win.mw = { config: { get: (key: string) => key === "wgUserName" ? localStorage.getItem("prts-nickname") : null } };
+  win.mw = { config: { get: (key: string) => key === "wgUserName" ? getItem("ui", "prts-nickname") : null } };
   captureIframe(win);
   // Pack-local assets first: the shipped copy beats the network for its own keys.
   // Install this BEFORE `installMediaTransport`/the fetch shim so src-rewrites and

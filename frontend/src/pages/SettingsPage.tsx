@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { LOCALES, LOCALE_LABELS, useLocale, setLocale, translate, type Locale } from "../i18n/index.ts";
 import { isDebugConsoleEnabled, setDebugPref, debugBuildDefault } from "../lib/debugSettings";
 import { getPlayerChrome, isHidePlayerBack, setHidePlayerBack, setPlayerChrome, type PlayerChrome } from "../lib/uiSettings";
+import { getItem, setItem } from "../lib/stateStore";
 import { isAndroid } from "../lib/platform";
 import { getDownloadSettings, setDownloadSettings } from "../lib/predownload";
 import { useDownload } from "../lib/DownloadContext";
@@ -115,7 +116,7 @@ export default function SettingsPage() {
   const [catalog, setCatalog] = useState<CatalogSummary | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("prts-nickname");
+    const saved = getItem("ui", "prts-nickname");
     if (saved) setNickname(saved);
     refreshCacheStatus();
     invoke<ResourceDirInfo>("get_resource_dir").then(setResDir).catch(() => {});
@@ -323,7 +324,7 @@ export default function SettingsPage() {
   };
 
   const saveNickname = () => {
-    localStorage.setItem("prts-nickname", nickname);
+    setItem("ui", "prts-nickname", nickname);
     showMsg("昵称已保存");
   };
 

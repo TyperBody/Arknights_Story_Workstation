@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 
-// Small UI preferences kept in localStorage. "hidePlayerBack" hides ONLY the
+import { getItem, setItem } from "./stateStore";
+
+// Small UI preferences kept in the SQLite state store (`scope=ui`) + localStorage 兜底. "hidePlayerBack" hides ONLY the
 // reader's on-screen back button (the other pages keep theirs); users who use the
 // system back gesture can declutter the immersive reader. "playerChrome" controls
 // the engine's bottom control strip (播放模式 / 播放速度 …) inside the reader.
@@ -19,14 +21,15 @@ const PLAYER_CHROME_VALUES: readonly PlayerChrome[] = ["show", "auto", "hide"];
 
 /** 当前「播放器底栏」设置（默认 `auto`：底栏常藏，指针移上去才显示；非法/缺失一律回落）。 */
 export function getPlayerChrome(): PlayerChrome {
-  const raw = localStorage.getItem(PLAYER_CHROME_KEY);
+  const raw = getItem("ui", PLAYER_CHROME_KEY);
   return PLAYER_CHROME_VALUES.includes(raw as PlayerChrome) ? (raw as PlayerChrome) : "auto";
 }
 
 export function setPlayerChrome(value: PlayerChrome): void {
   // `auto` 是默认值：不写 key，回到默认即「清掉」。
-  if (value === "auto") localStorage.removeItem(PLAYER_CHROME_KEY);
-  else localStorage.setItem(PLAYER_CHROME_KEY, value);
+  // 存 SQLite（`state.db`，scope=ui）；`auto` 是默认值 → 直接写 "auto" 而不是删键，
+  // 保证「迁移过的老用户」和「DB 里已有一条」的行为一致（读取端本就有默认回落）。
+  setItem("ui", PLAYER_CHROME_KEY, value);
   listeners.forEach((l) => l());
 }
 
@@ -36,12 +39,11 @@ export function usePlayerChrome(): PlayerChrome {
 }
 
 export function isHidePlayerBack(): boolean {
-  return localStorage.getItem(HIDE_PLAYER_BACK_KEY) === "1";
+  return getItem("ui", HIDE_PLAYER_BACK_KEY) === "1";
 }
 
 export function setHidePlayerBack(value: boolean): void {
-  if (value) localStorage.setItem(HIDE_PLAYER_BACK_KEY, "1");
-  else localStorage.removeItem(HIDE_PLAYER_BACK_KEY);
+  setItem("ui", HIDE_PLAYER_BACK_KEY, value ? "1" : "0");
   listeners.forEach((l) => l());
 }
 

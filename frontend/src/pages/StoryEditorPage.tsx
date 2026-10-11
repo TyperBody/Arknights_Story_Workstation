@@ -44,6 +44,7 @@ import {
   specOf,
 } from "../components/editor/workbenchLayout";
 import { createHistory, diffOf, type HistoryEntry } from "../components/editor/history";
+import ScriptHighlight from "../components/editor/ScriptHighlight";
 import { disposeEngineFrame } from "../lib/storyPlayerBoot";
 // engineBoot / localStories 在别处已是**静态**依赖（predownload.ts 等），页面这里
 // 改成静态 import 后，Rollup 的 "INEFFECTIVE_DYNAMIC_IMPORT"（同一模块既静态
@@ -284,6 +285,8 @@ interface EditorModel {
   ) => { text: string; caret?: { from: number; to: number }; lines?: number };
   /** `[Decision]` 区域整段重排（`editorModel.regionIndentPlan`）。 */
   regionIndentPlan?: (text: string) => { text: string; changed?: number; lines?: number };
+  /** 语法着色（`editorModel.tokenizeLine`，task-6）：整行字符偏移的 span 列表。 */
+  tokenizeLine?: (raw: string) => Array<{ from: number; to: number; kind: string }>;
 }
 
 /** 「区域缩进」的降级实现：模型缺失（/ 半截）时也能用；模型就绪后以模型为准。
@@ -355,6 +358,142 @@ function fallbackIndentLines(
   return { text: src.slice(0, first) + body.join("\n") + src.slice(last), caret: { from: lo, to: hi }, lines };
 }
 
+// ─── VSCode 式 Tab / Enter / Backspace（task-7 的纯函数）────────────────────
+//
+// 三件事与 `tab-size: 8`（CSS）配套：
+//   1. `tryTabSkeleton` 之后 Tab 插**一个 `\t` 字符**（浏览器原生按 8 列跳到
+//      下一个 tab stop；`.ed-anchor` 也已 tab-size: 8，所以像素测量不错位）。
+//   2. Enter = "沿用缩进"（VSCode 的 editor.autoIndent），见下。
+//   3. Backspace = 空白才起作用：先删空白，再按 8 列网格回退一格（VSCode 的
+//      "Backspace 到上一个 tab stop"）。
+//
+// 下面的纯函数都只吃 `(text, offset)`，**不碰 DOM**，方便单测与 harness 对拍。
+
+const TAB_SIZE = 8;
+
+/** `[Cmd(...)]` 的行首命令名（去 `@tag`、去行首空白）；旁白/非指令 = `null`。 */
+function lineHeadCommand(line: string): string | null {
+  const bare = String(line ?? "").replace(/^[ \t]+/, "");
+  if (!bare.startsWith("[")) return null;
+  const close = bare.indexOf("]");
+  if (close === -1) return null;
+  const head = bare.slice(1, close);
+  if (/^\s*name\s*=/.test(head)) return "dialog";
+  const open = head.indexOf("(");
+  const name = (open === -1 ? head : head.slice(0, open)).split("@")[0].trim();
+  return /^[A-Za-z_]\w*$/.test(name) ? name.toLowerCase() : null;
+}
+
+/** 视觉列（Tab 跳 8 列网格）；`start` 是行首在 `text` 里的偏移。 */
+function visualColumn(text: string, start: number, offset: number, tabSize = TAB_SIZE): number {
+  let column = 0;
+  for (let index = start; index < offset; index += 1) {
+    const code = text.codePointAt(index) ?? 0;
+    if (code === 9) column += tabSize - (column % tabSize);
+    else column += code > 0x2e80 ? 2 : 1;
+  }
+  return column;
+}
+
+/** 行首在 `text` 里的偏移。 */
+function lineStartAt(text: string, offset: number): number {
+  return text.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
+}
+
+/** 行尾（不含 `\n`）在 `text` 里的偏移。 */
+function lineEndAt(text: string, offset: number): number {
+  const at = text.indexOf("\n", offset);
+  return at === -1 ? text.length : at;
+}
+
+/**
+ * Enter 的自动缩进（VSCode `editor.autoIndent: "full"` 的简化版，只做行首
+ * 空白）：
+ * - `[Decision]` → 新行**多一级**（1 个 `\t`；它的 `[Predicate]` 应当在其
+ *   区域内一级）；
+ * - `[Predicate]` → 新行**多一级**（= 线路体）；
+ * - 下一行已存在且是 `[Predicate]`/`[End]`/`[endtip]` → 新行**与其同级**
+ *   （在下一行前回车 = 补一条同级线路头，而不是缩进到线路体里）；
+ * - 其余 → 沿用当前行的**完整行首缩进**（逐字符照抄，Tab/空格混合不失真）。
+ *
+ * 返回要插到 `offset` 处的文本（`"\n"` + 缩进；无缩进时就是 `"\n"`）。
+ * @param text 全文 @param offset 光标（`selectionStart === selectionEnd`）
+ */
+export function autoIndentOnEnter(text: string, offset: number): string {
+  const src = String(text ?? "");
+  const at = Math.max(0, Math.min(src.length, Math.trunc(Number(offset) || 0)));
+  const start = lineStartAt(src, at);
+  const end = lineEndAt(src, at);
+  const line = src.slice(start, end);
+  const lead = /^[ \t]*/.exec(line)?.[0] ?? "";
+  const command = lineHeadCommand(line);
+
+  // 下一行（非空行则看它的命令名：补线路头 / 收尾时**同级**）。
+  let nextLead = "";
+  let nextCommand: string | null = null;
+  if (end < src.length) {
+    const nextStart = end + 1;
+    const nextEnd = lineEndAt(src, nextStart);
+    const nextLine = src.slice(nextStart, nextEnd);
+    nextLead = /^[ \t]*/.exec(nextLine)?.[0] ?? "";
+    nextCommand = lineHeadCommand(nextLine);
+  }
+  const atRouteGate = nextCommand === "predicate" || nextCommand === "end" || nextCommand === "endtip";
+
+  let indent: string;
+  if (command === "decision" || command === "predicate") {
+    indent = `${lead}\t`; // 新行多一级（线路体 / 线路头）
+  } else if (atRouteGate) {
+    // 与下一行同级：`Decision` 的线路头是一级、路线体是两级，这里就用它的
+    // 命令名对齐（`Predicate` → 一级；`End`/`endtip` → 0 级）。
+    indent = nextCommand === "predicate" ? nextLead || "\t" : nextLead;
+  } else {
+    indent = lead; // 沿用当前行的完整行首缩进（逐字符）
+  }
+  if (line.trim() === "") indent = lead; // 空行：只沿用现有空白，不多加
+  return `\n${indent}`;
+}
+
+/**
+ * Backspace 的"跳 tab stop"：光标左边**只有空白**（到行首为止）时，把这段
+ * 空白删到上一个 8 列 tab stop —— 即从 `offset` 往左找出**最长**的
+ * `[start, offset)` 使「`text[start]` 是行首或 Tab」且
+ * `visualColumn(start → offset) ≡ 0 (mod 8)`：删掉后光标正好落在 8 列网格上。
+ *
+ * 光标左边有非空白（正常打字）、或删除后会跨到**行首之前**时返回 `null`
+ * —— 交回浏览器原生 Backspace。
+ *
+ * @returns `{from, to}`（删 `[from, to)`，光标落在 `from`）或 `null`
+ */
+export function outdentOnBackspace(
+  text: string,
+  offset: number,
+  tabSize = TAB_SIZE
+): { from: number; to: number } | null {
+  const src = String(text ?? "");
+  const to = Math.max(0, Math.min(src.length, Math.trunc(Number(offset) || 0)));
+  const start = lineStartAt(src, to);
+  if (to === start) return null; // 行首：交给浏览器（删换行）
+  const chunk = src.slice(start, to);
+  if (/[^ \t]/.test(chunk)) return null; // 左边有非空白：正常删字符
+  const size = Math.max(1, Math.trunc(Number(tabSize) || TAB_SIZE));
+  let column = 0;
+  for (let index = start; index < to; index += 1) column += src[index] === "\t" ? size - (column % size) : 1;
+  const stop = column - (column % size || size); // 上一个 tab stop 的**列号**
+  // 行首空白里找「累计视觉宽 ≤ stop」的**最靠右**位置：删掉它右边这段，
+  // 光标正好落在（或落在不超过）该 tab stop 上；Tab 会整格跳过，空格逐列。
+  let from = start;
+  let width = 0;
+  for (let index = start; index < to; index += 1) {
+    width += src[index] === "\t" ? size - (width % size) : 1;
+    if (width <= stop) from = index + 1;
+    else break;
+  }
+  if (from >= to) return null;
+  return { from, to };
+}
+
+
 /**
  * 编辑器模型的最小可用契约。先按名字取导出并做**函数级**校验：`editcore` 正在
  * 并行落盘该文件，任何一处 JSDoc/语法问题都不该让页面白屏——拿不到就退回降级模式
@@ -374,6 +513,9 @@ function adaptModel(mod: Record<string, unknown>): EditorModel | null {
   const formatLine = mod.formatLine;
   const indentLines = mod.indentLines;
   const regionIndentPlan = mod.regionIndentPlan;
+  // 语法着色（task-6 的 `tokenizeLine`）：纯函数、可选；缺失时由
+  // `ScriptHighlight` 的降级 tokenizer 顶上（首帧也有色）。
+  const tokenizeLine = mod.tokenizeLine;
   return {
     CONTROLLERS: controllers,
     CATEGORY_LABELS: (mod.CATEGORY_LABELS as Record<string, string>) ?? undefined,
@@ -387,6 +529,7 @@ function adaptModel(mod: Record<string, unknown>): EditorModel | null {
     indentLines: typeof indentLines === "function" ? (indentLines as EditorModel["indentLines"]) : undefined,
     regionIndentPlan:
       typeof regionIndentPlan === "function" ? (regionIndentPlan as EditorModel["regionIndentPlan"]) : undefined,
+    tokenizeLine: typeof tokenizeLine === "function" ? (tokenizeLine as EditorModel["tokenizeLine"]) : undefined,
   };
 }
 
@@ -1062,7 +1205,6 @@ export default function StoryEditorPage() {
   const [caret, setCaret] = useState({ line: 1, col: 1, offset: 0 });
   const [busy, setBusy] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewFull, setPreviewFull] = useState(false);
   const [previewStatus, setPreviewStatus] = useState("");
 
   /** 页面根：浮动窗口的定位上下文 + bounds 测量 + focusin 滚动还原。 */
@@ -2022,28 +2164,13 @@ export default function StoryEditorPage() {
 
   useEffect(() => () => closePreview(), [closePreview]);
 
-  // ── 预览面板拖拽高度（像 YSS 的工具控件一样可调整） ───────────────
-
-  const [previewHeight, setPreviewHeight] = useState(340);
-  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const onDragMove = useCallback((event: PointerEvent) => {
-    const state = dragRef.current;
-    if (!state) return;
-    setPreviewHeight(Math.max(140, Math.min(window.innerHeight - 220, state.startHeight + (state.startY - event.clientY))));
-  }, []);
-  const onDragEnd = useCallback(() => {
-    dragRef.current = null;
-    window.removeEventListener("pointermove", onDragMove);
-    window.removeEventListener("pointerup", onDragEnd);
-  }, [onDragMove]);
-  const onDragStart = useCallback(
-    (event: React.PointerEvent) => {
-      dragRef.current = { startY: event.clientY, startHeight: previewHeight };
-      window.addEventListener("pointermove", onDragMove);
-      window.addEventListener("pointerup", onDragEnd);
-    },
-    [onDragEnd, onDragMove, previewHeight]
-  );
+  /**
+   * 「放大 / 还原」= `.ed-preview.full` 的整页覆盖层（`position: fixed; inset: 0`）。
+   * 工作台 2.0 里面板高度由槽位 / 浮动 rect 决定，所以"放大"只加一层覆盖，
+   * 退出摘掉即可 —— 与「停靠 / 浮动」正交（`⧉` 的 rect 不受影响）。
+   */
+  const [previewFull, setPreviewFull] = useState(false);
+  const togglePreviewFull = useCallback(() => setPreviewFull((value) => !value), []);
 
   // ── 控制器面板数据 ────────────────────────────────────────────
 
@@ -2495,6 +2622,14 @@ export default function StoryEditorPage() {
             height: docSize.height,
           }}
         >
+          {/* 着色层：在 textarea **之下**（正文文字透明、颜色全由它出），
+              与 textarea 同字体/字号/行高/tab-size(8)，逐像素对齐。 */}
+          <ScriptHighlight
+            text={text}
+            tokenizer={model ? model.tokenizeLine ?? null : null}
+            diagnosticsByLine={diagnosticsByLine}
+            readonly={readOnly}
+          />
           <div className="ed-linebar" style={{ top: (caret.line - 1) * LH, height: LH }} />
           <textarea
             ref={taRef}
@@ -2581,6 +2716,48 @@ export default function StoryEditorPage() {
                 }
                 if (tryTabSkeleton()) {
                   event.preventDefault();
+                  return;
+                }
+                // 否则：**一个 `\t` 字符**（VSCode 默认 = Tab 缩进；CSS
+                // `tab-size: 8` 让浏览器原生对齐到 8 列）——与 `.ed-anchor`
+                // 同值测量，Tab 行的像素宽度不错位。
+                event.preventDefault();
+                {
+                  const start = event.currentTarget.selectionStart ?? 0;
+                  const end = event.currentTarget.selectionEnd ?? start;
+                  applyEdit(start, end, "\t");
+                }
+                hiddenRef.current = true;
+                setPopup(null);
+                return;
+              }
+              if (event.key === "Enter" && !event.shiftKey) {
+                // Enter 自动缩进（VSCode 的 editor.autoIndent）：无补全弹窗时
+                // 走 `autoIndentOnEnter`；有弹窗时上面已经 return（补全优先）。
+                const el = event.currentTarget;
+                const from = el.selectionStart ?? 0;
+                const to = el.selectionEnd ?? 0;
+                if (from === to) {
+                  const insert = autoIndentOnEnter(textRef.current, from);
+                  event.preventDefault();
+                  applyEdit(from, to, insert);
+                  setPopup(null);
+                  return;
+                }
+              }
+              if (event.key === "Backspace" && !event.altKey) {
+                // Backspace：左边只有空白时跳一个 8 列 tab stop（VSCode 的
+                // outdent）；否则交回浏览器原生（正常删字符 / 删选区 / 删换行）。
+                const el = event.currentTarget;
+                const from = el.selectionStart ?? 0;
+                const to = el.selectionEnd ?? 0;
+                if (from === to) {
+                  const plan = outdentOnBackspace(textRef.current, from);
+                  if (plan) {
+                    event.preventDefault();
+                    applyEdit(plan.from, plan.to, "");
+                    return;
+                  }
                 }
               }
               if (mod && (event.key === "[" || event.key === "]")) {
@@ -2831,13 +3008,11 @@ export default function StoryEditorPage() {
     </div>
   );
 
-  /** 预览（Map）：iframe 宿主 + 重载 / 放大 / 关闭。 */
+  /** 预览（Map）：iframe 宿主 + 重载 / 放大 / 关闭。
+   *  面板**填满壳**（工作台槽位 / 浮动窗）：高度归工作台的 split `share` 或浮动
+   *  rect 管，「放大 / 还原」= 浮动 rect（整页）↔ 停靠块。 */
   const renderPreviewPane = () => (
-    <div
-      className={`ed-preview${previewFull ? " full" : ""}`}
-      style={{ height: previewFull ? "62%" : previewHeight }}
-    >
-      <div className="ed-preview-resize" onPointerDown={onDragStart} title={tr("editor.preview.resizeTitle", undefined, "拖动调整高度")} />
+    <div className={`ed-preview${previewFull ? " full" : ""}`} data-preview-full={previewFull ? "1" : undefined}>
       <div className="ed-preview-bar">
         <span>{tr("editor.preview.title", undefined, "预览")}</span>
         {/* 单行 + 省略号（CSS）；全文悬停可见：状态里可能带换行的多行 loader 报错。 */}
@@ -2848,7 +3023,16 @@ export default function StoryEditorPage() {
         >
           {tr("editor.preview.reload", undefined, "重新载入预览")}
         </button>
-        <button className="ed-btn" onClick={() => setPreviewFull((value) => !value)}>
+        <button
+          className="ed-btn"
+          data-preview-action="zoom"
+          onClick={togglePreviewFull}
+          title={
+            previewFull
+              ? tr("editor.preview.fullTitle", undefined, "还原到工作台原来的位置")
+              : tr("editor.preview.zoomTitle", undefined, "把预览放大到整页（再点还原）")
+          }
+        >
           {previewFull ? tr("editor.preview.full", undefined, "还原") : tr("editor.preview.zoom", undefined, "放大")}
         </button>
         <button className="ed-btn" onClick={() => { closePreview(); setPreviewOpen(false); }}>

@@ -7,6 +7,7 @@ mod engine_snapshot;
 mod media;
 mod models;
 mod net;
+mod state_db;
 mod parser;
 
 use commands::{assets, cache, wiki};
@@ -392,6 +393,12 @@ pub fn run() {
                 Ok(_) => {}
                 Err(error) => log::warn!("[starter] boot sync failed: {error}"),
             }
+            // Local state store (SQLite): 打开/建表一次并打一行日志（原生自检按行断言）。
+            // 失败**只 warn**：状态库坏 → 前端自动落回 localStorage，绝不能挡启动。
+            match state_db::report() {
+                Ok(info) => log::info!("[state] sqlite ready: {info}"),
+                Err(error) => log::warn!("[state] sqlite unavailable ({error}); 前端将回落到 localStorage"),
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -404,6 +411,14 @@ pub fn run() {
             // Cache management
             cache::save_to_cache,
             cache::load_from_cache,
+            // Local "memory" store (SQLite: layout / panels / settings) — see state_db.rs
+            state_db::state_db_get,
+            state_db::state_db_set,
+            state_db::state_db_del,
+            state_db::state_db_snapshot,
+            state_db::state_db_set_many,
+            state_db::state_db_import,
+            state_db::state_db_info,
             // Bundled engine snapshot (offline first boot; see engine_snapshot.rs)
             engine_snapshot::engine_snapshot_info,
             engine_snapshot::engine_pack_info,

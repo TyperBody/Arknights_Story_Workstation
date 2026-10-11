@@ -17,6 +17,7 @@ import {
   saveCachedBundle,
 } from "./enginePack";
 import { disposeEngineFrame } from "./storyPlayerBoot";
+import { getItem, setItem } from "./stateStore";
 
 /**
  * Predownload status. Indexing (manifest) and downloading run CONCURRENTLY now
@@ -851,7 +852,7 @@ const SETTINGS_KEY = "prts-download-settings";
 function withPersistedMirror(s: DownloadSettings): DownloadSettings {
   let persisted: Partial<DownloadSettings> = {};
   try {
-    persisted = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<DownloadSettings>;
+    persisted = JSON.parse(getItem("player", SETTINGS_KEY) ?? "{}") as Partial<DownloadSettings>;
   } catch {
     persisted = {};
   }
@@ -882,7 +883,7 @@ export async function setDownloadSettings(s: DownloadSettings): Promise<void> {
     customMirror: merged.customMirror,
   });
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+    setItem("player", SETTINGS_KEY, JSON.stringify(merged));
   } catch {
     /* quota / private mode: Rust still has it */
   }
@@ -890,7 +891,7 @@ export async function setDownloadSettings(s: DownloadSettings): Promise<void> {
 
 /** Re-apply persisted download settings to the backend (call once at startup). */
 export async function applyPersistedDownloadSettings(): Promise<void> {
-  const raw = localStorage.getItem(SETTINGS_KEY);
+  const raw = getItem("player", SETTINGS_KEY);
   if (!raw) return;
   try {
     const s = JSON.parse(raw) as DownloadSettings;
