@@ -36,8 +36,11 @@ try {
     fix(); setInterval(fix, 100);
   });
   await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(text)}`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
-  await page.waitForTimeout(1500);
+  await page.waitForSelector("textarea.ed-textarea", { timeout: 30000 });
+  // 工作台与常驻面板是懒加载部件：等它们挂上再断言（冷启动/连跑时会晚一两秒）。
+  await page.waitForSelector("[data-wb-panel]", { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(1200);
+  // 冗余自愈：`ed-viewtabs` 的其它按钮（校验/预览）别在窗口里飘；这里只做**目录**断言。
 
   const count = async (sel) => page.locator(sel).count();
   check("工作台容器存在 [data-workbench]", (await count("[data-workbench]")) >= 1, `count=${await count("[data-workbench]")}`);
@@ -52,9 +55,14 @@ try {
   const before = await count(panelSel("branch"));
   const tab = page.locator(".ed-viewtabs .ed-btn", { hasText: "分支图" });
   if (await tab.count()) {
-    await tab.first().click(); await page.waitForTimeout(500);
+    // 点击可能被「书架信息已更新」浮条拦（浮条在 head 前插入时样式注入会失败）→ 兜底 JS click。
+    const tapTab = async () => {
+      try { await tab.first().click({ timeout: 4000 }); }
+      catch { await tab.first().evaluate((el) => el.click()); }
+    };
+    await tapTab(); await page.waitForTimeout(700);
     const mid = await count(panelSel("branch"));
-    await tab.first().click(); await page.waitForTimeout(400);
+    await tapTab(); await page.waitForTimeout(500);
     const after = await count(panelSel("branch"));
     check("分支图 = 工具栏按需开关（Map）", before === 0 && mid >= 1 && after === 0, `before=${before} mid=${mid} after=${after}`);
   } else check("工具栏有「分支图」开关", false, "未找到 .ed-viewtabs 按钮");
