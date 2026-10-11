@@ -23,7 +23,8 @@
     "test:workbench": "node build/harness/demo-check.mjs && node build/harness/persist-check.mjs && node build/harness/stage-zoom.mjs && node build/harness/window-chrome.mjs && node build/harness/workbench-drag.mjs && node build/harness/branch-shot.mjs && node build/harness/engine-failure.mjs && node build/harness/live-download.mjs",
     "test:mirror": "node tools/mirror/mirror-selftest.mjs && node build/harness/rust-mirror-live.mjs && node build/harness/live-download.mjs",
     "test:starter": "node build/harness/starter-assets.mjs",
-    "test:workbench:model": "node build/harness/wb-selftest.mjs"
+    "test:workbench:model": "node build/harness/wb-selftest.mjs",
+    "test:harness": "node scripts/harness/run.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "~2.10.1",
