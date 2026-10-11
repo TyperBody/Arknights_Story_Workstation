@@ -25,7 +25,7 @@ import {
   type PanelId,
   type WorkbenchState,
 } from "../components/editor/workbenchStack";
-import { clampWindowState, type FloatRect } from "../components/editor/windowState";
+import { type FloatRect } from "../components/editor/windowState";
 import {
   DEFAULT_LAYOUT_NAME,
   PANELS,
@@ -2612,8 +2612,20 @@ export default function StoryEditorPage() {
       setFloats((prev) => {
         if (next.kind === "float") {
           // 浮动窗别缩成一条：Map 面板（预览 / 分支图）至少 300 高（图/iframe 要地方）。
-          const clamped = clampWindowState(next, boundsRef.current, spec.minW, Math.max(spec.minH, 300));
-          return clamped.kind === "float" ? { ...prev, [id]: clamped.rect } : prev;
+          // ⚠️ 这里**不能用 `clampWindowState`**：它按 `bounds`（整页）把 `x/y` 夹进
+          // `[0, bounds - rect]`，而本页的 `rect` 是 `[data-wb-panel]` 槽位坐标系
+          // （`absoluteRect`）——槽位在工作台右侧时自然 rect 就是 (0,1)，一夹就钉死
+          // → 浮动窗拖不动、右下角拉不大。这里只做"别丢出屏幕"的宽松夹取。
+          const usable = boundsRef.current;
+          const loose = (value: number, min: number, max: number) =>
+            Math.min(Math.max(Number.isFinite(value) ? value : min, min), Math.max(min, max));
+          const rect = {
+            w: Math.max(spec.minW, Math.round(next.rect.w)),
+            h: Math.max(Math.max(spec.minH, 300), Math.round(next.rect.h)),
+            x: loose(next.rect.x, -(Math.max(spec.minW, next.rect.w) - 80), Math.max(0, usable.w - 80)),
+            y: loose(next.rect.y, -40, Math.max(0, usable.h - 40)),
+          };
+          return { ...prev, [id]: rect };
         }
         const copy = { ...prev };
         delete copy[id];

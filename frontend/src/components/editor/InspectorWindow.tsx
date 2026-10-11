@@ -105,7 +105,9 @@ function parentSize(element: HTMLElement | null, fallback: { w: number; h: numbe
 /** 默认浮动尺寸：屏幕中偏右、右侧留点余量（够用户立刻拖动/缩放）。 */
 function defaultFloatRect(bounds: { w: number; h: number }, minW: number, minH: number): Rect {
   const w = clamp(Math.min(430, Math.round(bounds.w * 0.3)), minW, Math.max(minW, Math.round(bounds.w * 0.6)));
-  const h = clamp(Math.min(430, Math.round(bounds.h * 0.45)), minH, Math.max(minH, Math.round(bounds.h * 0.8)));
+  // 浮动窗至少 300 高（Map 的图 / iframe 要地方）——和页面 `onWinChange` 的下限一致。
+  const floor = Math.max(minH, 300);
+  const h = clamp(Math.min(430, Math.round(bounds.h * 0.45)), floor, Math.max(floor, Math.round(bounds.h * 0.8)));
   return {
     w,
     h,
@@ -341,14 +343,9 @@ export default function InspectorWindow({
       const dx = event.clientX - drag.pointerX;
       const dy = event.clientY - drag.pointerY;
       if (drag.mode === "move") {
-        onChange(
-          clampWindowState(
-            { kind: "float", rect: { ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy } },
-            bounds,
-            minW,
-            minH
-          )
-        );
+        // ⚠️ 容器（`Workbench` 的 `[data-wb-panel]` / `.bad-shell` / 页面）才是定位父：
+        // 不能按页面 `bounds` clamp x/y，否则槽位在右侧时 rect 天然就是 (0,1)、一 clamp 就钉死。
+        onChange({ kind: "float", rect: { ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy } });
         return;
       }
       const next = { w: Math.max(minW, Math.round(drag.w + dx)), h: Math.max(minH, Math.round(drag.h + dy)) };
@@ -360,7 +357,7 @@ export default function InspectorWindow({
         onResizePx?.(next);
       }
     },
-    [bounds, measure, minH, minW, onChange, onDragStart, onResizePx, onResizeShare]
+    [measure, minH, minW, onChange, onDragStart, onResizePx, onResizeShare]
   );
 
   const endDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {

@@ -151,3 +151,84 @@
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   工作台 v1（BRIEF §0.2 / §2.1）：窗口壳的**形态**语义。
+   - `.ed-win--block`（块）≠ `.ed-win--dock`（旧"停靠右栏"）：`dock` 可以是块（工作台里）
+     也可以是旧的侧栏；块用 `data-shell` + `.ed-win--dock|--map` 决定标题条按钮。
+   - **常驻 dock（toolpanel / stage）**：标题条**只有折叠 `▾`**；`⧉` / `✕` 都不渲染
+     （用户：「检视器在工具面板 所以不应该和其他窗口一样单开脱离按钮 并且这是显示不显示
+     也不是独立窗口阿」）。canvas/markup 断言用 `.ed-win-btn` 计数 → 折叠按钮**不带**该类。
+   - **Map（preview / branch）**：`▾` + `⧉` + `✕`（后两个是 `.ed-win-btn`）。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 块：撑满槽位（父容器决定宽/高），无圆角/边框（工作台块自己带 1px 边框）。 */
+.ed-win--block {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0;
+  border: 0;
+}
+
+.ed-win--dragging {
+  opacity: 0.85;
+}
+
+/* 常驻 dock 的标题条：拖动由 Workbench 接管 → 指针是 `move`（拼接/吸附）。 */
+.ed-win--block.ed-win--dock .ed-win-bar {
+  cursor: move;
+}
+
+/* 折叠按钮（常驻 dock 的 `▾`）：**不是** `.ed-win-btn`（harness 断言常驻面板 .ed-win-btn = 0）。 */
+.ed-win-collapse {
+  flex: none;
+  width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ed-win-collapse:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--accent);
+}
+
+/* 折叠态：标题条上给个提示字，Body 隐藏（DOM 保留 —— "显示不显示"而不是卸载）。 */
+.ed-win-fold-hint {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.ed-win--folded {
+  background: var(--bg-secondary);
+}
+
+/* 活跃面板（Workbench 选中）：标题条左侧一道 accent 条 + 轻描边。 */
+.ed-win--active > .ed-win-bar {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 块形态的右下角手柄：分割条语义（拖 = 改比例）——用 `ew-resize` 提示。 */
+.ed-win--block .ed-win-resize {
+  opacity: 0.3;
+}
+
+.ed-win--block.ed-win--map .ed-win-resize {
+  cursor: ew-resize;
+}
+
