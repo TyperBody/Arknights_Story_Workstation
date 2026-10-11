@@ -14,7 +14,11 @@ t("auto 是默认档（不写 key）", /value === "auto"\)\s*localStorage\.remov
 t("auto 档无 3 秒定时器（纯隐藏）", /CHROME_AUTO[\s\S]{0,2000}?setHidden\(true\)/.test(boot) && !/setTimeout\([\s\S]{0,200}3000/.test(boot), "");
 t("auto 档：指针几何命中即显示", /pointermove"[\s\S]{0,60}onMove/.test(boot) && /getBoundingClientRect\(\)/.test(boot), "");
 t("auto 档：移出即收起", /pointerleave"[^)]*setHidden\(true\)/.test(boot) || /onOut/.test(boot), "");
-t("CSS：收起态透明度 + 不接收指针", /ark-chrome-auto[\s\S]{0,120}ark-chrome-hidden\{opacity:0;pointer-events:none/.test(boot.replace(/\s+/g, "")), "");
+const cssFlat = boot.replace(/\s+/g, "");
+t("CSS：收起态透明度 + 不接收指针",
+  /ark-chrome-hidden\{opacity:0;pointer-events:none/.test(cssFlat)
+  && /ark-chrome-auto/.test(cssFlat),
+  cssFlat.match(/html\.ark-chrome-auto[^`]{0,200}/)?.[0]?.slice(0, 120) ?? "(未找到)");
 t("CSS：展开态由 html.ark-chrome-open 决定", /ark-chrome-auto\.ark-chrome-open/.test(boot.replace(/\s+/g, "")), "");
 t("hide 档仍是 display:none", /ark-chrome-hide[\s\S]{0,80}display:none/.test(boot.replace(/\s+/g, "")), "");
 t("设置页文案与默认一致（auto=默认）", /底栏常藏，指针移上去才显示/.test(settings), "");

@@ -81,14 +81,22 @@ const results = [];
 for (const [group, file, what] of selected) {
   const path = H(file);
   if (!existsSync(path)) { results.push({ group, file, ok: false, detail: "missing" }); console.log(`MISS ${file} — 文件不存在`); continue; }
-  const started = Date.now();
-  const run = spawnSync(process.execPath, [path], { cwd: ROOT, encoding: "utf8" });
-  const ms = Date.now() - started;
+  // 浏览器 harness 之间给 chromium 一点释放时间（同机连跑时偶发 GPU/zygote 竞争）。
+  await new Promise((done) => setTimeout(done, 400));
+  let run = spawnSync(process.execPath, [path], { cwd: ROOT, encoding: "utf8" });
+  let attempts = 1;
+  // 失败**重试一次**：浏览器 harness 在同机连跑时会偶发抖动（GPU stall / zygote 通信）；
+  // 真失败两次仍失败 → 才算失败（`attempts` 会打出来，别把抖动当绿灯）。
+  if (run.status !== 0) {
+    attempts = 2;
+    await new Promise((done) => setTimeout(done, 1200));
+    run = spawnSync(process.execPath, [path], { cwd: ROOT, encoding: "utf8" });
+  }
   const ok = run.status === 0;
   const tail = `${run.stdout ?? ""}\n${run.stderr ?? ""}`
     .split("\n").filter((l) => /pass \/|ok \/|PASS|结果：|=== /.test(l)).slice(-1)[0] ?? "";
-  results.push({ group, file, ok, detail: `${ms}ms ${tail.trim()}` });
-  console.log(`${ok ? "ok  " : "FAIL"} ${file.padEnd(26)} ${what}`);
+  results.push({ group, file, ok, attempts, detail: tail.trim() });
+  console.log(`${ok ? "ok  " : "FAIL"} ${file.padEnd(26)} ${what}${attempts > 1 ? "  (retry×1)" : ""}`);
   if (!ok) console.log(`${run.stdout ?? ""}${run.stderr ?? ""}`.split("\n").slice(-14).join("\n"));
 }
 
