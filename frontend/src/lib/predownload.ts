@@ -58,6 +58,12 @@ export interface JobSnapshot {
   bytesPerSec: number;
   /** Keys that failed after retries (with last error), for diagnosing missing assets. */
   failedKeys: string[];
+  /**
+   * Successful fetches per source id (`pack`/`prts`/`jsd`/`fastly`/`ghproxy`) —
+   * proves in the UI/diagnostics that the selected download source is really
+   * being used (`download.rs::Snapshot::sources`).
+   */
+  sources: Record<string, number>;
 }
 
 /** True when an error string came from the backend offline gate. */
@@ -623,6 +629,7 @@ const ZERO_JOB: JobSnapshot = {
   bytes: 0,
   bytesPerSec: 0,
   failedKeys: [],
+  sources: {},
 };
 
 /**

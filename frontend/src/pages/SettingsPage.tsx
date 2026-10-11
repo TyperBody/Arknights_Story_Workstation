@@ -88,6 +88,9 @@ export default function SettingsPage() {
   const [concurrency, setConcurrency] = useState(DEFAULT_SETTINGS.downloadConcurrency);
   const [manifestConcurrency, setManifestConcurrency] = useState(DEFAULT_SETTINGS.manifestConcurrency);
   const [rateLimitKbps, setRateLimitKbps] = useState(0);
+  // 「下载器当前真正生效的源」——从 Rust 读回（`download_settings_get`），
+  // 用于证明设置页的选择确实推到了下载引擎 / prts-cdn（而不只是 UI 预览）。
+  const [rustMirror, setRustMirror] = useState<MirrorSource | null>(null);
   const [envInfo, setEnvInfo] = useState("");
   const [catalog, setCatalog] = useState<CatalogSummary | null>(null);
 
@@ -101,6 +104,7 @@ export default function SettingsPage() {
       .then((s) => {
         setConcurrency(s.concurrency);
         setRateLimitKbps(Math.round(s.rateLimitBps / 1024));
+        if (s.mirror && s.mirror in MIRROR_LABELS) setRustMirror(s.mirror as MirrorSource);
       })
       .catch(() => {});
     try {
@@ -150,6 +154,7 @@ export default function SettingsPage() {
           mirror,
           customMirror,
         });
+        setRustMirror(mirror);
       } catch (e) {
         showMsg(`已存到应用设置；同步到下载器失败: ${e instanceof Error ? e.message : String(e)}`, 6000);
       }
@@ -409,6 +414,15 @@ export default function SettingsPage() {
           </div>
         )}
         <div className="cache-info" style={{ marginTop: "8px", wordBreak: "break-all" }}>
+          <div style={{ color: "var(--text-secondary)" }}>
+            下载器当前生效源：
+            {rustMirror
+              ? MIRROR_LABELS[rustMirror].label
+              : "读取中…（未连接后端）"}
+            {rustMirror && rustMirror !== appSettings.mirror
+              ? "（与应用设置不一致，重选一次下载源即可同步）"
+              : ""}
+          </div>
           <div style={{ color: "var(--text-secondary)" }}>样例预览：{previewMirror(appSettings.mirror, appSettings.customMirror)}</div>
           <div style={{ color: "var(--text-secondary)", marginTop: "4px" }}>
             包内已有的引擎快照会**优先**命中，源只在需要联网补齐时生效；换源即时生效，无需重启。

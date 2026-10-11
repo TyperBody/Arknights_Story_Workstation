@@ -96,7 +96,6 @@ impl MirrorSettings {
     }
 }
 
-
 /// Whether a bulk download is currently active (Running or Paused).
 pub fn any_active() -> bool {
     DOWNLOAD_ACTIVE.load(Ordering::Relaxed)
@@ -216,10 +215,10 @@ pub struct Snapshot {
     /// missing assets. Capped; empty in the common case.
     pub failed_keys: Vec<String>,
     /// How many stored assets came from each source this job (`pack`/`prts`/`jsd`/
-    /// `fastly`/`ghproxy`; `custom` is folded into the source whose URL it
-    /// resolved to). Lets the UI/probe show that the selected source is really
-    /// being used. Ordered source id → count.
-    pub sources: Vec<(String, u64)>,
+    /// `fastly`/`ghproxy`; the user's `custom` template is not identifiable, so it
+    /// counts as the source whose URL it mirrors). Lets the UI/probe show that the
+    /// selected source is really being used.
+    pub sources: HashMap<String, u64>,
 }
 
 impl Job {
@@ -280,8 +279,8 @@ impl Job {
         *self.sources.lock().unwrap().entry(source).or_insert(0) += 1;
     }
 
-    /// `[(source, count)]` in settings-page order (`media::SOURCE_IDS`).
-    fn source_counts(&self) -> Vec<(String, u64)> {
+    /// Per-source success counts (`media::SOURCE_IDS` order for stable output).
+    fn source_counts(&self) -> HashMap<String, u64> {
         let counts = self.sources.lock().unwrap();
         crate::media::SOURCE_IDS
             .iter()
@@ -891,7 +890,7 @@ pub fn system_counts(state: tauri::State<'_, Manager>) -> serde_json::Value {
             *totals.entry(id.clone()).or_insert(0) += n;
         }
     }
-    let sources: Vec<serde_json::Value> = sources_json(&totals).unwrap_or_default();
+    let sources: Vec<serde_json::Value> = sources_json(&totals);
     serde_json::json!({
         "mirror": mirror,
         "customMirror": custom_mirror,
@@ -903,14 +902,12 @@ pub fn system_counts(state: tauri::State<'_, Manager>) -> serde_json::Value {
     })
 }
 
-fn sources_json(totals: &HashMap<String, u64>) -> Result<Vec<serde_json::Value>, String> {
-    let mut out = Vec::new();
-    for id in crate::media::SOURCE_IDS {
-        if let Some(n) = totals.get(id) {
-            out.push(serde_json::json!({ "source": id, "count": n }));
-        }
-    }
-    Ok(out)
+/// Per-source totals as a JSON array in `SOURCE_IDS` order (stable for probes).
+fn sources_json(totals: &HashMap<String, u64>) -> Vec<serde_json::Value> {
+    crate::media::SOURCE_IDS
+        .iter()
+        .filter_map(|id| totals.get(*id).map(|n| serde_json::json!({ "source": id, "count": n })))
+        .collect()
 }
 
 /// Frontend → Android keep-alive: report the "reading a story" (playback) state.
