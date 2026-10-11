@@ -39,6 +39,29 @@ export function resolverPrelude(): string {
   return RESOLVER_SOURCE;
 }
 
+/**
+ * `dataUrl(source)` 的 **UTF-8 前缀**：`data:text/javascript;charset=utf-8;base64,`。
+ *
+ * 为什么不写裸 `data:text/javascript,`：上游 StoryPlayer 源码里到处是 `#`
+ * （哈希文件名、CSS 选择器、`import.meta.url` 的 fragment），而 data URL 中
+ * `#` 会**截断整个 payload** —— 模块变成半截脚本。base64 是唯一能把任意字节
+ * 塞进 URL 的编码（`btoa` 一次性、无网、无 IO）。这里把它收敛到**唯一一处**，
+ * 方便整条 transport 换掉（`blob:` / 自定义协议）时只改这个函数。
+ */
+export const DATA_URL_PREFIX = "data:text/javascript;charset=utf-8;base64,";
+
+/** UTF-8 安全的 `data:` URL（唯一实现；见 `DATA_URL_PREFIX` 的说明）。 */
+export function sourceDataUrl(source: string): string {
+  const bytes = new TextEncoder().encode(source);
+  let binary = "";
+  // 分块避免超长 spread（V8 的 apply 参数上限）。
+  const CHUNK = 0x8000;
+  for (let index = 0; index < bytes.length; index += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + CHUNK));
+  }
+  return `${DATA_URL_PREFIX}${btoa(binary)}`;
+}
+
 export function validateStoryPlayer(snapshot: StoryPlayerSnapshot): string[] {
   const errors: string[] = [];
   if (!snapshot?.modules?.[snapshot.entry]) errors.push("StoryPlayer 入口模块缺失");

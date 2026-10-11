@@ -16,6 +16,7 @@ import {
   adaptStoryPlayerEntry,
   fetchModuleSource,
   prepareModule,
+  sourceDataUrl,
   storyPlayerStaticAssets,
   validateStoryPlayer,
   StoryPlayerModuleError,
@@ -35,14 +36,6 @@ interface StoryPlayerWindow extends Window {
   __arkstageVueApp?: { unmount: () => void };
   __arkstageDispose?: () => void;
   mw?: unknown;
-}
-
-/** UTF-8 安全的 `data:text/javascript;base64,…`。 */
-function dataUrl(source: string): string {
-  const bytes = new TextEncoder().encode(source);
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
-  return `data:text/javascript;base64,${btoa(binary)}`;
 }
 
 /**
@@ -454,7 +447,7 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
       // 用 data: URL 而非 blob: —— Windows WebView2 上有 blob 模块 fetch 失败的实例
       // （`resource load failed: blob:…`），data: 在 Chromium/WebKit 上都能取；
       // import map 仍是「一个模块一个 URL」，模块恒等性不变。
-      const moduleUrl = dataUrl(source);
+      const moduleUrl = sourceDataUrl(source);
       imports[opts.mode === "play" ? proxyUrl(url, domains) : url] = moduleUrl;
     }
     if (cancelled()) { win.__arkstageDispose(); return {}; }
