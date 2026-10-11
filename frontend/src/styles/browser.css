@@ -1768,6 +1768,12 @@
   flex: 1;
 }
 
+/* 「区域缩进」动作的结果提示（`role="status"`，2.4s 自动消失）。 */
+.ed-indent-hint {
+  color: var(--success);
+  white-space: nowrap;
+}
+
 .ed-status .dirty {
   color: var(--accent);
 }

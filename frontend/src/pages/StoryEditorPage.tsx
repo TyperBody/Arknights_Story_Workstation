@@ -1083,6 +1083,8 @@ export default function StoryEditorPage() {
   const textRef = useRef("");
   const modelRef = useRef<EditorModel | null>(null);
   const pendingSel = useRef<[number, number] | null>(null);
+  /** 「区域缩进」的入口悬挂点：函数在下面定义，整页快捷键（更下面）要用 → 先挂 ref。 */
+  const indentRegionRef = useRef<(mode?: "region" | "indent" | "outdent") => void>(() => {});
 
   textRef.current = text;
   modelRef.current = model;
@@ -1119,6 +1121,8 @@ export default function StoryEditorPage() {
   const [previewUpto, setPreviewUpto] = useState(0);
   /** 行定位条滑杆位置（光标行，1 基）。 */
   const scrubLine = previewUpto > 0 ? previewUpto : caret.line;
+  /** 「区域缩进」的结果提示（`role="status"`，2.4s 后自动消失）。 */
+  const [indentHint, setIndentHint] = useState("");
   /** 舞台：拖动/选中哪个槽位；工具面板是否展开检视器。 */
   const [stageSelected, setStageSelected] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
@@ -2097,8 +2101,6 @@ export default function StoryEditorPage() {
    * 层级缩进版。纯函数优先用模型（`editorModel.indentLines` / `regionIndentPlan`），
    * 模型没就绪时用页面内的同语义降级实现 —— 两者都**只动行首空白**。
    */
-  const [indentHint, setIndentHint] = useState("");
-
   const showIndentHint = useCallback((count: number) => {
     setIndentHint(tr("editor.indent.done", { count }, `已缩进 ${count} 行（播放不受影响）`));
     window.setTimeout(() => setIndentHint(""), 2400);
@@ -2162,6 +2164,8 @@ export default function StoryEditorPage() {
     },
     [applyEdit, caret.offset, decisionLineAt, showIndentHint, tr]
   );
+  // 整页快捷键（定义在上面）通过 ref 调它 —— 那里不能直接引用（TDZ）。
+  indentRegionRef.current = indentRegion;
 
   /** Tab / Shift+Tab：有跨行选区 → 缩进/反缩进；否则维持「补全骨架 / 插入 Tab」。 */
   const tryIndentSelection = useCallback(
