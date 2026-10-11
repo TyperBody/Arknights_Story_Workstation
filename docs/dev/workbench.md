@@ -51,6 +51,7 @@
 | 区域缩进（`[Decision]` 线路层级） | ![indent](images/indent-region.png) |
 | 舞台裁剪（150% 摘掉 clip = 素材带，对照见 `images/stage-clip-150-unclipped.png`） | ![clip](images/stage-clip-150.png) |
 | 编辑器英文界面（`prts-language=en-US`） | ![en](images/editor-en.png) |
+| 编辑器舞台 150%（裁剪后：16:9，素材不再成条） | ![stage150](images/stage-editor-150.png) |
 
 ## 4. 回归
 
@@ -60,6 +61,7 @@ cd <repo>
 node build/harness/demo-check.mjs                      # 编辑器/舞台/分支图/拼接 端到端
 node build/harness/_stage-clip-check.mjs               # 舞台裁剪（16:9）+ 舞台/日志可调大小（51）
 node build/harness/_indent-ui-check.mjs                # 区域缩进 UI（11）
+node build/harness/_stage-visual-check.mjs             # 编辑器舞台 100%/150% 的 16:9 观感证据
 node build/harness/_i18n-check.mjs                    # i18n 运行时（7）
 node build/harness/player-chrome.mjs                  # 播放器底栏（默认纯隐藏，10）
 node scripts/fanfic/branchGraph-selftest.mjs           # 分支图语义（73）
