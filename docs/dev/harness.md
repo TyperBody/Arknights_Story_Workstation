@@ -20,6 +20,7 @@
 | ⑥ | 随包起步素材集（287 张/14.6 MB） | `starter-assets.mjs`（17；`--native` 18） | assets |
 | ⑦ | 下载源真正生效（Rust 源链 + 镜像 URL 形状 + 设置推送） | `rust-mirror-live.mjs`（13）、`live-download.mjs`（3） | assets |
 | — | 窗口壳（折叠/⧉/拖动/缩放/✕） | `p4-shell-unit.mjs`（10）、`p4-shell-probe.mjs`（11） | shell |
+| — | 播放器底栏三档（`auto` = 默认纯隐藏；指针命中即显示） | `player-chrome.mjs`（10） | player |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 | `native-source-probe.mjs`（`--native` 语义；需 Xvfb） | 手动 |
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
