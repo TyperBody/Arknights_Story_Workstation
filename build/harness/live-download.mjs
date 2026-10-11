@@ -10,14 +10,15 @@ try {
   const p = await b.newPage({ viewport: { width: 1400, height: 950 } });
   await p.goto(`${DEV}/settings`, { waitUntil: "domcontentloaded", timeout: 90_000 });
   await p.waitForTimeout(1800);
+  // 设置页可能还有别的下拉（如 i18n 的「语言」）→ 按「含 pack+jsd 选项」定位下载源那个。
   const options = await p.evaluate(() => {
-    const sel = document.querySelector("select");
+    const sel = [...document.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "jsd"));
     return sel ? [...sel.options].map((o) => ({ value: o.value, label: o.textContent?.trim() })) : [];
   });
   t("设置页有「下载源」下拉且含镜像项", options.some((o) => o.value === "jsd") && options.some((o) => o.value === "pack"), JSON.stringify(options));
   // 切换 → localStorage 落盘
   await p.evaluate(() => {
-    const sel = document.querySelector("select");
+    const sel = [...document.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "jsd"));
     if (!sel) return;
     sel.value = "jsd";
     sel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -29,7 +30,7 @@ try {
   t("预览 URL 带镜像前缀 mirror/prts", /mirror\/prts\//.test(preview) && /jsdelivr/.test(preview), preview.slice(0, 110));
   // 还原默认
   await p.evaluate(() => {
-    const sel = document.querySelector("select");
+    const sel = [...document.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "jsd"));
     if (!sel) return;
     sel.value = "pack";
     sel.dispatchEvent(new Event("change", { bubbles: true }));
