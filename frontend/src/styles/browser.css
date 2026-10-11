@@ -1894,13 +1894,15 @@
 }
 
 /* ── 舞台挂载点（StagePane，task-10）───────────────────────────────
-   子组件尚未落盘时只显示一行占位；`height` 由页面传入。 */
+   子组件尚未落盘时只显示一行占位；**高度由宿主决定**（T3）：
+   `.ed-stage` 撑满 `[data-wb-panel="stage"]` 的 dock 槽位，拖分隔条拖多大
+   舞台就多大（下面的工作台段里同名规则再兜一次；媒体查询里另有 26vh 上限）。 */
 .ed-stage {
-  flex: none;
+  flex: 1 1 auto;
   display: flex;
   align-items: stretch;
   gap: 10px;
-  min-height: 0;
+  min-height: 64px;
   padding: 8px 12px;
   background: #141414;
   border-top: 1px solid var(--border);
@@ -1917,9 +1919,11 @@
   background: #000;
 }
 
+/* StagePane 根（`[data-stage-pane]`）撑满挂载点；它自己再 `height:100%`。 */
 .ed-stage-host > * {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
 }
 
 .ed-stage-host-empty {
@@ -2036,7 +2040,7 @@
   }
   /* 上下堆叠时舞台别抢正文的高度：随视口收缩。 */
   .ed-stage {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     max-height: 26vh;
   }
 }
@@ -2127,7 +2131,7 @@
   border-top: 0;
 }
 
-/* 舞台窗口：dock 时高度由内部 `.ed-stage` 的内联 style 决定。 */
+/* 舞台窗口：dock 时高度由**槽位**决定（T3；`.ed-stage` 撑满）。 */
 .ed-win-body > .ed-stage {
   border-top: 0;
 }
@@ -2203,14 +2207,17 @@
   border-right: 1px solid var(--border);
 }
 
-/* 舞台（dock）：`ed-stage` 原来靠 InspectorWindow 的 dock 高度；给个上限即可。 */
+/* 舞台（dock）：**高度交给槽位**（T3）——`ed-stage` 原来靠内联 `height: 232`
+   与 InspectorWindow 的 dock 高度；现在撑满 `[data-wb-panel="stage"]`，
+   分隔条拖多大舞台就多大（`min-height` 兜住「拖到 0」）。 */
 .ed-stage-dock {
   min-height: 0;
 }
 
 .ed-stage {
-  height: 232px;
-  max-height: 46vh;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 64px;
 }
 
 /* 预览（Map）：高度由内联 style（`previewHeight` / 放大 62%）决定。 */
@@ -2252,4 +2259,21 @@
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+}
+
+/* ── 命名布局（BRIEF §2.4）：工具栏上的紧凑一组 ───────────────────── */
+.ed-layout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ed-layout-select {
+  max-width: 140px;
+  padding: 5px 6px;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
 }

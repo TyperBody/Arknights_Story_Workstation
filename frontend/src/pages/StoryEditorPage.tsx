@@ -30,9 +30,13 @@ import {
   DEFAULT_LAYOUT_NAME,
   PANELS,
   WINDOW_SPECS,
+  activeLayout,
   consumeLegacy,
+  deleteLayout,
   isDockPanel,
   isMapPanel,
+  listLayouts,
+  loadLayout,
   migrateLegacy,
   readLayout,
   saveLayoutNamed,
@@ -462,7 +466,8 @@ interface ControllerInspectorProps {
 /**
  * 工作台**一次性引导**（模块级缓存：组件函数里的 `useState` 初始化器会跑两次）：
  * 1. `migrateLegacy()` —— 旧 `prts-editor-windows:*` **只读一次后删除**（§2.1）；
- * 2. 读 `prts-editor-wb:default`（`parse` 坏数据 → `defaultState()`）；
+ * 2. 读**活跃布局** `prts-editor-wb:<prts-editor-wb:active>`（缺 → `default`；
+ *    缺该键 / `parse` 坏数据 → `defaultState()`）；
  * 3. 可见清单 = 常驻 dock（`toolpanel` / `stage`）+ 旧状态里**曾经开过**的 Map；
  * 4. `normalize` 收口（去重 / 折叠单子 split / share clamp）。
  */
@@ -475,7 +480,8 @@ function workbenchBoot(): { state: WorkbenchState; visible: PanelId[] } {
   for (const item of legacy) {
     if (item.panel && isMapPanel(item.panel) && !visible.includes(item.panel)) visible.push(item.panel);
   }
-  const raw = readLayout(DEFAULT_LAYOUT_NAME);
+  // 活跃布局优先：换过命名布局的会话刷新后仍应回到它的形状（`active` 缺失 → default）。
+  const raw = readLayout(activeLayout()) ?? readLayout(DEFAULT_LAYOUT_NAME);
   let state = normalize((raw ? parse(raw) : null) ?? defaultState(), visible);
   for (const item of legacy) {
     if (!item.panel || !isMapPanel(item.panel)) continue;
@@ -1002,9 +1008,14 @@ export default function StoryEditorPage() {
   const [bounds, setBounds] = useState({ w: 0, h: 0 });
   const boundsRef = useRef(bounds);
   boundsRef.current = bounds;
-  /** 工作台：布局树（`prts-editor-wb:default`）+ 树里的面板清单。 */
+  /** 工作台：布局树（`prts-editor-wb:<active>`）+ 树里的面板清单。 */
   const [wb, setWb] = useState<WorkbenchState>(boot.state);
   const [visible, setVisible] = useState<PanelId[]>(boot.visible);
+  /** 最新值的只读镜像：布局回调（切换/另存）要用，但不该因此重建。 */
+  const wbRef = useRef(wb);
+  wbRef.current = wb;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   /** 收起（`▾`）的面板：只切**显示**、不卸载、不进 `minimized`（§2.2）。 */
   const [folded, setFolded] = useState<PanelId[]>([]);
   /** 面板「活跃」环（chrome.active）。 */
@@ -2175,11 +2186,67 @@ export default function StoryEditorPage() {
     });
   }, []);
 
-  /** 工作台状态变化：受控 + 落盘 `prts-editor-wb:default`。 */
+  /**
+   * **命名布局**（BRIEF §2.4 的用户可见面）：`prts-editor-wb:default` 是「当前」，
+   * 其余名字是快照。这里只做三件事：列出 / 另存为 / 切换（+ 删除），
+   * 布局文本的解析仍走 `workbenchStack`（`parse` / `normalize`）。
+   */
+  const [layoutNames, setLayoutNames] = useState<string[]>(() => listLayouts());
+  const [activeLayoutName, setActiveLayoutName] = useState<string>(() => activeLayout());
+  const [layoutPick, setLayoutPick] = useState<string>(DEFAULT_LAYOUT_NAME);
+
+  /** 切换（或另存为）布局：文本 → `normalize` → 工作台；坏文本回落默认。 */
+  const applyLayoutText = useCallback((text: string | null) => {
+    const parsed = text ? (parse(text) as WorkbenchState | null) : null;
+    const next = normalize(parsed ?? defaultState(), visibleRef.current);
+    setWb(next);
+    return next;
+  }, []);
+
+  const chooseLayout = useCallback((name: string) => {
+    const clean = String(name ?? "").trim() || DEFAULT_LAYOUT_NAME;
+    if (clean !== activeLayoutName) saveLayoutNamed(activeLayoutName, stringify(wbRef.current));
+    setActiveLayoutName(clean);
+    loadLayout(clean);
+    applyLayoutText(readLayout(clean));
+  }, [activeLayoutName, applyLayoutText]);
+
+  const saveAsLayout = useCallback((name: string) => {
+    const clean = String(name ?? "").trim();
+    if (!clean) return;
+    saveLayoutNamed(clean, stringify(wbRef.current));
+    setActiveLayoutName(clean);
+    setLayoutNames(listLayouts());
+  }, []);
+
+  const deleteLayoutNamed = useCallback((name: string) => {
+    deleteLayout(name);
+    const names = listLayouts();
+    setLayoutNames(names);
+    if (name === activeLayoutName) {
+      const fallback = names.includes(DEFAULT_LAYOUT_NAME) ? DEFAULT_LAYOUT_NAME : names[0] ?? DEFAULT_LAYOUT_NAME;
+      setActiveLayoutName(fallback);
+      loadLayout(fallback);
+      applyLayoutText(readLayout(fallback));
+    }
+  }, [activeLayoutName, applyLayoutText]);
+
+  /** 「重置」= 回到**随包默认形状**：覆盖 `default` 并把活跃布局切回它（不动命名快照）。 */
+  const resetLayout = useCallback(() => {
+    applyLayoutText(null);
+    saveLayoutNamed(DEFAULT_LAYOUT_NAME, stringify(normalize(defaultState(), visibleRef.current)));
+    setActiveLayoutName(DEFAULT_LAYOUT_NAME);
+    setLayoutPick(DEFAULT_LAYOUT_NAME);
+    loadLayout(DEFAULT_LAYOUT_NAME);
+    setLayoutNames(listLayouts());
+  }, [applyLayoutText]);
+
+  /** 工作台状态变化：受控 + 落盘 `prts-editor-wb:<active>`。 */
   const onWorkbenchState = useCallback((next: WorkbenchState) => {
     setWb(next);
-    saveLayoutNamed(DEFAULT_LAYOUT_NAME, stringify(next));
-  }, []);
+    saveLayoutNamed(activeLayoutName, stringify(next));
+  }, [activeLayoutName]);
+
 
   /** P3 的规格表注册给窗口壳（`⧉` / 标题的兜底来源）。 */
   useEffect(() => {
@@ -2515,16 +2582,18 @@ export default function StoryEditorPage() {
     </div>
   );
 
-  /** 舞台（dock，task-10）：演到光标行时的画面；拖立绘 = 改该行 `x=`/`y=`。 */
+  /** 舞台（dock，task-10）：演到光标行时的画面；拖立绘 = 改该行 `x=`/`y=`。
+   *  **高度由宿主决定**（T3）：不写死 `height` —— `[data-wb-panel="stage"]` 的
+   *  dock 槽位拖多大，`.ed-stage` → `.ed-stage-host` → StagePane 就多大。 */
   const renderStagePane = () => (
-    <div className="ed-stage" data-editor-part="stage" style={{ height: 232 }}>
+    <div className="ed-stage" data-editor-part="stage">
       <div className="ed-stage-host" ref={stageHostRef}>
         {StagePanePart ? (
           <Suspense fallback={<em className="ed-stage-host-empty">正在载入舞台…</em>}>
             <StagePanePart
               chars={stageState.chars}
               background={stageState.background}
-              height={214}
+              /* 不传 `height`：`StagePane` 自己 `height: 100%` 填满宿主。 */
               onMove={onStageMove}
               onSelect={onStageSelect}
               selected={stageSelected}
@@ -2738,6 +2807,62 @@ export default function StoryEditorPage() {
           >
             插入控制器…
           </button>
+          {/* 命名布局（BRIEF §2.4）：切换 / 另存为 / 重置 / 删除。 */}
+          <span className="ed-layout" data-layout-bar="1">
+            <select
+              className="ed-layout-select"
+              value={layoutPick}
+              aria-label="布局"
+              title="切换已保存的工作台布局"
+              onChange={(event) => setLayoutPick(event.target.value)}
+            >
+              {(layoutNames.length ? layoutNames : [DEFAULT_LAYOUT_NAME]).map((name) => (
+                <option key={name} value={name}>
+                  布局：{name}
+                  {name === activeLayoutName ? " ✓" : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              className="ed-btn"
+              data-layout-action="load"
+              onClick={() => chooseLayout(layoutPick)}
+              title="切换到选中的布局（切走前会把当前布局存回它自己的名字）"
+            >
+              切换
+            </button>
+            <button
+              className="ed-btn"
+              data-layout-action="save-as"
+              onClick={() => {
+                const name = window.prompt("布局另存为（名字）：", layoutPick === DEFAULT_LAYOUT_NAME ? "" : layoutPick);
+                if (!name) return;
+                saveAsLayout(name);
+                setLayoutPick(name.trim());
+              }}
+              title="把当前布局另存为一个新名字"
+            >
+              另存为…
+            </button>
+            <button
+              className="ed-btn"
+              data-layout-action="reset"
+              onClick={resetLayout}
+              title="把当前布局恢复成默认（工具面板左 / 编辑区上 / 舞台下）"
+            >
+              重置
+            </button>
+            {layoutPick !== DEFAULT_LAYOUT_NAME && layoutNames.includes(layoutPick) && (
+              <button
+                className="ed-btn"
+                data-layout-action="delete"
+                onClick={() => deleteLayoutNamed(layoutPick)}
+                title={`删除布局「${layoutPick}」`}
+              >
+                删除
+              </button>
+            )}
+          </span>
           <button className="ed-btn" onClick={reload} title="放弃未保存改动，从磁盘重新载入">
             重新载入
           </button>

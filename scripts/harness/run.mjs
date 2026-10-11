@@ -29,6 +29,7 @@ const GROUPS = {
     ["window-chrome.mjs", "② toolpanel/stage 无 ⧉✕；preview/branch = Map"],
     ["workbench-drag.mjs", "③ 拼接/换位/调尺寸 + 落盘"],
     ["wb-selftest.mjs", "③ 布局模型纯函数（62 断言 + fuzz）"],
+    ["layout-named.mjs", "③ 命名布局：另存为/切换/重置/删除 + 刷新保持"],
   ],
   branch: [
     ["branch-shot.mjs", "④ dify 风 DAG（零重叠 + 分层 + 截图）"],

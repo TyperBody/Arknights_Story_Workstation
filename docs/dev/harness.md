@@ -15,6 +15,7 @@
 | ① | 舞台缩放连续（几何 px 不变、滚轮锚点 <0.5px） | `stage-zoom.mjs`（38） | workbench |
 | ② | toolpanel/stage 无 ⧉✕；preview/branch = Map | `window-chrome.mjs`（5） | workbench |
 | ③ | 拼接/换位/调尺寸 + 落盘 | `workbench-drag.mjs`（3）、`wb-selftest.mjs`（62） | workbench |
+| ③ | **命名布局**（另存为 / 切换 / 重置 / 删除 / 刷新保持） | `layout-named.mjs`（9） | workbench |
 | ④ | dify 风 DAG（零重叠/分层/适配）+ 截图 | `branch-shot.mjs`（59）、`t6-visual-check.mjs` | branch |
 | ⑤ | 单条横幅（URL+HTTP 状态）+ 不白屏 | `engine-failure.mjs`（2）、`engine-failure-min.mjs`（4） | engine |
 | ⑥ | 随包起步素材集（287 张/14.6 MB） | `starter-assets.mjs`（17；`--native` 18） | assets |
@@ -23,7 +24,7 @@
 | — | 播放器底栏三档（`auto` = 默认纯隐藏；指针命中即显示） | `player-chrome.mjs`（10） | player |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
-`npm run test:harness` 当前 = **15 个 harness**（workbench 6 / branch 1 / engine 2 / assets 3 / shell 2 / player 1）。
+`npm run test:harness` 当前 = **16 个 harness**（workbench 7 / branch 1 / engine 2 / assets 3 / shell 2 / player 1）。
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
 

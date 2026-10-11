@@ -20,7 +20,7 @@
     "test:stage": "node scripts/fanfic/stage-selftest.mjs",
     "test:forms:full": "node scripts/fanfic/editorForms-selftest.mjs --full",
     "test:selfcontained": "node scripts/fanfic/selfcontained-check.mjs",
-    "test:workbench": "node build/harness/demo-check.mjs && node build/harness/persist-check.mjs && node build/harness/stage-zoom.mjs && node build/harness/window-chrome.mjs && node build/harness/workbench-drag.mjs && node build/harness/branch-shot.mjs && node build/harness/engine-failure.mjs && node build/harness/live-download.mjs",
+    "test:workbench": "node build/harness/demo-check.mjs && node build/harness/persist-check.mjs && node build/harness/layout-named.mjs && node build/harness/stage-zoom.mjs && node build/harness/window-chrome.mjs && node build/harness/workbench-drag.mjs && node build/harness/branch-shot.mjs && node build/harness/engine-failure.mjs && node build/harness/live-download.mjs",
     "test:mirror": "node tools/mirror/mirror-selftest.mjs && node build/harness/rust-mirror-live.mjs && node build/harness/live-download.mjs",
     "test:starter": "node build/harness/starter-assets.mjs",
     "test:workbench:model": "node build/harness/wb-selftest.mjs",
