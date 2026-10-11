@@ -48,6 +48,9 @@
 | dify 风分支图（分区卡片 + 正交连线 + 适配） | ![branch](images/branch-graph-dify.png) |
 | 设置 → 下载源 / 下载并发 | ![settings](images/settings-download-source.png) |
 | 舞台连续缩放（滚轮锚点、viewBox 变、几何不变） | ![stage](images/stage-zoom.png) |
+| 区域缩进（`[Decision]` 线路层级） | ![indent](images/indent-region.png) |
+| 舞台裁剪（150% 摘掉 clip = 素材带，对照见 `images/stage-clip-150-unclipped.png`） | ![clip](images/stage-clip-150.png) |
+| 编辑器英文界面（`prts-language=en-US`） | ![en](images/editor-en.png) |
 
 ## 4. 回归
 
