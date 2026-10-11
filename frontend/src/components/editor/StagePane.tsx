@@ -71,6 +71,7 @@ import {
 //     onToggle?: () => void; onSelect?: () => void; active?: boolean;
 //   }
 import type { PanelChromeProps } from "./inspectorWindow";
+import { useT } from "../../i18n/index.ts";
 
 /** 组件接受的字符（`parseStage` 的产物超集；缺 rect 时自己算）。 */
 export interface StagePaneChar extends StageCharInput {
@@ -91,7 +92,11 @@ export interface StagePaneProps {
   chars: StagePaneChar[];
   /** 背景键或 `{key,url}`；`null`/`""`/拼不出 URL = 纯黑底（**不发** `src=""` 的空请求）。 */
   background?: StagePaneBackground;
-  /** 窗格高度（px）；宽度自适应，画布按 16:9 letterbox 居中。 */
+  /**
+   * 窗格高度（px）；宽度自适应。
+   * **不给 = 填满宿主**（`height: 100%` + `flex: 1 1 auto`）—— 工作台/页面把
+   * 宿主拖多大，舞台就多大（T3）。
+   */
   height?: number;
   /** 拖拽结束：`delta` 单位 = 1280×720 画布 px、y 向下（拖右 `+x`、拖下 `+y`）。 */
   onMove?: (slot: Slot, delta: Point) => void;
@@ -132,9 +137,13 @@ const SAFE_ACTION = { x: STAGE_WIDTH * 0.035, y: STAGE_HEIGHT * 0.035 };
 const PLACEHOLDER_SIZE = { w: 720, h: 720 };
 
 const SLOT_LABEL: Record<Slot, string> = { l: "l 左", m: "m 中", r: "r 右" };
+const SLOT_LABEL_KEY: Record<Slot, string> = { l: "editor.stage.slotL", m: "editor.stage.slotM", r: "editor.stage.slotR" };
 
 /** 一档滚轮/按钮的缩放步长（含 Shift 加速）。 */
 const ZOOM_FAST = 0.25;
+
+/** `data-stage-clip` 的四条数字（整数 px；只给 harness 读数，不参与几何）。 */
+const rounded = (value: number): number => (Number.isFinite(value) ? Math.round(value) : 0);
 
 function defaultResolveUrl(key: string, kind: "background" | "character" = "background"): string {
   const value = String(key ?? "").trim();
@@ -217,6 +226,7 @@ export function StagePane(props: StagePaneProps) {
     chrome,
     className,
   } = props;
+  const tr = useT();
 
   // 受控/非受控两用：`zoom`/`showGuides` prop 是**默认值**，窗格内的按钮/滚轮写 override。
   const [zoomOverride, setZoomOverride] = useState<ZoomView | null>(null);
@@ -468,15 +478,21 @@ export function StagePane(props: StagePaneProps) {
     if (!text) return;
     try {
       await navigator.clipboard?.writeText(text);
-      setHint("已复制这一行");
+      setHint(tr("editor.stage.copied", undefined, "已复制这一行"));
     } catch {
-      setHint("复制失败（浏览器不允许）—— 文本已选中");
+      setHint(tr("editor.stage.copyFailed", undefined, "复制失败（浏览器不允许）—— 文本已选中"));
     }
     if (typeof window !== "undefined") window.setTimeout(() => setHint(""), 1600);
-  }, [pending]);
+  }, [pending, tr]);
 
   const patchText = pending ? (pending.line ?? pending.slideLine) : "";
   const selectedChar = items.find((item) => item.slot === selected) ?? null;
+
+  // 宿主高度：给了 `height` 就用它（像素）；不给 = **填满宿主**（`100%`）。
+  // 宿主尺寸由页面/工作台槽位决定 → 拖分隔条「舞台拖多大就多大」（T3）。
+  const givenHeight = Number(height);
+  const fillHost = !(Number.isFinite(givenHeight) && givenHeight > 0);
+  const clipView = { x: rounded(view.x), y: rounded(view.y), w: rounded(view.w), h: rounded(view.h) };
 
   return (
     <div
@@ -485,9 +501,13 @@ export function StagePane(props: StagePaneProps) {
       data-stage-zoom={zoomState}
       data-stage-chars={chars.length}
       data-stage-chrome-visible={chromeVisible ? "1" : "0"}
+      data-stage-fill={fillHost ? "1" : "0"}
+      data-stage-clip={`${clipView.x},${clipView.y},${clipView.w},${clipView.h}`}
       style={{
-        height: height ?? 232,
+        height: fillHost ? "100%" : givenHeight,
         minHeight: 0,
+        alignSelf: "stretch",
+        flex: "1 1 auto",
         display: "flex",
         flexDirection: "column",
         gap: 4,
@@ -506,10 +526,10 @@ export function StagePane(props: StagePaneProps) {
         data-active={chrome?.active ? "1" : "0"}
         data-hidden={chromeVisible ? "0" : "1"}
         style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 18, padding: "0 2px" }}
-        title={chrome?.ariaLabel ?? "舞台"}
+        title={chrome?.ariaLabel ?? tr("editor.stage.title", undefined, "舞台")}
         onPointerDown={() => chrome?.onSelect?.()}
       >
-        <span className="sp-chrome-title" style={{ color: "#9fb3c8" }}>{chrome?.title ?? "舞台"}</span>
+        <span className="sp-chrome-title" style={{ color: "#9fb3c8" }}>{chrome?.title ?? tr("editor.stage.title", undefined, "舞台")}</span>
         {chrome?.active ? <span className="sp-chrome-dot" style={{ color: "#7a5cff" }}>●</span> : null}
         <span style={{ flex: "1 1 auto" }} />
         {chrome?.onToggle || chrome === undefined || foldedOverride !== null ? (
@@ -518,7 +538,7 @@ export function StagePane(props: StagePaneProps) {
             className="sp-fold"
             onClick={toggleChrome}
             aria-expanded={chromeVisible}
-            aria-label={chrome?.ariaLabel ? `${chromeVisible ? "收起" : "展开"}${chrome.ariaLabel}` : "收起"}
+            aria-label={chrome?.ariaLabel ? `${chromeVisible ? tr("editor.toolbar.foldHide", undefined, "收起") : tr("editor.toolbar.foldShow", undefined, "展开")}${chrome.ariaLabel}` : tr("editor.toolbar.foldHide", undefined, "收起")}
             style={buttonStyle(false)}
           >
             {chromeVisible ? "▾" : "▸"}
@@ -559,161 +579,179 @@ export function StagePane(props: StagePaneProps) {
             <pattern id="ark-stage-grid" width="80" height="80" patternUnits="userSpaceOnUse">
               <path d="M80 0H0V80" fill="none" stroke="#1d2836" strokeWidth="1" />
             </pattern>
+            {/* 裁剪 = 当前 viewBox（`clipPathUnits` 默认 `userSpaceOnUse`）：
+                SVG 的视口**不裁剪**内容 —— 背景/立绘在 viewBox 之外照样画，屏幕上
+                就会出现「16:9 窗口 + 更宽的素材带」= 用户报的「放大后素材扭曲」。
+                把整个画布内容包进这个 clip，可见内容恒为 16:9，一个像素都不露。
+                HUD（工具条 / 增量条）在 clip 之外，不受影响。 */}
+            <clipPath id="ark-stage-clip">
+              <rect
+                id="ark-stage-clip-rect"
+                x={view.x}
+                y={view.y}
+                width={view.w}
+                height={view.h}
+                data-stage-clip-rect="1"
+                data-stage-clip-rect-view={`${view.x} ${view.y} ${view.w} ${view.h}`}
+              />
+            </clipPath>
           </defs>
 
-          {/* 画布底 + 背景 */}
-          <rect x={0} y={0} width={STAGE_WIDTH} height={STAGE_HEIGHT} fill="#0a0f16" />
-          {backgroundUrl ? (
-            <image
-              href={backgroundUrl}
-              x={0}
-              y={0}
-              width={STAGE_WIDTH}
-              height={STAGE_HEIGHT}
-              preserveAspectRatio="xMidYMid slice"
-              style={{ opacity: 0.92 }}
-              data-stage-background={backgroundImage?.key ?? ""}
+          <g clipPath="url(#ark-stage-clip)" data-stage-clip-group="1">
+            {/* 画布底 + 背景 */}
+            <rect x={0} y={0} width={STAGE_WIDTH} height={STAGE_HEIGHT} fill="#0a0f16" />
+            {backgroundUrl ? (
+              <image
+                href={backgroundUrl}
+                x={0}
+                y={0}
+                width={STAGE_WIDTH}
+                height={STAGE_HEIGHT}
+                preserveAspectRatio="xMidYMid slice"
+                style={{ opacity: 0.92 }}
+                data-stage-background={backgroundImage?.key ?? ""}
+              />
+            ) : null}
+            {guides ? <rect x={0} y={0} width={STAGE_WIDTH} height={STAGE_HEIGHT} fill="url(#ark-stage-grid)" style={{ opacity: 0.55 }} /> : null}
+
+            {/* 安全框 + 1280×720 边框 */}
+            <rect
+              x={SAFE_ACTION.x}
+              y={SAFE_ACTION.y}
+              width={STAGE_WIDTH - SAFE_ACTION.x * 2}
+              height={STAGE_HEIGHT - SAFE_ACTION.y * 2}
+              fill="none"
+              stroke="#2b6cb0"
+              strokeWidth="1"
+              strokeDasharray="6 6"
+              style={{ opacity: 0.6 }}
+              data-stage-safe="action"
             />
-          ) : null}
-          {guides ? <rect x={0} y={0} width={STAGE_WIDTH} height={STAGE_HEIGHT} fill="url(#ark-stage-grid)" style={{ opacity: 0.55 }} /> : null}
+            <rect
+              x={SAFE_TITLE.x}
+              y={SAFE_TITLE.y}
+              width={STAGE_WIDTH - SAFE_TITLE.x * 2}
+              height={STAGE_HEIGHT - SAFE_TITLE.y * 2}
+              fill="none"
+              stroke="#2b6cb0"
+              strokeWidth="1"
+              strokeDasharray="3 9"
+              style={{ opacity: 0.45 }}
+              data-stage-safe="title"
+            />
+            <rect x={0} y={0} width={STAGE_WIDTH} height={STAGE_HEIGHT} fill="none" stroke="#3d4b5c" strokeWidth="1" />
 
-          {/* 安全框 + 1280×720 边框 */}
-          <rect
-            x={SAFE_ACTION.x}
-            y={SAFE_ACTION.y}
-            width={STAGE_WIDTH - SAFE_ACTION.x * 2}
-            height={STAGE_HEIGHT - SAFE_ACTION.y * 2}
-            fill="none"
-            stroke="#2b6cb0"
-            strokeWidth="1"
-            strokeDasharray="6 6"
-            style={{ opacity: 0.6 }}
-            data-stage-safe="action"
-          />
-          <rect
-            x={SAFE_TITLE.x}
-            y={SAFE_TITLE.y}
-            width={STAGE_WIDTH - SAFE_TITLE.x * 2}
-            height={STAGE_HEIGHT - SAFE_TITLE.y * 2}
-            fill="none"
-            stroke="#2b6cb0"
-            strokeWidth="1"
-            strokeDasharray="3 9"
-            style={{ opacity: 0.45 }}
-            data-stage-safe="title"
-          />
-          <rect x={0} y={0} width={STAGE_WIDTH} height={STAGE_HEIGHT} fill="none" stroke="#3d4b5c" strokeWidth="1" />
+            {/* 槽位虚线（l/m/r = 440/640/840，引擎 slotBaseX） */}
+            {guides
+              ? ([
+                  { slot: "l" as Slot, x: 440 },
+                  { slot: "m" as Slot, x: 640 },
+                  { slot: "r" as Slot, x: 840 },
+                ]).map(({ slot, x }) => (
+                  <g key={slot} data-stage-guide={slot}>
+                    <line x1={x} y1={0} x2={x} y2={STAGE_HEIGHT} stroke="#7a5cff" strokeWidth="1" strokeDasharray="10 8" style={{ opacity: 0.45 }} />
+                    <text x={x + 6} y={18} fill="#b9a8ff" fontSize="16" style={{ opacity: 0.8 }}>
+                      {tr(SLOT_LABEL_KEY[slot], undefined, SLOT_LABEL[slot])}
+                    </text>
+                  </g>
+                ))
+              : null}
 
-          {/* 槽位虚线（l/m/r = 440/640/840，引擎 slotBaseX） */}
-          {guides
-            ? ([
-                { slot: "l" as Slot, x: 440 },
-                { slot: "m" as Slot, x: 640 },
-                { slot: "r" as Slot, x: 840 },
-              ]).map(({ slot, x }) => (
-                <g key={slot} data-stage-guide={slot}>
-                  <line x1={x} y1={0} x2={x} y2={STAGE_HEIGHT} stroke="#7a5cff" strokeWidth="1" strokeDasharray="10 8" style={{ opacity: 0.45 }} />
-                  <text x={x + 6} y={18} fill="#b9a8ff" fontSize="16" style={{ opacity: 0.8 }}>
-                    {SLOT_LABEL[slot]}
+            {/* 标尺：顶部横向刻度（每 80px 一格小刻度、每 160px 数字） */}
+            <g data-stage-ruler="1" style={{ opacity: 0.75 }}>
+              {Array.from({ length: Math.floor(view.w / 80) + 1 }, (_, index) => {
+                const mod = Math.round(view.x / 80) * 80 + index * 80;
+                if (mod < view.x || mod > view.x + view.w) return null;
+                const major = mod % 160 === 0;
+                return (
+                  <g key={`x${mod}`}>
+                    <line x1={mod} y1={view.y} x2={mod} y2={view.y + (major ? 12 : 6)} stroke="#6b7b8d" strokeWidth="1" />
+                    {major ? (
+                      <text x={mod + 3} y={view.y + 26} fill="#8fa1b5" fontSize="14">
+                        {mod}
+                      </text>
+                    ) : null}
+                  </g>
+                );
+              })}
+              {Array.from({ length: Math.floor(view.h / 80) + 1 }, (_, index) => {
+                const mod = Math.round(view.y / 80) * 80 + index * 80;
+                if (mod < view.y || mod > view.y + view.h) return null;
+                const major = mod % 160 === 0;
+                return (
+                  <g key={`y${mod}`}>
+                    <line x1={view.x} y1={mod} x2={view.x + (major ? 12 : 6)} y2={mod} stroke="#6b7b8d" strokeWidth="1" />
+                    {major ? (
+                      <text x={view.x + 14} y={mod - 3} fill="#8fa1b5" fontSize="14">
+                        {mod}
+                      </text>
+                    ) : null}
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* 立绘 */}
+            {items.map(({ char, slot, rect, dim, missing, image }) => {
+              const url = resolveCharUrl(char, image);
+              const isSelected = selected === slot;
+              const alpha = dim ? 0.45 : 1;
+              return (
+                <g
+                  key={`${slot}-${char.name}-${rect.x}`}
+                  data-stage-char={slot}
+                  data-stage-missing={missing ? "1" : "0"}
+                  style={{ cursor: "grab", opacity: alpha }}
+                  onPointerDown={(event) => startDrag(event, slot)}
+                >
+                  {url ? <image href={url} x={rect.x} y={rect.y} width={rect.w} height={rect.h} preserveAspectRatio="none" /> : null}
+                  {missing || !url ? (
+                    <>
+                      <rect
+                        x={rect.x}
+                        y={rect.y}
+                        width={rect.w}
+                        height={rect.h}
+                        fill="rgba(255, 96, 96, 0.08)"
+                        stroke="#ff6b6b"
+                        strokeWidth="2"
+                        strokeDasharray="14 10"
+                      />
+                      <text x={rect.x + 16} y={rect.y + 34} fill="#ffb3b3" fontSize="26">
+                        {char.name || tr("editor.stage.emptyName", undefined, "（空）")}
+                      </text>
+                      <text x={rect.x + 16} y={rect.y + 66} fill="#ff9b9b" fontSize="18">
+                        {tr("editor.stage.unknownChar", undefined, "未知角色（引擎会 warn missing_asset 并清槽）")}
+                      </text>
+                    </>
+                  ) : null}
+                  {isSelected ? (
+                    <rect
+                      x={rect.x - 4}
+                      y={rect.y - 4}
+                      width={rect.w + 8}
+                      height={rect.h + 8}
+                      fill="none"
+                      stroke="#f4c430"
+                      strokeWidth="3"
+                      strokeDasharray="18 10"
+                      data-stage-selected="1"
+                    />
+                  ) : null}
+                  <text x={rect.x + 8} y={rect.y - 12} fill={isSelected ? "#f4c430" : "#9fb3c8"} fontSize="20" data-stage-char-label={slot}>
+                    {slot} · {char.name}
+                    {char.label ? ` · ${char.label}` : ""}
                   </text>
                 </g>
-              ))
-            : null}
+              );
+            })}
 
-          {/* 标尺：顶部横向刻度（每 80px 一格小刻度、每 160px 数字） */}
-          <g data-stage-ruler="1" style={{ opacity: 0.75 }}>
-            {Array.from({ length: Math.floor(view.w / 80) + 1 }, (_, index) => {
-              const mod = Math.round(view.x / 80) * 80 + index * 80;
-              if (mod < view.x || mod > view.x + view.w) return null;
-              const major = mod % 160 === 0;
-              return (
-                <g key={`x${mod}`}>
-                  <line x1={mod} y1={view.y} x2={mod} y2={view.y + (major ? 12 : 6)} stroke="#6b7b8d" strokeWidth="1" />
-                  {major ? (
-                    <text x={mod + 3} y={view.y + 26} fill="#8fa1b5" fontSize="14">
-                      {mod}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
-            {Array.from({ length: Math.floor(view.h / 80) + 1 }, (_, index) => {
-              const mod = Math.round(view.y / 80) * 80 + index * 80;
-              if (mod < view.y || mod > view.y + view.h) return null;
-              const major = mod % 160 === 0;
-              return (
-                <g key={`y${mod}`}>
-                  <line x1={view.x} y1={mod} x2={view.x + (major ? 12 : 6)} y2={mod} stroke="#6b7b8d" strokeWidth="1" />
-                  {major ? (
-                    <text x={view.x + 14} y={mod - 3} fill="#8fa1b5" fontSize="14">
-                      {mod}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
+            {items.length === 0 ? (
+              <text x={STAGE_WIDTH / 2} y={STAGE_HEIGHT / 2} fill="#6b7b8d" fontSize="30" textAnchor="middle" data-stage-empty="1">
+                {tr("editor.stage.empty", undefined, "舞台为空（演到这一行还没有立绘）")}
+              </text>
+            ) : null}
           </g>
-
-          {/* 立绘 */}
-          {items.map(({ char, slot, rect, dim, missing, image }) => {
-            const url = resolveCharUrl(char, image);
-            const isSelected = selected === slot;
-            const alpha = dim ? 0.45 : 1;
-            return (
-              <g
-                key={`${slot}-${char.name}-${rect.x}`}
-                data-stage-char={slot}
-                data-stage-missing={missing ? "1" : "0"}
-                style={{ cursor: "grab", opacity: alpha }}
-                onPointerDown={(event) => startDrag(event, slot)}
-              >
-                {url ? <image href={url} x={rect.x} y={rect.y} width={rect.w} height={rect.h} preserveAspectRatio="none" /> : null}
-                {missing || !url ? (
-                  <>
-                    <rect
-                      x={rect.x}
-                      y={rect.y}
-                      width={rect.w}
-                      height={rect.h}
-                      fill="rgba(255, 96, 96, 0.08)"
-                      stroke="#ff6b6b"
-                      strokeWidth="2"
-                      strokeDasharray="14 10"
-                    />
-                    <text x={rect.x + 16} y={rect.y + 34} fill="#ffb3b3" fontSize="26">
-                      {char.name || "（空）"}
-                    </text>
-                    <text x={rect.x + 16} y={rect.y + 66} fill="#ff9b9b" fontSize="18">
-                      未知角色（引擎会 warn missing_asset 并清槽）
-                    </text>
-                  </>
-                ) : null}
-                {isSelected ? (
-                  <rect
-                    x={rect.x - 4}
-                    y={rect.y - 4}
-                    width={rect.w + 8}
-                    height={rect.h + 8}
-                    fill="none"
-                    stroke="#f4c430"
-                    strokeWidth="3"
-                    strokeDasharray="18 10"
-                    data-stage-selected="1"
-                  />
-                ) : null}
-                <text x={rect.x + 8} y={rect.y - 12} fill={isSelected ? "#f4c430" : "#9fb3c8"} fontSize="20" data-stage-char-label={slot}>
-                  {slot} · {char.name}
-                  {char.label ? ` · ${char.label}` : ""}
-                </text>
-              </g>
-            );
-          })}
-
-          {items.length === 0 ? (
-            <text x={STAGE_WIDTH / 2} y={STAGE_HEIGHT / 2} fill="#6b7b8d" fontSize="30" textAnchor="middle" data-stage-empty="1">
-              舞台为空（演到这一行还没有立绘）
-            </text>
-          ) : null}
         </svg>
 
         {/* HUD：缩放工具条（连续缩放：`−` / 百分比 → 100% / `＋` / `适配` / `1:1`）。
@@ -726,7 +764,7 @@ export function StagePane(props: StagePaneProps) {
             onClick={() => zoomCenter(-WHEEL_STEP)}
             disabled={zoomState <= MIN_ZOOM + 1e-9}
             style={buttonStyle(false)}
-            title="缩小 10%（以视口中心为锚）"
+            title={tr("editor.stage.zoomOutTitle", undefined, "缩小 10%（以视口中心为锚）")}
           >
             −
           </button>
@@ -735,7 +773,7 @@ export function StagePane(props: StagePaneProps) {
             data-stage-action="zoom-reset"
             onClick={zoomToDefault}
             style={buttonStyle(zoomState === DEFAULT_ZOOM)}
-            title="回到 100%（点击百分比）"
+            title={tr("editor.stage.zoomResetTitle", undefined, "回到 100%（点击百分比）")}
           >
             {zoomPercent(zoomState)}
           </button>
@@ -745,14 +783,14 @@ export function StagePane(props: StagePaneProps) {
             onClick={() => zoomCenter(WHEEL_STEP)}
             disabled={zoomState >= MAX_ZOOM - 1e-9}
             style={buttonStyle(false)}
-            title="放大 10%（以视口中心为锚）"
+            title={tr("editor.stage.zoomInTitle", undefined, "放大 10%（以视口中心为锚）")}
           >
             ＋
           </button>
-          <button type="button" data-stage-action="fit" onClick={zoomToFit} style={buttonStyle(false)} title="适配窗格（fitZoom，含留白）">
-            适配
+          <button type="button" data-stage-action="fit" onClick={zoomToFit} style={buttonStyle(false)} title={tr("editor.stage.fitTitle", undefined, "适配窗格（fitZoom，含留白）")}>
+            {tr("editor.stage.fit", undefined, "适配")}
           </button>
-          <button type="button" data-stage-action="zoom-1" onClick={zoomToDefault} style={buttonStyle(zoomState === DEFAULT_ZOOM)} title="1:1（铺满窗格，只看 1280×720）">
+          <button type="button" data-stage-action="zoom-1" onClick={zoomToDefault} style={buttonStyle(zoomState === DEFAULT_ZOOM)} title={tr("editor.stage.zoomOneTitle", undefined, "1:1（铺满窗格，只看 1280×720）")}>
             1:1
           </button>
           <button
@@ -760,12 +798,12 @@ export function StagePane(props: StagePaneProps) {
             data-stage-action="zoom-05"
             onClick={() => applyZoom(zoomAt(zoomState, { x: view.x + view.w / 2, y: view.y + view.h / 2 }, 0.5 - zoomState, box, clampZoom, view))}
             style={buttonStyle(Math.abs(zoomState - 0.5) < 1e-9)}
-            title="50%（看全 1.25× 边距）"
+            title={tr("editor.stage.zoomHalfTitle", undefined, "50%（看全 1.25× 边距）")}
           >
             50%
           </button>
-          <button type="button" data-stage-action="guides" onClick={() => setGuidesOverride((value) => !(value ?? guides))} style={buttonStyle(guides)} title="栅格 + 槽位虚线 + 安全框">
-            参考线
+          <button type="button" data-stage-action="guides" onClick={() => setGuidesOverride((value) => !(value ?? guides))} style={buttonStyle(guides)} title={tr("editor.stage.guidesTitle", undefined, "栅格 + 槽位虚线 + 安全框")}>
+            {tr("editor.stage.guides", undefined, "参考线")}
           </button>
         </div>
 
@@ -779,21 +817,21 @@ export function StagePane(props: StagePaneProps) {
 
       {/* 状态条 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 20, whiteSpace: "nowrap", overflow: "hidden" }}>
-        <span data-stage-status="zoom" title="缩放百分比 · 窗格 CSS 尺寸" style={{ cursor: "pointer" }} onClick={zoomToDefault}>
+        <span data-stage-status="zoom" title={tr("editor.stage.zoomTitle", undefined, "缩放百分比 · 窗格 CSS 尺寸")} style={{ cursor: "pointer" }} onClick={zoomToDefault}>
           {zoomPercent(zoomState)} · {box.w > 0 ? `${Math.round(box.w)}×${Math.round(box.h)}` : "—"}
         </span>
         <span data-stage-status="slot" style={{ color: "#f4c430" }}>
-          {selectedChar ? `选中 ${selectedChar.slot}：${selectedChar.char.name}` : "未选中"}
+          {selectedChar ? tr("editor.stage.selected", { slot: selectedChar.slot, name: selectedChar.char.name }, `选中 ${selectedChar.slot}：${selectedChar.char.name}`) : tr("editor.stage.notSelected", undefined, "未选中")}
         </span>
         <code
           data-stage-patch="1"
           title={patchText}
           style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", color: pending ? "#9fe0a0" : "#6b7b8d" }}
         >
-          {pending ? patchText : "拖动立绘 → 这里给出引擎认的补丁"}
+          {pending ? patchText : tr("editor.stage.patchHint", undefined, "拖动立绘 → 这里给出引擎认的补丁")}
         </code>
-        <button type="button" data-stage-action="copy" onClick={() => void copyPatch()} disabled={!pending} style={buttonStyle(Boolean(pending))} title="把补丁整行复制到剪贴板">
-          复制这一行
+        <button type="button" data-stage-action="copy" onClick={() => void copyPatch()} disabled={!pending} style={buttonStyle(Boolean(pending))} title={tr("editor.stage.copyPatchTitle", undefined, "把补丁整行复制到剪贴板")}>
+          {tr("editor.stage.copyLine", undefined, "复制这一行")}
         </button>
         {hint ? <span style={{ color: "#9fe0a0" }}>{hint}</span> : null}
       </div>

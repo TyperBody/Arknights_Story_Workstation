@@ -22,6 +22,7 @@ import {
   type FormField,
   type Preset,
 } from "../../../../src/akstage/local/editorForms.js";
+import { useT } from "../../i18n/index.ts";
 
 /** 页面传过来的 props（与 `StoryEditorPage` 里的 `ControllerInspectorProps` 对齐）。 */
 export interface ControllerInspectorProps {
@@ -155,6 +156,7 @@ function AssetPicker(props: {
   onClose: () => void;
 }): ReactNode {
   const { keys, resolveUrl, onPick, onClose } = props;
+  const tr = useT();
   const [query, setQuery] = useState("");
   const shown = useMemo(() => {
     const wanted = query.trim().toLowerCase();
@@ -167,7 +169,7 @@ function AssetPicker(props: {
         <input
           autoFocus
           style={{ ...S.input, fontFamily: "inherit" }}
-          placeholder="搜索素材 key（如 bg_ / char_）"
+          placeholder={tr("editor.inspector.assetSearch", undefined, "搜索素材 key（如 bg_ / char_）")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
@@ -176,11 +178,11 @@ function AssetPicker(props: {
           }}
         />
         <button type="button" style={S.btnGhost} onClick={onClose}>
-          收起
+          {tr("editor.toolbar.foldHide", undefined, "收起")}
         </button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 132, overflow: "auto" }}>
-        {shown.length === 0 && <span style={S.note}>没有匹配的素材（可以直接手输 key）</span>}
+        {shown.length === 0 && <span style={S.note}>{tr("editor.inspector.assetNone", undefined, "没有匹配的素材（可以直接手输 key）")}</span>}
         {shown.map((key) => (
           <button
             key={key}
@@ -208,6 +210,7 @@ function FieldRow(props: {
   onChange: (name: string, value: unknown) => void;
 }): ReactNode {
   const { field, value, model, assets, resolveUrl, onChange } = props;
+  const tr = useT();
   const [picker, setPicker] = useState(false);
   const disabled = !field.engineRead;
   const options = field.options ?? [];
@@ -220,7 +223,7 @@ function FieldRow(props: {
     return (
       <div style={{ ...S.row, gridTemplateColumns: "1fr" }}>
         <div style={S.note}>
-          <strong style={{ color: "var(--text-secondary)" }}>{field.label}</strong>：{field.hint}
+          <strong style={{ color: "var(--text-secondary)" }}>{field.label}</strong>{tr("editor.inspector.colon", undefined, "：")}{field.hint}
         </div>
       </div>
     );
@@ -240,7 +243,7 @@ function FieldRow(props: {
           onChange={(event) => set(event.target.checked)}
           style={{ width: 32, height: 16, accentColor: "var(--accent)" }}
         />
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{value === true ? "开" : "关"}</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{value === true ? tr("editor.common.on", undefined, "开") : tr("editor.common.off", undefined, "关")}</span>
       </label>
     );
   } else if (field.type === "number") {
@@ -268,7 +271,7 @@ function FieldRow(props: {
           disabled={disabled}
           onChange={(event) => set(event.target.value === "" ? 0 : Number(event.target.value))}
         />
-        {flatRange(range ?? null, field)}
+        {flatRange(range ?? null, field, tr)}
       </div>
     );
   } else if (field.type === "enum" && options.length > 0) {
@@ -282,7 +285,7 @@ function FieldRow(props: {
           disabled={disabled}
           onChange={(event) => set(event.target.value)}
         >
-          <option value="">（未设置）</option>
+          <option value="">{tr("editor.common.unset", undefined, "（未设置）")}</option>
           {options.map((option) => (
             <option key={option} value={option}>
               {option}
@@ -291,7 +294,7 @@ function FieldRow(props: {
         </select>
         <input
           style={{ ...S.input, maxWidth: 160 }}
-          placeholder="或手输"
+          placeholder={tr("editor.common.orType", undefined, "或手输")}
           value={text}
           disabled={disabled}
           onChange={(event) => set(event.target.value)}
@@ -307,12 +310,12 @@ function FieldRow(props: {
             value={toInputText(value)}
             disabled={disabled}
             list={pool.length && !picker ? `ed-assets-${field.name}` : undefined}
-            placeholder={pool.length ? "输入 key，或点右侧挑选" : "输入 key"}
+            placeholder={pool.length ? tr("editor.inspector.keyOrPick", undefined, "输入 key，或点右侧挑选") : tr("editor.inspector.keyInput", undefined, "输入 key")}
             onChange={(event) => set(event.target.value)}
           />
           {pool.length > 0 && (
             <button type="button" style={S.btnGhost} disabled={disabled} onClick={() => setPicker((open) => !open)}>
-              从素材里选
+              {tr("editor.common.pickFromAssets", undefined, "从素材里选")}
             </button>
           )}
         </div>
@@ -353,7 +356,7 @@ function FieldRow(props: {
           style={S.input}
           value={toInputText(value)}
           disabled={disabled}
-          placeholder={field.separator ? `多个值用 ${field.separator} 分隔` : ""}
+          placeholder={field.separator ? tr("editor.common.multiValue", { separator: field.separator }, `多个值用 ${field.separator} 分隔`) : ""}
           onChange={(event) => set(event.target.value)}
         />
         {field.separator ? <span style={S.chip}>{field.separator}</span> : null}
@@ -373,10 +376,10 @@ function FieldRow(props: {
           {control}
           <div style={S.note}>
             <code style={{ color: "var(--text-secondary)" }}>{field.name}</code>
-            {field.type !== "bool" ? ` · ${field.type === "path" ? "素材 key" : field.type === "number" ? "数值" : field.type === "enum" ? "枚举" : "文本"}` : ""}
-            {field.engineRead ? "" : ` · ${field.reason ?? "引擎不读"}`}
-            {field.constant !== undefined ? ` · 语料里恒为 ${field.constant}` : ""}
-            {field.corpusCount ? ` · 语料 ${field.corpusCount} 次` : ""}
+            {field.type !== "bool" ? ` · ${fieldTypeLabel(field.type, tr)}` : ""}
+            {field.engineRead ? "" : ` · ${field.reason ?? tr("editor.common.engineIgnored", undefined, "引擎不读")}`}
+            {field.constant !== undefined ? ` · ${tr("editor.common.alwaysValue", { value: field.constant }, `语料里恒为 ${field.constant}`)}` : ""}
+            {field.corpusCount ? ` · ${tr("editor.common.corpusCount", { count: field.corpusCount }, `语料 ${field.corpusCount} 次`)}` : ""}
           </div>
         </div>
       </div>
@@ -385,11 +388,23 @@ function FieldRow(props: {
   );
 }
 
+/** 字段类型的中文名（`editor.common.type*`）。 */
+function fieldTypeLabel(type: string, tr: (key: string, vars?: Record<string, string | number>, defaultValue?: string) => string): string {
+  if (type === "path") return tr("editor.common.typePath", undefined, "素材 key");
+  if (type === "number") return tr("editor.common.typeNumber", undefined, "数值");
+  if (type === "enum") return tr("editor.common.typeEnum", undefined, "枚举");
+  return tr("editor.common.typeText", undefined, "文本");
+}
+
 /** 范围提示：`[min, max, step]`。 */
-function flatRange(range: [number, number, number] | null, field: FormField): ReactNode {
-  if (!range) return <span style={S.chip}>{field.constant !== undefined ? `恒为 ${field.constant}` : "手输"}</span>;
+function flatRange(
+  range: [number, number, number] | null,
+  field: FormField,
+  tr: (key: string, vars?: Record<string, string | number>, defaultValue?: string) => string,
+): ReactNode {
+  if (!range) return <span style={S.chip}>{field.constant !== undefined ? tr("editor.common.alwaysShort", { value: field.constant }, `恒为 ${field.constant}`) : tr("editor.common.manual", undefined, "手输")}</span>;
   return (
-    <span style={S.chip} title="范围来自官方语料实测">
+    <span style={S.chip} title={tr("editor.common.rangeTitle", undefined, "范围来自官方语料实测")}>
       {range[0]}–{range[1]}
     </span>
   );
@@ -400,6 +415,7 @@ function flatRange(range: [number, number, number] | null, field: FormField): Re
  */
 export default function ControllerInspector(props: ControllerInspectorProps): ReactNode {
   const { model = null, line, lineIndex, onApply, height, assets, resolveUrl, onDirty } = props;
+  const tr = useT();
   const parsed = useMemo(() => parseValues(line, model), [line, model]);
   const command = parsed.command;
   const spec = useMemo(() => (command ? controllerOf(command, model) : null), [command, model]);
@@ -469,24 +485,24 @@ export default function ControllerInspector(props: ControllerInspectorProps): Re
     return (
       <div style={S.wrap} data-editor-part="inspector-body" onKeyDown={onKeyDown}>
         <div style={S.head}>
-          <span style={S.title}>{parsed.kind === "dialogue" ? "对白" : parsed.kind === "comment" ? "注释" : "旁白"}</span>
+          <span style={S.title}>{parsed.kind === "dialogue" ? tr("editor.inspector.kindDialogue", undefined, "对白") : parsed.kind === "comment" ? tr("editor.inspector.kindComment", undefined, "注释") : tr("editor.inspector.kindNarration", undefined, "旁白")}</span>
           <span style={{ flex: 1 }} />
           {editable ? (
             <button type="button" style={S.btn} onClick={apply} disabled={!onApply || !dirty} title="Ctrl+Enter">
-              应用
+              {tr("editor.common.apply", undefined, "应用")}
             </button>
           ) : null}
           {editable ? (
             <button type="button" style={S.btnGhost} onClick={reset} disabled={!dirty}>
-              还原
+              {tr("editor.common.reset", undefined, "还原")}
             </button>
           ) : null}
-          {lineIndex !== undefined ? <span style={S.dim}>第 {lineIndex + 1} 行</span> : null}
+          {lineIndex !== undefined ? <span style={S.dim}>{tr("editor.inspector.line", { line: lineIndex + 1 }, `第 ${lineIndex + 1} 行`)}</span> : null}
         </div>
         <div style={S.body}>
           {editable ? (
             <>
-              <div style={S.note}>旁白行：只改正文（`]` 之后的部分逐字节保留）。</div>
+              <div style={S.note}>{tr("editor.inspector.narrationNote", undefined, "旁白行：只改正文（`]` 之后的部分逐字节保留）。")}</div>
               <textarea
                 style={{ ...S.input, minHeight: 64, resize: "vertical" }}
                 value={toInputText(values.text ?? body.replace(/^\s+/, ""))}
@@ -495,10 +511,10 @@ export default function ControllerInspector(props: ControllerInspectorProps): Re
             </>
           ) : (
             <div style={S.note}>
-              {parsed.kind === "blank" ? "空行（没有可改的控制器）。" : "这一行是注释；用「插入」向导加一条控制器。"}
+              {parsed.kind === "blank" ? tr("editor.inspector.blankLine", undefined, "空行（没有可改的控制器）。") : tr("editor.inspector.commentLine", undefined, "这一行是注释；用「插入」向导加一条控制器。")}
             </div>
           )}
-          <pre style={S.preview}>{preview || line || "（空行）"}</pre>
+          <pre style={S.preview}>{preview || line || tr("editor.diagnostics.emptyLine", undefined, "（空行）")}</pre>
         </div>
       </div>
     );
@@ -513,14 +529,14 @@ export default function ControllerInspector(props: ControllerInspectorProps): Re
       <div style={S.head}>
         <span style={S.title}>{form?.canonical ?? parsed.canonical ?? command}</span>
         {form ? <span style={S.chip}>{form.category}</span> : null}
-        {spec && spec.runtimeRegistered === false ? <span style={{ ...S.chip, color: "var(--error)" }}>运行时未注册</span> : null}
+        {spec && spec.runtimeRegistered === false ? <span style={{ ...S.chip, color: "var(--error)" }}>{tr("editor.inspector.notRegistered", undefined, "运行时未注册")}</span> : null}
         <span style={{ flex: 1 }} />
-        {dirty ? <span style={{ ...S.chip, color: "var(--accent)" }}>已修改</span> : null}
+        {dirty ? <span style={{ ...S.chip, color: "var(--accent)" }}>{tr("editor.inspector.dirty", undefined, "已修改")}</span> : null}
         <button type="button" style={S.btn} onClick={apply} disabled={!onApply || !dirty} title="Ctrl+Enter">
-          应用
+          {tr("editor.common.apply", undefined, "应用")}
         </button>
         <button type="button" style={S.btnGhost} onClick={reset} disabled={!dirty}>
-          还原
+          {tr("editor.common.reset", undefined, "还原")}
         </button>
         <select
           style={S.select}
@@ -530,16 +546,16 @@ export default function ControllerInspector(props: ControllerInspectorProps): Re
             if (found) applyPreset(found);
             event.target.value = "";
           }}
-          title="模板（预设）：参数取自真实语料行；选中即填入表单，再点「应用」写回"
+          title={tr("editor.inspector.presetTitle", undefined, "模板（预设）：参数取自真实语料行；选中即填入表单，再点「应用」写回")}
         >
-          <option value="">预设…</option>
+          <option value="">{tr("editor.common.preset", undefined, "预设…")}</option>
           {presets.map((preset, index) => (
             <option key={preset.name} value={index}>
               {preset.name}
             </option>
           ))}
         </select>
-        {lineIndex !== undefined ? <span style={S.dim}>第 {lineIndex + 1} 行</span> : null}
+        {lineIndex !== undefined ? <span style={S.dim}>{tr("editor.inspector.line", { line: lineIndex + 1 }, `第 ${lineIndex + 1} 行`)}</span> : null}
       </div>
 
       <div style={S.body}>
@@ -556,16 +572,16 @@ export default function ControllerInspector(props: ControllerInspectorProps): Re
             />
           ))
         ) : (
-          <div style={S.note}>这条命令不在字段表里（未知指令）——只能原样编辑。</div>
+          <div style={S.note}>{tr("editor.inspector.unknownCommand", undefined, "这条命令不在字段表里（未知指令）——只能原样编辑。")}</div>
         )}
         <div>
-          <div style={{ ...S.note, marginBottom: 3 }}>预览（Ctrl+Enter 应用）：</div>
+          <div style={{ ...S.note, marginBottom: 3 }}>{tr("editor.inspector.previewLabel", undefined, "预览（Ctrl+Enter 应用）：")}</div>
           <pre style={S.preview}>{preview}</pre>
         </div>
         {form?.hint ? <div style={S.note}>{form.hint}</div> : null}
         {form?.engineRef ? (
           <div style={S.note}>
-            引擎实现：
+            {tr("editor.inspector.engineImpl", undefined, "引擎实现：")}
             <code>{form.engineRef}</code>
           </div>
         ) : null}

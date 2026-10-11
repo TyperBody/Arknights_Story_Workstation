@@ -19,6 +19,7 @@
  * @property {Record<string, unknown>} args
  * @property {string} tail
  * @property {string} text
+ * @property {string} [leading] 行首空白（区域缩进；`raw` 保留原样，去掉 `leading` 后才是解析输入）
  * @property {string} [commandRaw]
  * @property {string} [speaker]
  * @property {string} [malformed]
@@ -65,20 +66,60 @@ export function parseScript(script) {
       i += 1;
     }
     const lineNumber = i + 1;
-    if (!text.trim() || /^\s+$/.test(text) || /^\s*\/\//.test(text)) continue;
+    // 区域缩进：空行/注释行**允许**行首空白（缩进的 `// 注释` 仍是注释）。
+    if (!text.trim() || /^[ \t]*$/.test(text) || /^[ \t]*\/\//.test(text)) continue;
     lines.push(parseLine(text, lineNumber));
   }
   return lines;
 }
 
+/**
+ * 行首空白剥离（区域缩进）：只吃空格与 Tab，与 `String.prototype.trimStart` 的
+ * 其余空白（全角空格、\f…）区分开 —— 那类字符要保持"裸文本行"语义。
+ *
+ * **只对去缩进后以 `[` 开头的行**生效（`stripIndent` 的单行版）：
+ * `  [Delay(time=1)]` → `[Delay(time=1)]`；`  裸旁白` 原样（行首空白是旁白
+ * 展示文本的一部分）。行尾 `\` 的续行物理行由 `[` 行拼掉，保留缩进不影响播放。
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripIndent(text) {
+  const line = String(text ?? "");
+  const head = line.replace(/^[ \t]+/, "");
+  return head.startsWith("[") ? head : line;
+}
+
+/**
+ * 「区域缩进 → 引擎可播」的归一化：逐行 `stripIndent`。
+ *
+ * `\r\n` → `\n`，行数与 `parseScript` 一致，便于逐行对拍；可选 `leading`
+ * 头部注释由引擎的 `//` 过滤处理（`  // x` 也照丢）。
+ *
+ * @param {string} script
+ * @returns {string}
+ */
+export function stripIndentForEngine(script) {
+  return String(script ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(stripIndent)
+    .join("\n");
+}
+
 /** @param {string} text @param {number} [lineNumber] @returns {ParsedLine} */
 export function parseLine(text, lineNumber = 0) {
-  const base = { lineNumber, raw: text, text: "", command: null, args: {}, tail: "" };
-  if (text[0] !== "[") return { ...base, kind: "narration" };
-  const close = text.lastIndexOf("]");
+  const rawText = String(text ?? "");
+  // 区域缩进：行首空格/Tab 先剥掉再判定；`raw` 保留原样，`leading` 挂出来
+  // 给编辑器（缩进级别 / 缩进诊断）用。
+  const lead = /^[ \t]*/.exec(rawText)[0];
+  const text2 = rawText.slice(lead.length);
+  const base = { lineNumber, raw: rawText, leading: lead, text: "", command: null, args: {}, tail: "" };
+  if (text2[0] !== "[") return { ...base, kind: "narration" };
+  const close = text2.lastIndexOf("]");
   if (close === -1) return { ...base, kind: "narration", malformed: "缺少 ]" };
-  const head = text.slice(1, close);
-  const tail = text.slice(close + 1);
+  const head = text2.slice(1, close);
+  const tail = text2.slice(close + 1);
   if (tail.startsWith("(") || tail.trimStart().startsWith("(")) {
     return { ...base, kind: "narration", malformed: "“]” 后有残留的 “(”——参数必须写在 ] 之内" };
   }

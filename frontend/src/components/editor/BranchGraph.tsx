@@ -44,6 +44,7 @@ import {
   type Node as GraphNode,
   type Route,
 } from "../../../../src/akstage/local/branchGraph.js";
+import { useT } from "../../i18n/index.ts";
 import "./branchGraph.css";
 
 /** 组件的 props：task-16 契约 + P4 的可选 chrome（BRIEF §2.2）。 */
@@ -117,8 +118,8 @@ const ROLE_COLORS: Record<string, string> = {
   choice: "#f4c430",
   dead: "#6b7280",
 };
-/** 无 Decision 时的人话提示（harness 逐字断言）。 */
-const EMPTY_HINT = "这个剧本还没有分支：插入 [Decision] 后这里会画出走向";
+/** 无 Decision 时的人话提示（= zh-Hans 原文；harness 逐字断言，en-US 见 `editor.branch.emptyHint`）。 */
+const EMPTY_HINT_DEFAULT = "这个剧本还没有分支：插入 [Decision] 后这里会画出走向";
 /** 滚轮每格的缩放倍率（clamp 到 `LAYOUT_ZOOM_MIN..MAX`）。 */
 const ZOOM_STEP = 1.12;
 /** 画布四周的最小可视留白（「适配」用）。 */
@@ -175,14 +176,15 @@ export default function BranchGraph({
   onClose,
   chrome,
 }: BranchGraphProps) {
-  /** 图：文本变化才重算（大脚本也只算一次）。 */
+  const tr = useT();
+  /** 图：文本变化才重算（大脚本也只算一次）；`tr` 每语言一个稳定函数，切语言即重算。 */
   const graph: Graph = useMemo(() => {
     try {
       return buildGraph(String(text ?? ""));
     } catch {
-      return { nodes: [], edges: [], routes: [], merges: [], degraded: true, stats: { ...EMPTY_STATS, degradedReasons: ["推导失败"] } };
+      return { nodes: [], edges: [], routes: [], merges: [], degraded: true, stats: { ...EMPTY_STATS, degradedReasons: [tr("editor.branch.reasonFallback", undefined, "推导失败")] } };
     }
-  }, [text]);
+  }, [text, tr]);
   const caret = Number.isFinite(caretLine) ? Math.max(1, Math.trunc(caretLine)) : 1;
   /** 光标行 → 节点（反向高亮）。`buildGraph` 已含 try/catch。 */
   const caretNodeId = useMemo(() => {
@@ -327,10 +329,11 @@ export default function BranchGraph({
     try {
       rows = suggestForkOptions(String(text ?? ""), FORK_ROWS_MIN).slice(0, FORK_ROWS_MAX);
     } catch {
-      rows = [{ label: "选项一", value: 1 }, { label: "选项二", value: 2 }];
+      rows = [{ label: tr("editor.branch.forkFallbackA", undefined, "选项一"), value: 1 }, { label: tr("editor.branch.forkFallbackB", undefined, "选项二"), value: 2 }];
     }
     setFork({ nodeId: selectedNode.id, rows });
-  }, [onPatch, selectedNode, text]);
+    // `tr` 每个语言一个稳定函数：切语言时闭包跟着换（fallback 文案）。
+  }, [onPatch, selectedNode, text, tr]);
   const confirmFork = useCallback(() => {
     if (!fork || !onPatch) return;
     const node = layout.nodes.find((candidate) => candidate.id === fork.nodeId);
@@ -377,7 +380,7 @@ export default function BranchGraph({
   }, [chrome]);
 
   return (
-    <section className="ed-graph bg-graph" style={{ height, width: "100%" }} aria-label="分支图">
+    <section className="ed-graph bg-graph" style={{ height, width: "100%" }} aria-label={tr("editor.panel.branchAriaFallback", undefined, "分支图")}>
       <header className="ed-graph-head bg-chrome" data-chrome="branch" data-active={chrome?.active ? "1" : "0"}
         onClick={chrome?.onSelect}
         onKeyDown={(event) => { if (event.key === "Enter") chrome?.onSelect?.(); }}
@@ -385,15 +388,15 @@ export default function BranchGraph({
         tabIndex={chrome?.onSelect ? 0 : undefined}
       >
         <span className="bg-role-chip" data-branch-role="legend" aria-hidden="true" />
-        <span className="ed-graph-title">{chrome?.title ?? "分支图"}</span>
+        <span className="ed-graph-title">{chrome?.title ?? tr("editor.panel.branchAriaFallback", undefined, "分支图")}</span>
         <span className="ed-graph-stat">
           {hasChoice
-            ? `${graph.stats.decisions} 决策 · ${layout.lanes.length} 线路 · ${graph.stats.merges} 合流`
-            : "还没有分支"}
+            ? tr("editor.branch.decisionSummary", { decisions: graph.stats.decisions, lanes: layout.lanes.length, merges: graph.stats.merges }, `${graph.stats.decisions} 决策 · ${layout.lanes.length} 线路 · ${graph.stats.merges} 合流`)
+            : tr("editor.branch.noBranches", undefined, "还没有分支")}
         </span>
         <span className="ed-graph-legend" data-branch-legend="1">
           {layout.lanes.slice(0, 6).map((lane) => (
-            <span key={lane.id} className="ed-graph-legend-item" title={`${lane.value}：${lane.label}`}>
+            <span key={lane.id} className="ed-graph-legend-item" title={tr("editor.branch.laneTitle", { value: lane.value, label: lane.label }, `${lane.value}：${lane.label}`)}>
               <i style={{ background: colorOf({ role: "node", lane: lane.id } as LayoutNode) }} />
               {`${lane.value}:${lane.label.slice(0, 8)}`}
             </span>
@@ -406,30 +409,30 @@ export default function BranchGraph({
           type="button"
           className="bg-fit"
           data-branch-action="fit"
-          title="适配窗口（快捷键 0）"
+          title={tr("editor.branch.fitTitle", undefined, "适配窗口（快捷键 0）")}
           onClick={fit}
         >
-          ⤢ 适配
+          {tr("editor.branch.fit", undefined, "⤢ 适配")}
         </button>
         <button
           type="button"
           className="bg-fold"
           data-branch-action="fold"
           onClick={toggleFold}
-          title={hidden ? "展开分支图" : "收起分支图"}
+          title={hidden ? tr("editor.branch.expandTitle", undefined, "展开分支图") : tr("editor.branch.collapseTitle", undefined, "收起分支图")}
           aria-expanded={!hidden}
-          aria-label={`${hidden ? "展开" : "收起"}${chrome?.ariaLabel || "分支图"}`}
+          aria-label={`${hidden ? tr("editor.toolbar.foldShow", undefined, "展开") : tr("editor.toolbar.foldHide", undefined, "收起")}${chrome?.ariaLabel || tr("editor.panel.branchAriaFallback", undefined, "分支图")}`}
         >
           {hidden ? "▸" : "▾"}
         </button>
         {onClose ? (
-          <button type="button" className="ed-graph-close" onClick={onClose} aria-label="关闭分支图">✕</button>
+          <button type="button" className="ed-graph-close" onClick={onClose} aria-label={tr("editor.branch.close", undefined, "关闭分支图")}>✕</button>
         ) : null}
       </header>
 
       {graph.degraded ? (
         <p className="ed-graph-warn" role="status">
-          {`分支结构较复杂，图上可能只展开了部分线路${graph.stats.degradedReasons[0] ? `（${graph.stats.degradedReasons[0]}）` : ""}`}
+          {tr("editor.branch.degraded", { reason: graph.stats.degradedReasons[0] ? `（${graph.stats.degradedReasons[0]}）` : "" }, `分支结构较复杂，图上可能只展开了部分线路${graph.stats.degradedReasons[0] ? `（${graph.stats.degradedReasons[0]}）` : ""}`)}
         </p>
       ) : null}
 
@@ -449,7 +452,7 @@ export default function BranchGraph({
             data-branch-zoom={r(current.zoom)}
             width="100%"
             height="100%"
-            aria-label="分支图（按 Decision / Predicate 画剧情走向）"
+            aria-label={tr("editor.branch.graphAria", undefined, "分支图（按 Decision / Predicate 画剧情走向）")}
           >
             <defs>
               <marker id="bg-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
@@ -488,7 +491,7 @@ export default function BranchGraph({
                         <g className="bg-edge-label" transform={`translate(${r(edge.anchor.x)} ${r(edge.anchor.y)})`}>
                           <rect x={-30} y={-11} width={60} height={17} rx={4} className="bg-edge-label-bg" />
                           <text className="bg-edge-label-text" textAnchor="middle" y={1.5}>{edge.label.slice(0, 8)}</text>
-                          <title>{`${edge.label}（value=${edge.value ?? "—"}）`}</title>
+                          <title>{tr("editor.branch.edgeTitle", { label: edge.label, value: edge.value ?? "—" }, `${edge.label}（value=${edge.value ?? "—"}）`)}</title>
                         </g>
                       ) : null}
                     </g>
@@ -537,7 +540,7 @@ export default function BranchGraph({
                       ) : (
                         <text className="bg-summary" x={14} y={46}>{node.summary}</text>
                       )}
-                      {isMerged ? <text className="bg-merge-tag" x={node.w - 12} y={58} textAnchor="end">合流</text> : null}
+                      {isMerged ? <text className="bg-merge-tag" x={node.w - 12} y={58} textAnchor="end">{tr("editor.branch.mergeTag", undefined, "合流")}</text> : null}
                       <circle
                         className={`bg-state bg-state-${isMerged ? "done" : active ? "active" : "idle"}`}
                         cx={node.w - 11}
@@ -558,40 +561,42 @@ export default function BranchGraph({
           </svg>
 
           {!hasChoice ? (
-            <p className="ed-graph-empty bg-empty" data-branch-empty="1" role="status">{EMPTY_HINT}</p>
+            <p className="ed-graph-empty bg-empty" data-branch-empty="1" role="status">{tr("editor.branch.emptyHint", undefined, EMPTY_HINT_DEFAULT)}</p>
           ) : null}
           {layout.degenerate ? (
-            <p className="bg-hint" data-branch-hint="degenerate">节点较多，已退化为一列排布；可滚轮缩放后拖动查看。</p>
+            <p className="bg-hint" data-branch-hint="degenerate">{tr("editor.branch.degenerateHint", undefined, "节点较多，已退化为一列排布；可滚轮缩放后拖动查看。")}</p>
           ) : null}
         </div>
       </div>
 
       {hidden ? (
-        <p className="ed-graph-empty" data-branch-hidden="1">{`${chrome?.title ?? "分支图"}已收起（点 ▸ 展开）`}</p>
+        <p className="ed-graph-empty" data-branch-hidden="1">{tr("editor.branch.collapsed", { title: chrome?.title ?? tr("editor.panel.branchAriaFallback", undefined, "分支图") }, `${chrome?.title ?? "分支图"}已收起（点 ▸ 展开）`)}</p>
       ) : null}
 
       <div className="ed-graph-actions">
         <span className="ed-graph-hint">
-          {selectedNode ? `选中 #${selectedNode.range[0]}：${selectedNode.title}` : "点卡片跳行 · 拖空白平移 · 滚轮缩放 · 0 / ⤢ 适配"}
+          {selectedNode
+            ? tr("editor.branch.selection", { line: selectedNode.range[0], title: selectedNode.title }, `选中 #${selectedNode.range[0]}：${selectedNode.title}`)
+            : tr("editor.branch.hint", undefined, "点卡片跳行 · 拖空白平移 · 滚轮缩放 · 0 / ⤢ 适配")}
         </span>
         <button
           type="button"
           className="ed-graph-fork"
           data-branch-action="fork"
           disabled={!selectedNode || !onPatch}
-          title={onPatch ? "在选中卡片之后插入一条 Decision（每条线一个 Predicate + 末尾合流闸门）" : "当前为只读（未提供 onPatch）"}
+          title={onPatch ? tr("editor.branch.forkTitle", undefined, "在选中卡片之后插入一条 Decision（每条线一个 Predicate + 末尾合流闸门）") : tr("editor.branch.forkTitleReadOnly", undefined, "当前为只读（未提供 onPatch）")}
           onClick={openFork}
         >
-          ⤳ 在此分叉
+          {tr("editor.branch.forkButton", undefined, "⤳ 在此分叉")}
         </button>
       </div>
 
       {fork ? (
-        <div className="ed-graph-forkbox" role="dialog" aria-label="在此分叉">
+        <div className="ed-graph-forkbox" role="dialog" aria-label={tr("editor.branch.forkDialog", undefined, "在此分叉")}>
           <table>
             <thead>
               <tr>
-                <th>选项文本</th>
+                <th>{tr("editor.branch.forkOptionColumn", undefined, "选项文本")}</th>
                 <th>value</th>
               </tr>
             </thead>
@@ -632,22 +637,22 @@ export default function BranchGraph({
             <button
               type="button"
               onClick={() => setFork((state) => state && state.rows.length < FORK_ROWS_MAX
-                ? { ...state, rows: [...state.rows, { label: `选项${state.rows.length + 1}`, value: Math.max(1, ...state.rows.map((row) => row.value)) + 1 }] }
+                ? { ...state, rows: [...state.rows, { label: tr("editor.branch.forkOptionDefault", { index: state.rows.length + 1 }, `选项${state.rows.length + 1}`), value: Math.max(1, ...state.rows.map((row) => row.value)) + 1 }] }
                 : state)}
               disabled={fork.rows.length >= FORK_ROWS_MAX}
             >
-              + 一行
+              {tr("editor.branch.forkAddRow", undefined, "+ 一行")}
             </button>
             <button
               type="button"
               onClick={() => setFork((state) => state && state.rows.length > FORK_ROWS_MIN ? { ...state, rows: state.rows.slice(0, -1) } : state)}
               disabled={fork.rows.length <= FORK_ROWS_MIN}
             >
-              − 一行
+              {tr("editor.branch.forkRemoveRow", undefined, "− 一行")}
             </button>
             <span className="ed-graph-forkgap" />
-            <button type="button" className="ed-graph-forkcancel" onClick={() => setFork(null)}>取消</button>
-            <button type="button" className="ed-graph-forkok" onClick={confirmFork}>插入</button>
+            <button type="button" className="ed-graph-forkcancel" onClick={() => setFork(null)}>{tr("editor.common.cancel", undefined, "取消")}</button>
+            <button type="button" className="ed-graph-forkok" onClick={confirmFork}>{tr("editor.branch.forkConfirm", undefined, "插入")}</button>
           </div>
         </div>
       ) : null}

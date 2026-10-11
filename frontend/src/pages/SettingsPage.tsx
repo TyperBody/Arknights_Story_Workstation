@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { LOCALES, LOCALE_LABELS, useLocale, setLocale, translate, type Locale } from "../i18n/index.ts";
 import { isDebugConsoleEnabled, setDebugPref, debugBuildDefault } from "../lib/debugSettings";
 import { getPlayerChrome, isHidePlayerBack, setHidePlayerBack, setPlayerChrome, type PlayerChrome } from "../lib/uiSettings";
 import { isAndroid } from "../lib/platform";
@@ -83,6 +84,7 @@ interface ResourceDirInfo {
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const locale = useLocale();
   const hideResourceDir = isAndroid();
   const { start: startPredownload, busy: downloadBusy } = useDownload();
   const compression = useCompression();
@@ -413,6 +415,28 @@ export default function SettingsPage() {
             placeholder="博士"
           />
           <button className="btn-primary" onClick={saveNickname}>保存</button>
+        </div>
+      </div>
+
+      {/* Language — 界面 / 编辑器文案的语言（`prts-language`，与 LangBot 的 `langbot_language` 同形）。 */}
+      <div className="setting-group">
+        <label>{translate(locale, "editor.settings.language", undefined, "语言")}</label>
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+          <select
+            value={locale}
+            aria-label={translate(locale, "editor.settings.language", undefined, "语言")}
+            style={{ minWidth: "200px" }}
+            onChange={(e) => setLocale(e.target.value as Locale)}
+          >
+            {LOCALES.map((id) => (
+              <option key={id} value={id}>
+                {LOCALE_LABELS[id]}
+              </option>
+            ))}
+          </select>
+          <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+            {translate(locale, "editor.settings.languageHint", undefined, "界面与编辑器文案的语言；立即生效，保存在本机。")}
+          </span>
         </div>
       </div>
 

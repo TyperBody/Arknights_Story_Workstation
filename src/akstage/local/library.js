@@ -8,6 +8,10 @@
 // - 浏览器探针：scripts/fanfic/vite-local-library.mjs 注入的虚拟模块
 // 见 .akskills/arkstage-fanfic/reference/package.md。
 
+// 「送引擎前」的缩进归一化与 token 化共用同一份实现（storyPack 是格式契约的
+// 单一来源），避免 library 与打包脚本出现两套 stripIndent。
+import { stripIndentForEngine } from "./storyPack.js";
+
 /**
  * @typedef {object} PackBundleHook
  * @property {{script: string, title: string}} story
@@ -182,14 +186,30 @@ export function mergeTables(upstreamTable, patchTable) {
 export function buildHook(pack, upstream) {
   const bundle = buildPackBundle(pack, upstream);
   if (!bundle) return null;
-  const revision = `fan:${pack.id}:${hash(stripControls(pack.script))}`;
-  return { story: { script: stripControls(pack.script), title: pack.id }, bundle, revision };
+  // 送引擎前归一化（`hash` 与 `revision` —— 与打包脚本 `storyPack.hash32` 同值）。
+  const script = stripControls(pack.script);
+  const revision = `fan:${pack.id}:${hash(script)}`;
+  return { story: { script, title: pack.id }, bundle, revision };
 }
 
 /** @param {string} script @returns {string} */
 export function stripControls(script) {
-  // `[Cmd@tag(...)]` 里的 @tag 只给取景器用；引擎按字面分发，必须去掉。
+  // 两步：先 `[Cmd@tag(...)]` → `[Cmd(...)]`（@tag 只给取景器用），
+  // 再区域缩进归一化。语义见 storyPack.stripIndentForEngine
+  // （只动 `[` 开头的行；`\` 续行与纯旁白原样）。
+  return stripIndentForEngine(cleanTags(script));
+}
+
+/** stripControls 的第一步：`[Cmd@tag(...)]` → `[Cmd(...)]`（单独导出便于对拍）。 */
+/** @param {string} script @returns {string} */
+export function cleanTags(script) {
   return String(script ?? "").replace(/\[\s*([A-Za-z_]\w*)@[A-Za-z0-9_-]+\s*(?=[\](])/g, "[$1");
+}
+
+/** 只做区域缩进归一化（不去 `@tag`）；`\` 续行与纯旁白行原样。 */
+/** @param {string} script @returns {string} */
+export function stripIndent(script) {
+  return stripIndentForEngine(script);
 }
 
 /** 剧本里出现的上游素材域名（本地素材用 `local.arkstage.invalid`）。 */

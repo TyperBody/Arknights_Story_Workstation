@@ -226,7 +226,47 @@ Yayin Story Studio / ASERStudio 的 AStorySyntax 思路）——左侧行号 + �
 
 诊断带**字符区间**（编辑器里画波浪线）与"修法"提示；控制器面板按 YSS 式分类
 （背景 / 立绘 / 对白 / 停顿 / 遮罩 / 镜头 / 字幕 / 音乐 / 音效 / 选择 / 分支收尾…）点击即可插入骨架。
-内核回归：`npm run test:editor`（编辑器内核 153 条断言 + 文档↔引擎参数对齐自检）。
+内核回归：`npm run test:editor`（编辑器内核 168 + 文档 + 表单 149 + **区域缩进 114**）。
+
+### 区域缩进（`Decision` 分支体不再手敲空格）
+
+用户原话：编辑器页面「大多数是字符，不方便中文用户入手」。区域缩进把
+`[Decision]` / `[Predicate]` 的分支体排成层级，**只影响可读性、不影响播放**：
+
+```
+[Decision(options="跟着她走;先问清楚", values="1;2")]
+  [Predicate(references="1")]
+    [charslot(slot="m", name="char_002_amiya_1#1", duration=0.5)]
+    [name="阿米娅"]  这边走，博士。
+  [Predicate(references="2")]
+    [name="阿米娅"]  先别急，我把情况说清楚。
+[End]
+```
+
+层级约定（`regionIndentPlan`，两空格一级）：
+
+| 行 | 缩进 |
+|---|---|
+| `[Decision]` / `[End]` / `[endtip]` | 顶格（0） |
+| `[Predicate(references=…)]`（线路头，含合流） | 1 级 |
+| 线路体（该 `Predicate` 之后，到下一条线路/合流/`[End]`/EOF） | 2 级 |
+
+- **编辑器容忍**：行首空格/Tab 在 `parseLine` / `parseScript` / `lintScript` 里等价于
+  "不存在"——缩进版与顶格版给出**同一** kind 序列、同一组诊断（span 整体平移），
+  缩进的指令行不再报 `NarrationLine`。`ParseResult.leading` 挂出行首空白。
+- **送引擎前归一化**：`storyPack.stripIndentForEngine`（`library.stripControls` 会调）
+  只对去缩进后以 `[` 开头的行去行首空白；**纯旁白行原样**（行首空白是展示文本的
+  一部分），**`\` 续行的物理行**同样原样（由 `[` 行拼掉）。因此 `buildHook` 产出的
+  `story.script` 与顶格版**逐字节相等**，`revision` 也一致。
+- **Tab / 奇数格缩进**：`UseSpaceInsteadTab`（0x100C）对**行首 Tab** 保留提示，
+  但降级为提示级；`BadIndentation`（0x1019）提示"宽度不是 2 的整数倍"。
+  引擎本身（`parser.ts` 的 `commandRegex` 无 `m`、`logicalLines` 不 trim）会把
+  缩进指令行当旁白，所以归一化是播放正确性的必要条件，不只是美化。
+- 纯函数：`editorModel.indentLines(text, from, to, "indent"|"outdent")`（区间缩进，
+  只动行首空白，往返幂等）与 `editorModel.regionIndentPlan(text)`（整段分层重排，幂等）。
+- 回归：`node scripts/fanfic/editorIndent-selftest.mjs`（114 断言：解析容忍 /
+  诊断对拍 / 归一化逐字节 / `buildHook` / `indentLines` / `regionIndentPlan` 层级与
+  幂等 / demo `runtime.json` 的 `story.script` 对拍）。
 
 ### 演出动效（为什么"动画好奇怪"）
 

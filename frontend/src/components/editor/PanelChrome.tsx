@@ -13,6 +13,7 @@
  * - 纯 DOM/CSS，零依赖；class 命名与 `StagePane` 的 `.sp-*` 前缀一致，`bg-*` 由内容组件自带。
  */
 
+import { useT } from "../../i18n/index.ts";
 import type { PanelChromeProps } from "./inspectorWindow";
 
 export interface PanelChromeViewProps {
@@ -51,13 +52,17 @@ export function PanelFold({
   className?: string;
 }) {
   const visible = chrome.visible !== false;
+  const tr = useT();
+  const fold = visible
+    ? tr("editor.toolbar.foldHide", undefined, "收起")
+    : tr("editor.toolbar.foldShow", undefined, "展开");
   return (
     <button
       type="button"
       className={className}
       onClick={chrome.onToggle}
-      title={visible ? "收起" : "展开"}
-      aria-label={chrome.ariaLabel ? `${visible ? "收起" : "展开"}${chrome.ariaLabel}` : visible ? "收起" : "展开"}
+      title={fold}
+      aria-label={chrome.ariaLabel ? `${fold}${chrome.ariaLabel}` : fold}
       aria-expanded={visible}
     >
       {visible ? "▾" : "▸"}

@@ -22,6 +22,7 @@ import {
   type FormField,
   type Preset,
 } from "../../../../src/akstage/local/editorForms.js";
+import { useT } from "../../i18n/index.ts";
 
 /** 页面传过来的 props（与 `StoryEditorPage` 里的 `ControllerWizardProps` 对齐）。 */
 export interface ControllerWizardProps {
@@ -183,6 +184,7 @@ function WizardField(props: {
   onChange: (value: unknown) => void;
 }): ReactNode {
   const { field, value, assets, onChange } = props;
+  const tr = useT();
   const disabled = !field.engineRead;
   const options = field.options ?? [];
   const pool = useMemo(
@@ -194,7 +196,7 @@ function WizardField(props: {
   if (field.type === "note") {
     return (
       <div style={{ ...S.note, marginBottom: 8 }}>
-        <strong>{field.label}</strong>：{field.hint}
+        <strong>{field.label}</strong>{tr("editor.inspector.colon", undefined, "：")}{field.hint}
       </div>
     );
   }
@@ -210,7 +212,7 @@ function WizardField(props: {
           onChange={(event) => onChange(event.target.checked)}
           style={{ width: 32, height: 16, accentColor: "var(--accent)" }}
         />
-        <span style={S.dim}>{value === true ? "开" : "关"}</span>
+        <span style={S.dim}>{value === true ? tr("editor.common.on", undefined, "开") : tr("editor.common.off", undefined, "关")}</span>
       </label>
     );
   } else if (field.type === "number") {
@@ -238,8 +240,8 @@ function WizardField(props: {
           disabled={disabled}
           onChange={(event) => onChange(event.target.value === "" ? 0 : Number(event.target.value))}
         />
-        <span style={S.chip} title="范围来自官方语料实测">
-          {range ? `${range[0]}–${range[1]}` : field.constant !== undefined ? `恒为 ${field.constant}` : "手输"}
+        <span style={S.chip} title={tr("editor.common.rangeTitle", undefined, "范围来自官方语料实测")}>
+          {range ? `${range[0]}–${range[1]}` : field.constant !== undefined ? tr("editor.common.alwaysShort", { value: field.constant }, `恒为 ${field.constant}`) : tr("editor.common.manual", undefined, "手输")}
         </span>
       </div>
     );
@@ -253,7 +255,7 @@ function WizardField(props: {
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
         >
-          <option value="">（未设置）</option>
+          <option value="">{tr("editor.common.unset", undefined, "（未设置）")}</option>
           {options.map((option) => (
             <option key={option} value={option}>
               {option}
@@ -276,7 +278,7 @@ function WizardField(props: {
           />
           {pool.length > 0 && (
             <button type="button" style={S.btnGhost} onClick={() => setPicker((open) => !open)}>
-              从素材里选
+              {tr("editor.common.pickFromAssets", undefined, "从素材里选")}
             </button>
           )}
         </div>
@@ -319,7 +321,7 @@ function WizardField(props: {
       <input
         style={S.input}
         value={toText(value)}
-        placeholder={field.separator ? `多个值用 ${field.separator} 分隔` : field.hint}
+        placeholder={field.separator ? tr("editor.common.multiValue", { separator: field.separator }, `多个值用 ${field.separator} 分隔`) : field.hint}
         onChange={(event) => onChange(event.target.value)}
       />
     );
@@ -335,8 +337,8 @@ function WizardField(props: {
         {control}
         <div style={S.note}>
           <code>{field.name}</code>
-          {field.engineRead ? "" : ` · ${field.reason ?? "引擎不读"}`}
-          {field.corpusCount ? ` · 语料 ${field.corpusCount} 次` : ""}
+          {field.engineRead ? "" : ` · ${field.reason ?? tr("editor.common.engineIgnored", undefined, "引擎不读")}`}
+          {field.corpusCount ? ` · ${tr("editor.common.corpusCount", { count: field.corpusCount }, `语料 ${field.corpusCount} 次`)}` : ""}
         </div>
       </div>
     </div>
@@ -348,6 +350,7 @@ function WizardField(props: {
  */
 export default function ControllerWizard(props: ControllerWizardProps): ReactNode {
   const { model = null, open = true, onClose, onInsert, initialCommand, assets } = props;
+  const tr = useT();
   const groups = useMemo(() => catalogByCategory(model), [model]);
   const [query, setQuery] = useState("");
 
@@ -473,19 +476,19 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
 
   const wanted = query.trim().toLowerCase();
   const filtered = wanted
-    ? { "搜索结果": groups.flatMap((group) => group.items).filter((item) => item.search.includes(wanted)) }
+    ? { [tr("editor.wizard.searchGroup", undefined, "搜索结果")]: groups.flatMap((group) => group.items).filter((item) => item.search.includes(wanted)) }
     : Object.fromEntries(groups.map((group) => [group.label, category && group.category !== category ? [] : group.items]));
 
   return (
     <div style={{ ...S.wrap, outline: "none" }} data-editor-part="wizard-body" tabIndex={-1} onKeyDown={onKeyDown}>
       <div style={S.head}>
-        <span style={S.title}>插入控制器</span>
-        <span style={S.dim}>分类 → 指令 → 参数 → 预览</span>
+        <span style={S.title}>{tr("editor.toolbar.wizardOpen", undefined, "插入控制器…").replace(/…$/, "")}</span>
+        <span style={S.dim}>{tr("editor.wizard.steps", undefined, "分类 → 指令 → 参数 → 预览")}</span>
         <span style={{ flex: 1 }} />
-        <span style={S.dim}>Ctrl+Enter 插入 · Esc 关闭</span>
+        <span style={S.dim}>{tr("editor.wizard.shortcuts", undefined, "Ctrl+Enter 插入 · Esc 关闭")}</span>
         {onClose && (
           <button type="button" style={S.btnGhost} onClick={onClose}>
-            关闭
+            {tr("editor.preview.close", undefined, "关闭")}
           </button>
         )}
       </div>
@@ -495,7 +498,7 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
           <input
             autoFocus
             style={S.search}
-            placeholder="搜索命令（如 character / 立绘 / delay）"
+            placeholder={tr("editor.wizard.searchPlaceholder", undefined, "搜索命令（如 character / 立绘 / delay）")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -514,8 +517,8 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
                     >
                       <code style={{ fontSize: 12 }}>{item.canonical}</code>
                       <span style={S.dim}>
-                        {item.requiredCount} 必填 · {item.optionalCount} 可选
-                        {item.engineReadCount === 0 ? " · 运行时未注册" : ""}
+                        {tr("editor.wizard.requiredOptional", { required: item.requiredCount, optional: item.optionalCount }, `${item.requiredCount} 必填 · ${item.optionalCount} 可选`)}
+                        {item.engineReadCount === 0 ? ` · ${tr("editor.inspector.notRegistered", undefined, "运行时未注册")}` : ""}
                       </span>
                     </button>
                   ))}
@@ -523,14 +526,14 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
               ),
             )}
             {Object.values(filtered).every((items) => items.length === 0) && (
-              <div style={S.note}>没有匹配的命令。</div>
+              <div style={S.note}>{tr("editor.wizard.noMatch", undefined, "没有匹配的命令。")}</div>
             )}
           </div>
         </div>
 
         <div style={S.right}>
           <div style={S.body}>
-            {!form && <div style={S.note}>左侧挑一条控制器。</div>}
+            {!form && <div style={S.note}>{tr("editor.wizard.pickLeft", undefined, "左侧挑一条控制器。")}</div>}
             {form && (
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -542,9 +545,9 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
                       style={S.select}
                       value={presetIndex}
                       onChange={(event) => applyPreset(Number(event.target.value))}
-                      title="模板：参数取自真实语料行（含命名写法与高频写法）"
+                      title={tr("editor.wizard.presetTitle", undefined, "模板：参数取自真实语料行（含命名写法与高频写法）")}
                     >
-                      <option value={-1}>预设…</option>
+                      <option value={-1}>{tr("editor.common.preset", undefined, "预设…")}</option>
                       {presets.map((preset, index) => (
                         <option key={preset.name} value={index}>
                           {preset.name}
@@ -555,7 +558,7 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
                 </div>
                 {spec && spec.runtimeRegistered === false && (
                   <div style={{ ...S.note, color: "var(--error)", marginBottom: 6 }}>
-                    运行时没有注册这条指令：写了会被 warn 跳过；用于离线编辑/占位。
+                    {tr("editor.wizard.notRegistered", undefined, "运行时没有注册这条指令：写了会被 warn 跳过；用于离线编辑/占位。")}
                   </div>
                 )}
                 {form.fields.map((field) => (
@@ -571,8 +574,8 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
             )}
           </div>
           <div style={{ padding: "0 14px 10px" }}>
-            <div style={{ ...S.note, marginBottom: 3 }}>预览：</div>
-            <pre style={S.preview}>{preview || "（先选一条控制器）"}</pre>
+            <div style={{ ...S.note, marginBottom: 3 }}>{tr("editor.wizard.previewLabel", undefined, "预览：")}</div>
+            <pre style={S.preview}>{preview || tr("editor.wizard.pickFirst", undefined, "（先选一条控制器）")}</pre>
           </div>
         </div>
       </div>
@@ -580,14 +583,14 @@ export default function ControllerWizard(props: ControllerWizardProps): ReactNod
       <div style={S.foot}>
         <span style={{ ...S.note, flex: 1 }}>
           {form
-            ? `${presetIndex >= 0 ? "按语料模板插入" : "按当前参数插入"}：${preview.split("\n").length} 行`
-            : "未选择"}
+            ? `${presetIndex >= 0 ? tr("editor.wizard.insertByPreset", undefined, "按语料模板插入") : tr("editor.wizard.insertByFields", undefined, "按当前参数插入")}${tr("editor.inspector.colon", undefined, "：")}${tr("editor.wizard.lineCount", { count: preview.split("\n").length }, `${preview.split("\n").length} 行`)}`
+            : tr("editor.wizard.notSelected", undefined, "未选择")}
         </span>
         <button type="button" style={S.btnGhost} onClick={onClose} disabled={!onClose}>
-          取消
+          {tr("editor.common.cancel", undefined, "取消")}
         </button>
         <button type="button" style={S.btn} onClick={insert} disabled={!onInsert || !form}>
-          {presetIndex >= 0 ? "插入为模板" : "插入"}
+          {presetIndex >= 0 ? tr("editor.common.insertAsPreset", undefined, "插入为模板") : tr("editor.branch.forkConfirm", undefined, "插入")}
         </button>
       </div>
     </div>

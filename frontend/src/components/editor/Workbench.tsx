@@ -52,6 +52,7 @@ import {
   type WorkbenchState,
   type Zone,
 } from "./workbenchStack.ts";
+import { useT } from "../../i18n/index.ts";
 
 /** 拖动多少像素才算「拖起来了」：`workbenchLayout.WB_DRAG_THRESHOLD`。 */
 const DRAG_THRESHOLD = WB_DRAG_THRESHOLD;
@@ -127,6 +128,7 @@ export default function Workbench({
   layoutName = "default",
   onHide,
 }: WorkbenchProps) {
+  const tr = useT();
   const rootRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const gutterRef = useRef<GutterSession | null>(null);
@@ -325,7 +327,7 @@ export default function Workbench({
             data-wb-dir={splitDir}
             role="separator"
             aria-orientation={splitDir === "row" ? "vertical" : "horizontal"}
-            title="拖动调整比例 · 双击复位 50/50"
+            title={tr("editor.workbench.gutterTitle", undefined, "拖动调整比例 · 双击复位 50/50")}
             onDoubleClick={() => resetSplit(path)}
           />
           <div className="wb-slot" style={slotStyle(1 - node.share, secondMin, splitDir)} data-wb-slot="1">
@@ -391,14 +393,14 @@ export default function Workbench({
       )}
       {minimized.length > 0 && (
         <div className="wb-min-strip" data-wb-min-strip="1">
-          <span className="wb-min-label">收起</span>
+          <span className="wb-min-label">{tr("editor.toolbar.foldHide", undefined, "收起")}</span>
           {minimized.map((id) => (
             <button
               key={id}
               type="button"
               className="wb-min-item"
               data-wb-min={id}
-              title={`把「${titleOf(id)}」放回工作台（右侧分屏）`}
+              title={tr("editor.workbench.restoreTitle", { title: titleOf(id) }, `把「${titleOf(id)}」放回工作台（右侧分屏）`)}
               onClick={() => {
                 const next = restore(tree, id, "root", "right");
                 onState(next);
@@ -413,9 +415,9 @@ export default function Workbench({
               type="button"
               className="wb-min-clear"
               onClick={() => minimized.forEach((id) => onHide(id))}
-              title="清空收起项"
+              title={tr("editor.workbench.clearTitle", undefined, "清空收起项")}
             >
-              清空
+              {tr("editor.workbench.clear", undefined, "清空")}
             </button>
           )}
         </div>

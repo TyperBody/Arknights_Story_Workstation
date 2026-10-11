@@ -11,6 +11,7 @@ import {
   type LazyExoticComponent,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { t, useT } from "../i18n/index.ts";
 import InspectorWindow, { type WindowState } from "../components/editor/InspectorWindow";
 import { registerWindowSpecs, type PanelChromeProps } from "../components/editor/inspectorWindow";
 import Workbench from "../components/editor/Workbench";
@@ -161,7 +162,7 @@ function completionLine(item: Completion): string {
 function lineLabel(text: string, line: number): string {
   const raw = text.split("\n")[line - 1] ?? "";
   const trimmed = raw.trim();
-  if (!trimmed) return `${line}: （空行）`;
+  if (!trimmed) return `${line}: ${t("editor.diagnostics.emptyLine", undefined, "（空行）")}`;
   return `${line}: ${trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed}`;
 }
 
@@ -274,6 +275,84 @@ interface EditorModel {
   completions: (prefix: string | undefined, context: unknown) => Completion[];
   formatLine?: (command: string, values: Record<string, unknown>) => string;
   hoverFor?: (text: string, offset: number) => HoverInfo | null;
+  /** 区间缩进 / 反缩进（`editorModel.indentLines`，两格一级）。 */
+  indentLines?: (
+    text: string,
+    from: number,
+    to: number,
+    direction: "indent" | "outdent" | 1 | -1
+  ) => { text: string; caret?: { from: number; to: number }; lines?: number };
+  /** `[Decision]` 区域整段重排（`editorModel.regionIndentPlan`）。 */
+  regionIndentPlan?: (text: string) => { text: string; changed?: number; lines?: number };
+}
+
+/** 「区域缩进」的降级实现：模型缺失（/ 半截）时也能用；模型就绪后以模型为准。
+ *
+ * 只改行首空白，所以与 `editorModel` 的语义一致：`Decision` 顶格、它的
+ * `Predicate` 一级、线路体两级；`indent`/`outdent` 一格 = 两个空格。 */
+const INDENT_UNIT = "  ";
+
+function fallbackRegionIndent(text: string): { text: string; changed: number; lines: number } {
+  const rows = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  let inside = false;
+  let level = 0;
+  let changed = 0;
+  const out = rows.map((line) => {
+    const bare = line.replace(/^[ \t]+/, "");
+    if (!bare.trim()) return line;
+    const head = bare.startsWith("[") ? bare.slice(1, bare.indexOf("]") === -1 ? undefined : bare.indexOf("]")) : "";
+    const name = /^\s*name\s*=/.test(head)
+      ? "dialog"
+      : (head.includes("(") ? head.slice(0, head.indexOf("(")) : head).split("@")[0].trim().toLowerCase();
+    if (name === "decision") { inside = true; level = 0; }
+    else if (name === "predicate") { inside = true; level = 1; }
+    else if (name === "end" || name === "endtip") { inside = false; level = 0; }
+    const want = name === "decision" || name === "end" || name === "endtip"
+      ? 0
+      : name === "predicate"
+        ? 1
+        : inside
+          ? level + 1
+          : 0;
+    const target = INDENT_UNIT.repeat(want) + bare;
+    if (target !== line) changed += 1;
+    return target;
+  });
+  return { text: out.join("\n"), changed, lines: rows.length };
+}
+
+/** 降级版区间缩进：`[from, to)` 覆盖的整行 ± 一格（`to` 落下一行行首不含下一行）。 */
+function fallbackIndentLines(
+  text: string,
+  from: number,
+  to: number,
+  direction: "indent" | "outdent" | 1 | -1
+): { text: string; caret: { from: number; to: number }; lines: number } {
+  const src = String(text ?? "");
+  const clampAt = (value: number) => Math.max(0, Math.min(src.length, Math.trunc(Number(value) || 0)));
+  const lo = Math.min(clampAt(from), clampAt(to));
+  const hi = Math.max(clampAt(from), clampAt(to));
+  const grow = direction === "indent" || Number(direction) === 1;
+  const first = src.lastIndexOf("\n", Math.max(0, lo - 1)) + 1;
+  const anchor = hi > lo ? hi - 1 : lo;
+  let last = src.indexOf("\n", Math.min(anchor, src.length));
+  if (last === -1) last = src.length;
+  let lines = 0;
+  const body = src.slice(first, last).split("\n").map((line) => {
+    lines += 1;
+    if (grow) return INDENT_UNIT + line;
+    const lead = /^[ \t]+/.exec(line)?.[0] ?? "";
+    if (!lead) return line;
+    let used = 0;
+    let width = 0;
+    for (const ch of lead) {
+      if (width >= INDENT_UNIT.length) break;
+      width += ch === "\t" ? 4 : 1;
+      used += 1;
+    }
+    return line.slice(used);
+  });
+  return { text: src.slice(0, first) + body.join("\n") + src.slice(last), caret: { from: lo, to: hi }, lines };
 }
 
 /**
@@ -293,6 +372,8 @@ function adaptModel(mod: Record<string, unknown>): EditorModel | null {
     : [];
   const hoverFor = mod.hoverFor;
   const formatLine = mod.formatLine;
+  const indentLines = mod.indentLines;
+  const regionIndentPlan = mod.regionIndentPlan;
   return {
     CONTROLLERS: controllers,
     CATEGORY_LABELS: (mod.CATEGORY_LABELS as Record<string, string>) ?? undefined,
@@ -303,6 +384,9 @@ function adaptModel(mod: Record<string, unknown>): EditorModel | null {
         .map(normalizeCompletion),
     formatLine: typeof formatLine === "function" ? (formatLine as EditorModel["formatLine"]) : undefined,
     hoverFor: typeof hoverFor === "function" ? (hoverFor as EditorModel["hoverFor"]) : undefined,
+    indentLines: typeof indentLines === "function" ? (indentLines as EditorModel["indentLines"]) : undefined,
+    regionIndentPlan:
+      typeof regionIndentPlan === "function" ? (regionIndentPlan as EditorModel["regionIndentPlan"]) : undefined,
   };
 }
 
@@ -394,9 +478,9 @@ type StageBackground = string | { key?: string; url?: string | null } | null;
 
 /** 背景的可读文案（占位行/状态栏用；对象也只取 key）。 */
 function backgroundLabel(background: StageBackground): string {
-  if (!background) return "（无）";
+  if (!background) return t("editor.stage.none", undefined, "（无）");
   if (typeof background === "string") return background;
-  return background.key ?? "（无）";
+  return background.key ?? t("editor.stage.none", undefined, "（无）");
 }
 
 /**
@@ -669,7 +753,7 @@ function stageStateAt(lines: string[], upto: number): { chars: StageChar[]; back
       slot,
       x: rawX > STAGE_LIMIT_X || rawX < -STAGE_LIMIT_X ? rawX - STAGE_W / 2 : rawX,
       y: rawY > STAGE_LIMIT_Y || rawY < -STAGE_LIMIT_Y ? rawY - STAGE_H * 0.78 : rawY,
-      label: `${i + 1} 行`,
+      label: t("editor.scrub.lineTooltip", { line: i + 1 }, `${i + 1} 行`),
     });
   }
   return { chars: [...slots.values()].sort((a, b) => a.slot.localeCompare(b.slot)), background };
@@ -761,7 +845,7 @@ function fallbackLint(text: string, controllers: ControllerMeta[] | null): Model
         code: 1002,
         name: "unknown-controller",
         severity: "warning",
-        message: `未知控制器：${match[1]}`,
+        message: t("editor.diagnostics.unknownController", { name: match[1] }, `未知控制器：${match[1]}`),
         line: index + 1,
         from: 1,
         to: 1 + match[1].length,
@@ -772,7 +856,7 @@ function fallbackLint(text: string, controllers: ControllerMeta[] | null): Model
         code: 1009,
         name: "unclosed-symbol",
         severity: "error",
-        message: "指令行没有闭合的 `]`",
+        message: t("editor.diagnostics.unclosed", undefined, "指令行没有闭合的 `]`"),
         line: index + 1,
         from: 0,
         to: line.length,
@@ -971,6 +1055,7 @@ export default function StoryEditorPage() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "empty">("loading");
   const [error, setError] = useState("");
   const [tab, setTab] = useState<TabKey>("diag");
+  const tr = useT();
   const [lintNonce, setLintNonce] = useState(0);
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [hover, setHover] = useState<{ info: HoverInfo; x: number; y: number } | null>(null);
@@ -1164,7 +1249,7 @@ export default function StoryEditorPage() {
       if (script === null) {
         setText("");
         setLoadState("empty");
-        setError(`剧本包「${id}」里找不到 script.txt 或 source/probe.txt；可直接在这里开始写，保存会创建 script.txt。`);
+        setError(tr("editor.error.noScript", { id }, `剧本包「${id}」里找不到 script.txt 或 source/probe.txt；可直接在这里开始写，保存会创建 script.txt。`));
         return;
       }
       setText(script);
@@ -1174,9 +1259,9 @@ export default function StoryEditorPage() {
     } catch (e) {
       setText("");
       setLoadState("empty");
-      setError(`读取剧本包失败：${errText(e)}`);
+      setError(tr("editor.error.readPack", { error: errText(e) }, `读取剧本包失败：${errText(e)}`));
     }
-  }, [id, resetHistory, search]);
+  }, [id, resetHistory, search, tr]);
 
   useEffect(() => {
     void loadPack();
@@ -1677,7 +1762,7 @@ export default function StoryEditorPage() {
   const doSave = useCallback(async () => {
     if (!id) return;
     if (!inTauri()) {
-      setError("纯浏览器里是只读演示：保存请在桌面应用内打开本页。");
+      setError(tr("editor.error.readOnlyDemo", undefined, "纯浏览器里是只读演示：保存请在桌面应用内打开本页。"));
       setDirty(false);
       return;
     }
@@ -1702,17 +1787,17 @@ export default function StoryEditorPage() {
         setRawMeta(merged);
         setOriginalMeta(meta);
       }
-      setPreviewStatus(`已保存 ${target}（${result.bytes} 字节）`);
+      setPreviewStatus(tr("editor.saved.text", { target, bytes: result.bytes }, `已保存 ${target}（${result.bytes} 字节）`));
     } catch (e) {
-      setError(`保存失败：${errText(e)}`);
+      setError(tr("editor.error.save", { error: errText(e) }, `保存失败：${errText(e)}`));
     } finally {
       setBusy("");
     }
-  }, [id, meta, metaChanged, rawMeta, sourceName, writeFile]);
+  }, [id, meta, metaChanged, rawMeta, sourceName, writeFile, tr]);
 
   const saveMetaOnly = useCallback(async () => {
     if (!inTauri()) {
-      setError("纯浏览器里是只读演示：保存请在桌面应用内打开本页。");
+      setError(tr("editor.error.readOnlyDemo", undefined, "纯浏览器里是只读演示：保存请在桌面应用内打开本页。"));
       return;
     }
     setBusy("meta");
@@ -1726,13 +1811,13 @@ export default function StoryEditorPage() {
       await writeFile("pack.json", `${JSON.stringify(merged, null, 1)}\n`, true);
       setRawMeta(merged);
       setOriginalMeta(meta);
-      setPreviewStatus("已保存 pack.json");
+      setPreviewStatus(tr("editor.saved.meta", undefined, "已保存 pack.json"));
     } catch (e) {
-      setError(`保存剧本信息失败：${errText(e)}`);
+      setError(tr("editor.error.saveMeta", { error: errText(e) }, `保存剧本信息失败：${errText(e)}`));
     } finally {
       setBusy("");
     }
-  }, [id, meta, rawMeta, writeFile]);
+  }, [id, meta, rawMeta, writeFile, tr]);
 
   const reload = useCallback(() => {
     void loadPack();
@@ -1776,6 +1861,12 @@ export default function StoryEditorPage() {
         rootRef.current?.contains(target) === true;
       const inFormField = tag === "input" || tag === "select" || (tag === "textarea" && target !== taRef.current);
       if (!isEditorish || inFormField) return;
+      if (key === "i" && event.altKey) {
+        // Ctrl/Cmd+Alt+I：整段重排 `[Decision]` 区域（task-5，与页内 textarea 同语义）。
+        event.preventDefault();
+        indentRegion("region");
+        return;
+      }
       if (key === "z" && !event.shiftKey) {
         if (event.altKey) return;
         event.preventDefault();
@@ -1787,7 +1878,7 @@ export default function StoryEditorPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doRedo, doSave, doUndo]);
+  }, [doRedo, doSave, doUndo, indentRegion]);
 
   // 有未保存改动时，关页/刷新给一次浏览器原生确认（不用 window.confirm）。
   useEffect(() => {
@@ -1878,12 +1969,12 @@ export default function StoryEditorPage() {
     const lines = textRef.current.split("\n");
     const cut = upto && upto > 0 ? Math.min(upto, lines.length) : 0;
     setPreviewUpto(cut);
-    setPreviewStatus(cut ? `正在准备预览（截到第 ${cut} 行）…` : "正在准备预览…");
+    setPreviewStatus(cut ? tr("editor.preview.preparingCut", { line: cut }, `正在准备预览（截到第 ${cut} 行）…`) : tr("editor.preview.preparing", undefined, "正在准备预览…"));
     if (!inTauri()) {
       // 浏览器：播放用的 story_player 快照只在 Vite 探针里；没有就得等「PRTS 同步」。
       const probe = await runProbe();
       if (!probe.upstream) {
-        setPreviewStatus("浏览器预览：本地探针里没有 story_player 快照，将走 PRTS 同步（首次较慢）。");
+        setPreviewStatus(tr("editor.preview.noSnapshot", undefined, "浏览器预览：本地探针里没有 story_player 快照，将走 PRTS 同步（首次较慢）。"));
       }
     }
     // 预览 = Map：开演时确保它在工作台里（下一帧才有 iframe 宿主）。
@@ -1900,11 +1991,11 @@ export default function StoryEditorPage() {
       const runtime = await buildPreviewRuntime(script);
       if (previewCancel.current) return;
       const frame = document.createElement("iframe");
-      frame.title = "剧本预览";
+      frame.title = tr("editor.preview.frameTitle", undefined, "剧本预览");
       host.innerHTML = "";
       host.appendChild(frame);
       previewFrame.current = frame;
-      setPreviewStatus("正在初始化演出引擎…");
+      setPreviewStatus(tr("editor.preview.booting", undefined, "正在初始化演出引擎…"));
       await bootEngineInFrame({
         iframe: frame,
         bundle: runtime.bundle as never,
@@ -1917,13 +2008,13 @@ export default function StoryEditorPage() {
       setPreviewLive(true);
       setPreviewStatus(
         cut > 0
-          ? `预览中（截到第 ${cut} 行；编辑后点「重新载入预览」）`
-          : "预览中（编辑后点「重新载入预览」）"
+          ? tr("editor.preview.runningCut", { line: cut }, `预览中（截到第 ${cut} 行；编辑后点「重新载入预览」）`)
+          : tr("editor.preview.running", undefined, "预览中（编辑后点「重新载入预览」）")
       );
     } catch (e) {
-      setPreviewStatus(`预览失败：${errText(e)}`);
+      setPreviewStatus(tr("editor.preview.failed", { error: errText(e) }, `预览失败：${errText(e)}`));
     }
-  }, [buildPreviewRuntime, closePreview, id, runProbe]);
+  }, [buildPreviewRuntime, closePreview, id, runProbe, tr]);
 
   useEffect(() => () => closePreview(), [closePreview]);
 
@@ -1957,17 +2048,17 @@ export default function StoryEditorPage() {
     const labels = model?.CATEGORY_LABELS ?? {};
     const groups = new Map<string, ControllerMeta[]>();
     for (const entry of list) {
-      const category = entry.category || "其他";
+      const category = entry.category || "Other";
       const bucket = groups.get(category) ?? [];
       bucket.push(entry);
       groups.set(category, bucket);
     }
     return [...groups.entries()].map(([category, items]) => ({
       category,
-      label: labels[category] ?? category,
+      label: tr(`editor.category.${category}`, undefined, labels[category] ?? category),
       items,
     }));
-  }, [model]);
+  }, [model, tr]);
 
   /** 把一整行插到光标处（空行整行替换；行尾另起一行；行中就地拼接）。 */
   const insertLineAtCaret = useCallback(
@@ -1999,6 +2090,93 @@ export default function StoryEditorPage() {
       insertLineAtCaret(paletteLine(modelRef.current, entry));
     },
     [insertLineAtCaret]
+  );
+
+  /**
+   * 「区域缩进」（task-5）：把**选区覆盖的行**或 `[Decision]` 所在区域重排成
+   * 层级缩进版。纯函数优先用模型（`editorModel.indentLines` / `regionIndentPlan`），
+   * 模型没就绪时用页面内的同语义降级实现 —— 两者都**只动行首空白**。
+   */
+  const [indentHint, setIndentHint] = useState("");
+
+  const showIndentHint = useCallback((count: number) => {
+    setIndentHint(tr("editor.indent.done", { count }, `已缩进 ${count} 行（播放不受影响）`));
+    window.setTimeout(() => setIndentHint(""), 2400);
+  }, [tr]);
+
+  /** 找光标所在（或最近的）`[Decision]` 起点行号（1 基）；没有就返回 0。 */
+  const decisionLineAt = useCallback((offset: number): number => {
+    const full = textRef.current;
+    const rows = full.split("\n");
+    const start = Math.min(rows.length, Math.max(1, full.slice(0, offset).split("\n").length));
+    const isDecision = (raw: string) => /^\[\s*Decision\b/i.test(raw.replace(/^[ \t]+/, ""));
+    for (let i = start - 1; i >= 0; i -= 1) if (isDecision(rows[i])) return i + 1;
+    for (let i = start - 1; i < rows.length; i += 1) if (isDecision(rows[i])) return i + 1;
+    return 0;
+  }, []);
+
+  /** 缩进区域：`mode="region"` 整段重排；否则对选区 ± 一格。 */
+  const indentRegion = useCallback(
+    (mode: "region" | "indent" | "outdent" = "region") => {
+      const full = textRef.current;
+      const el = taRef.current;
+      const from = el?.selectionStart ?? caret.offset;
+      const to = el?.selectionEnd ?? from;
+      const hasRange = to > from && full.slice(from, to).includes("\n");
+      const api = modelRef.current;
+
+      if (mode === "region" && !hasRange) {
+        const line = decisionLineAt(from);
+        if (!line) {
+          setIndentHint(tr("editor.indent.noDecision", undefined, "光标不在 [Decision] 区域里：先选中要缩进的行再点「缩进区域」。"));
+          window.setTimeout(() => setIndentHint(""), 2600);
+          return;
+        }
+        const plan = api?.regionIndentPlan
+          ? api.regionIndentPlan(full)
+          : fallbackRegionIndent(full);
+        if (plan.text === full) {
+          setIndentHint(tr("editor.indent.noChange", undefined, "这一区域已经是缩进好的：没有需要改的行。"));
+          window.setTimeout(() => setIndentHint(""), 2600);
+          return;
+        }
+        applyEdit(0, full.length, plan.text, caret.offset);
+        showIndentHint(plan.changed ?? Math.max(0, (plan.lines ?? 0)));
+        return;
+      }
+
+      // 选区（或整份文本）：按行 ± 一格。
+      const range = hasRange ? ([from, to] as const) : ([0, full.length] as const);
+      const result = api?.indentLines
+        ? api.indentLines(full, range[0], range[1], mode === "region" ? "indent" : mode)
+        : fallbackIndentLines(full, range[0], range[1], mode === "region" ? "indent" : mode);
+      if (result.text === full) {
+        setIndentHint(tr("editor.indent.noChange", undefined, "这一区域已经是缩进好的：没有需要改的行。"));
+        window.setTimeout(() => setIndentHint(""), 2600);
+        return;
+      }
+      const caretFrom = result.caret?.from ?? range[0];
+      const caretTo = result.caret?.to ?? range[1];
+      applyEdit(0, full.length, result.text, Math.min(caretFrom, result.text.length), Math.min(caretTo, result.text.length));
+      showIndentHint(result.lines ?? 0);
+    },
+    [applyEdit, caret.offset, decisionLineAt, showIndentHint, tr]
+  );
+
+  /** Tab / Shift+Tab：有跨行选区 → 缩进/反缩进；否则维持「补全骨架 / 插入 Tab」。 */
+  const tryIndentSelection = useCallback(
+    (direction: "indent" | "outdent"): boolean => {
+      const el = taRef.current;
+      if (!el) return false;
+      const from = el.selectionStart ?? 0;
+      const to = el.selectionEnd ?? 0;
+      if (to <= from || !textRef.current.slice(from, to).includes("\n")) return false;
+      indentRegion(direction);
+      hiddenRef.current = true;
+      setPopup(null);
+      return true;
+    },
+    [indentRegion]
   );
 
   /** 光标处的半截控制器名，作为向导的预选（`[Cha` → "Cha"）。 */
@@ -2254,9 +2432,10 @@ export default function StoryEditorPage() {
   }, []);
 
   /** chrome（§2.2）：内容组件（StagePane / BranchGraph）用它画自己的 chrome 条。 */
+  /** 面板标题的 i18n 键（词表见 `locales/editor/*.ts` → `panel.*`）。 */
   const chromeFor = (id: PanelId): PanelChromeProps => ({
-    title: specOf(id).title,
-    ariaLabel: `${specOf(id).title}面板`,
+    title: tr(`editor.panel.title.${id}`, undefined, specOf(id).title),
+    ariaLabel: tr("editor.panel.ariaLabel", { title: specOf(id).title }, `${specOf(id).title}面板`),
     visible: !folded.includes(id),
     onToggle: () => toggleFold(id),
     onSelect: () => setSelected((prev) => (prev === id ? null : id)),
@@ -2299,8 +2478,8 @@ export default function StoryEditorPage() {
             value={text}
             spellCheck={false}
             wrap="off"
-            aria-label="剧本正文"
-            placeholder={"[Character(name=\"char_002_amiya_1\", fadetime=0.5)]\n[name=\"阿米娅\"]  这边走，博士。"}
+            aria-label={tr("editor.body.ariaLabel", undefined, "剧本正文")}
+            placeholder={tr("editor.body.placeholder", undefined, '[Character(name="char_002_amiya_1", fadetime=0.5)]\n[name="阿米娅"]  这边走，博士。')}
             onChange={(event) => {
               hiddenRef.current = false;
               const nextValue = event.target.value;
@@ -2371,9 +2550,29 @@ export default function StoryEditorPage() {
                   acceptCompletion();
                   return;
                 }
+                // 跨行选区：Tab / Shift+Tab = 区域缩进 / 反缩进（task-5）。
+                if (tryIndentSelection(event.shiftKey ? "outdent" : "indent")) {
+                  event.preventDefault();
+                  return;
+                }
                 if (tryTabSkeleton()) {
                   event.preventDefault();
                 }
+              }
+              if (mod && (event.key === "[" || event.key === "]")) {
+                // Ctrl/Cmd+[ / ] = 选中行反缩进 / 缩进（无选区则整篇）。
+                if (tryIndentSelection(event.key === "]" ? "indent" : "outdent")) {
+                  event.preventDefault();
+                  return;
+                }
+                event.preventDefault();
+                indentRegion(event.key === "]" ? "indent" : "outdent");
+                return;
+              }
+              if (mod && event.altKey && event.key.toLowerCase() === "i") {
+                // Ctrl/Cmd+Alt+I = 整段重排 `[Decision]` 区域。
+                event.preventDefault();
+                indentRegion("region");
               }
             }}
           />
@@ -2401,12 +2600,12 @@ export default function StoryEditorPage() {
           )}
           {hover && (
             <div className="ed-hover" style={{ left: hover.x, top: hover.y }}>
-              <div className="ed-hover-title">{String(hover.info.title ?? "指令")}</div>
-              <div>{String(hover.info.summary ?? "（没有说明）")}</div>
+              <div className="ed-hover-title">{String(hover.info.title ?? tr("editor.hover.command", undefined, "指令"))}</div>
+              <div>{String(hover.info.summary ?? tr("editor.hover.summary", undefined, "（没有说明）"))}</div>
               {hoverParamText(hover.info.param) && (
-                <div className="ed-hover-ref">参数 {hoverParamText(hover.info.param)}</div>
+                <div className="ed-hover-ref">{tr("editor.hover.param", { param: hoverParamText(hover.info.param) }, `参数 ${hoverParamText(hover.info.param)}`)}</div>
               )}
-              {hover.info.anchor && <div className="ed-hover-ref">参考：{hover.info.anchor}</div>}
+              {hover.info.anchor && <div className="ed-hover-ref">{tr("editor.hover.anchor", { anchor: String(hover.info.anchor) }, `参考：${hover.info.anchor}`)}</div>}
             </div>
           )}
         </div>
@@ -2414,18 +2613,17 @@ export default function StoryEditorPage() {
 
       {loadState === "ready" && !text.trim() && (
         <div className="ed-code-empty">
-          这个剧本包里的 <code>{sourceName}</code> 是空的。直接开写，然后 Ctrl+S 保存。
+          {tr("editor.empty.packEmptyBefore", undefined, "这个剧本包里的")} <code>{sourceName}</code> {tr("editor.empty.packEmptyAfter", undefined, "是空的。直接开写，然后 Ctrl+S 保存。")}
         </div>
       )}
 
       {loadState === "empty" && (
         <div className="ed-code-empty">
           <p>
-            空态：<code>{id || "（无包 ID）"}</code> 还没读到剧本。
+            <code>{id || tr("editor.info.noId", undefined, "（无包 ID）")}</code> {tr("editor.empty.noPackLoaded", undefined, "还没有读到剧本。")}
           </p>
           <p>
-            在桌面应用里，请从「同人剧本」页进入；可用 <code>[Cha</code> + Tab 起手，
-            或点右侧「控制器」面板插入骨架。
+            {tr("editor.empty.readerHintBefore", undefined, "在桌面应用里，请从「同人剧本」页进入；可用")} <code>[Cha</code> {tr("editor.empty.readerHintMid", undefined, "+ Tab 起手，或点右侧「控制器」面板插入骨架。")}
           </p>
         </div>
       )}
@@ -2437,14 +2635,14 @@ export default function StoryEditorPage() {
     <div className="ed-panel">
       <div className="ed-tabs">
         <button className={`ed-tab${tab === "diag" ? " active" : ""}`} onClick={() => setTab("diag")}>
-          诊断
+          {tr("editor.tabs.diagnostics", undefined, "诊断")}
           {diagnostics.length > 0 && <span className="ed-tab-count">{diagnostics.length}</span>}
         </button>
         <button className={`ed-tab${tab === "palette" ? " active" : ""}`} onClick={() => setTab("palette")}>
-          控制器
+          {tr("editor.tabs.controllers", undefined, "控制器")}
         </button>
         <button className={`ed-tab${tab === "info" ? " active" : ""}`} onClick={() => setTab("info")}>
-          剧本信息
+          {tr("editor.tabs.info", undefined, "剧本信息")}
         </button>
       </div>
 
@@ -2453,7 +2651,7 @@ export default function StoryEditorPage() {
         {showInspector && (
           <div className="ed-inspector" data-editor-part="inspector">
             {ControllerInspectorPart ? (
-              <Suspense fallback={<div className="ed-inspector-empty">正在载入控制器检视器…</div>}>
+              <Suspense fallback={<div className="ed-inspector-empty">{tr("editor.inspector.loading", undefined, "正在载入控制器检视器…")}</div>}>
                 <ControllerInspectorPart
                   model={model ?? null}
                   line={caretLineText}
@@ -2464,18 +2662,18 @@ export default function StoryEditorPage() {
               </Suspense>
             ) : (
               <div className="ed-inspector-empty">
-                第 {caret.line} 行：<code>{caretLineText || "（空行）"}</code>
+                {tr("editor.inspector.line", { line: caret.line }, `第 ${caret.line} 行`)}：<code>{caretLineText || tr("editor.diagnostics.emptyLine", undefined, "（空行）")}</code>
                 <br />
-                （控制器检视器由并行任务交付；文件落盘后自动挂载）
+                {tr("editor.inspector.empty", undefined, "（控制器检视器由并行任务交付；文件落盘后自动挂载）")}
               </div>
             )}
           </div>
         )}
         {tab === "diag" && (
           <>
-            {!model && <p className="ed-hint">编辑器模型尚未加载：当前只做基础统计（未知指令按模型就绪后复核）。</p>}
+            {!model && <p className="ed-hint">{tr("editor.diagnostics.modelMissing", undefined, "编辑器模型尚未加载：当前只做基础统计（未知指令按模型就绪后复核）。")}</p>}
             {diagnostics.length === 0 ? (
-              <div className="ed-diag-ok">没有发现问题（{controllerCount} 条控制器 / {doc.stats?.decisions ?? 0} 个决策点）。</div>
+              <div className="ed-diag-ok">{tr("editor.diagnostics.ok", { controllers: controllerCount, decisions: doc.stats?.decisions ?? 0 }, `没有发现问题（${controllerCount} 条控制器 / ${doc.stats?.decisions ?? 0} 个决策点）。`)}</div>
             ) : (
               <div className="ed-diag">
                 {diagnostics.map((item, index) => (
@@ -2483,7 +2681,7 @@ export default function StoryEditorPage() {
                     key={`${item.line}-${item.code}-${index}`}
                     className={`ed-diag-item ${item.severity}`}
                     onClick={() => (item.line ? jumpToLine(item.line) : undefined)}
-                    title={`跳到第 ${item.line || "?"} 行：${item.message}`}
+                    title={tr("editor.diagnostics.jumpTitle", { line: item.line || "?", message: item.message }, `跳到第 ${item.line || "?"} 行：${item.message}`)}
                   >
                     <span className="ed-diag-code">
                       {String(item.code)}
@@ -2491,7 +2689,7 @@ export default function StoryEditorPage() {
                     </span>
                     <span>
                       {item.message}
-                      {item.fix ? <small className="ed-diag-fix">{`修法：${String(item.fix)}`}</small> : null}
+                      {item.fix ? <small className="ed-diag-fix">{tr("editor.diagnostics.fix", { fix: String(item.fix) }, `修法：${String(item.fix)}`)}</small> : null}
                     </span>
                   </button>
                 ))}
@@ -2502,8 +2700,8 @@ export default function StoryEditorPage() {
 
         {tab === "palette" && (
           <div className="ed-palette">
-            <p className="ed-hint">点击插入骨架到光标处（Tab 也能补全半截控制器）。</p>
-            {!model && <p className="ed-hint">降级模式：使用内置骨架表；编辑器模型就绪后改为完整指令表。</p>}
+            <p className="ed-hint">{tr("editor.palette.hint", undefined, "点击插入骨架到光标处（Tab 也能补全半截控制器）。")}</p>
+            {!model && <p className="ed-hint">{tr("editor.palette.fallbackHint", undefined, "降级模式：使用内置骨架表；编辑器模型就绪后改为完整指令表。")}</p>}
             {paletteGroups.map((group) => (
               <div className="ed-palette-group" key={group.category}>
                 <h3>{group.label}</h3>
@@ -2526,9 +2724,9 @@ export default function StoryEditorPage() {
 
         {tab === "info" && (
           <div className="ed-info">
-            <p className="ed-hint">pack.json 的字段；「保存剧本信息」只写 pack.json（「保存」会连正文一起写）。</p>
+            <p className="ed-hint">{tr("editor.info.hint", undefined, "pack.json 的字段；「保存剧本信息」只写 pack.json（「保存」会连正文一起写）。")}</p>
             <label className="ed-field">
-              <span>标题 title</span>
+              <span>{tr("editor.info.title", undefined, "标题 title")}</span>
               <input
                 className="ed-input"
                 value={meta.title}
@@ -2536,7 +2734,7 @@ export default function StoryEditorPage() {
               />
             </label>
             <label className="ed-field">
-              <span>章节 chapter</span>
+              <span>{tr("editor.info.chapter", undefined, "章节 chapter")}</span>
               <input
                 className="ed-input"
                 value={meta.chapter}
@@ -2544,7 +2742,7 @@ export default function StoryEditorPage() {
               />
             </label>
             <label className="ed-field">
-              <span>简介 description</span>
+              <span>{tr("editor.info.description", undefined, "简介 description")}</span>
               <input
                 className="ed-input"
                 value={meta.description}
@@ -2552,7 +2750,7 @@ export default function StoryEditorPage() {
               />
             </label>
             <label className="ed-field">
-              <span>分支点 branchPoints（逗号分隔）</span>
+              <span>{tr("editor.info.branchPoints", undefined, "分支点 branchPoints（逗号分隔）")}</span>
               <input
                 className="ed-input"
                 value={meta.branchPoints}
@@ -2560,21 +2758,21 @@ export default function StoryEditorPage() {
               />
             </label>
             <button className="ed-btn" onClick={() => void saveMetaOnly()} disabled={busy === "meta"}>
-              {busy === "meta" ? "保存中…" : "保存剧本信息"}
+              {busy === "meta" ? tr("editor.toolbar.saving", undefined, "保存中…") : tr("editor.info.save", undefined, "保存剧本信息")}
             </button>
 
             <div className="ed-source">
               <div>
-                「源文件」：<code>{sourceName}</code>
+                {tr("editor.info.sourceLabel", undefined, "「源文件」：")}<code>{sourceName}</code>
               </div>
               <em>
                 {sourceName === "script.txt"
-                  ? "读取顺序 script.txt → source/probe.txt。"
+                  ? tr("editor.info.sourceOrder", undefined, "读取顺序 script.txt → source/probe.txt。")
                   : sourceName === "source/probe.txt"
-                    ? "script.txt 不存在，正文来自 source/probe.txt；保存也写回它（并在需要时创建目录）。"
-                    : "来自 URL 的 ?text=（只读演示）；桌面应用内按 script.txt → source/probe.txt 的顺序读取。"}
+                    ? tr("editor.info.sourceProbe", undefined, "script.txt 不存在，正文来自 source/probe.txt；保存也写回它（并在需要时创建目录）。")
+                    : tr("editor.info.sourceUrl", undefined, "来自 URL 的 ?text=（只读演示）；桌面应用内按 script.txt → source/probe.txt 的顺序读取。")}
               </em>
-              <em>包 ID：{id || "（无）"}（{readOnly ? "浏览器只读演示" : "Tauri 运行中"}）</em>
+              <em>{tr("editor.info.packId", { id: id || tr("editor.stage.none", undefined, "（无）"), mode: readOnly ? tr("editor.info.modeReadOnly", undefined, "浏览器只读演示") : tr("editor.info.modeTauri", undefined, "Tauri 运行中") }, `包 ID：${id || "（无）"}（${readOnly ? "浏览器只读演示" : "Tauri 运行中"}）`)}</em>
             </div>
           </div>
         )}
@@ -2589,7 +2787,7 @@ export default function StoryEditorPage() {
     <div className="ed-stage" data-editor-part="stage">
       <div className="ed-stage-host" ref={stageHostRef}>
         {StagePanePart ? (
-          <Suspense fallback={<em className="ed-stage-host-empty">正在载入舞台…</em>}>
+          <Suspense fallback={<em className="ed-stage-host-empty">{tr("editor.stage.loading", undefined, "正在载入舞台…")}</em>}>
             <StagePanePart
               chars={stageState.chars}
               background={stageState.background}
@@ -2601,8 +2799,8 @@ export default function StoryEditorPage() {
           </Suspense>
         ) : (
           <em className="ed-stage-host-empty">
-            舞台预览由并行任务交付（frontend/src/components/editor/StagePane.tsx）；文件落盘后自动挂载。
-            当前解析：{stageState.chars.length} 个立绘 / 背景 {backgroundLabel(stageState.background)}
+            {tr("editor.stage.placeholder", undefined, "舞台预览由并行任务交付（frontend/src/components/editor/StagePane.tsx）；文件落盘后自动挂载。")}
+            {tr("editor.stage.parsedLabel", undefined, "当前解析：")}{tr("editor.stage.parsedCount", { chars: stageState.chars.length, background: backgroundLabel(stageState.background) }, `${stageState.chars.length} 个立绘 / 背景 ${backgroundLabel(stageState.background)}`)}
           </em>
         )}
       </div>
@@ -2615,21 +2813,21 @@ export default function StoryEditorPage() {
       className={`ed-preview${previewFull ? " full" : ""}`}
       style={{ height: previewFull ? "62%" : previewHeight }}
     >
-      <div className="ed-preview-resize" onPointerDown={onDragStart} title="拖动调整高度" />
+      <div className="ed-preview-resize" onPointerDown={onDragStart} title={tr("editor.preview.resizeTitle", undefined, "拖动调整高度")} />
       <div className="ed-preview-bar">
-        <span>预览</span>
+        <span>{tr("editor.preview.title", undefined, "预览")}</span>
         <span className="grow">{previewStatus}</span>
         <button
           className="ed-btn"
           onClick={() => void openPreview(previewUpto > 0 ? previewUpto : undefined)}
         >
-          重新载入预览
+          {tr("editor.preview.reload", undefined, "重新载入预览")}
         </button>
         <button className="ed-btn" onClick={() => setPreviewFull((value) => !value)}>
-          {previewFull ? "还原" : "放大"}
+          {previewFull ? tr("editor.preview.full", undefined, "还原") : tr("editor.preview.zoom", undefined, "放大")}
         </button>
         <button className="ed-btn" onClick={() => { closePreview(); setPreviewOpen(false); }}>
-          关闭
+          {tr("editor.preview.close", undefined, "关闭")}
         </button>
       </div>
       <div className="ed-preview-frame" ref={hostRef} />
@@ -2640,7 +2838,7 @@ export default function StoryEditorPage() {
   const renderBranchPane = () => (
     <div className="ed-branch-wrap">
       {BranchGraphPart ? (
-      <Suspense fallback={<div className="ed-inspector-empty">正在载入分支图…</div>}>
+      <Suspense fallback={<div className="ed-inspector-empty">{tr("editor.branch.loading", undefined, "正在载入分支图…")}</div>}>
         <BranchGraphPart
           text={text}
           caretLine={caret.line}
@@ -2663,8 +2861,8 @@ export default function StoryEditorPage() {
       </Suspense>
     ) : (
       <div className="ed-inspector-empty">
-        分支图由并行任务交付（<code>frontend/src/components/editor/BranchGraph.tsx</code>）；文件落盘后自动挂载。
-        当前 {doc.stats?.decisions ?? 0} 个决策点 / {doc.stats?.combos ?? 0} 条组合。
+        {tr("editor.branch.placeholder", undefined, "分支图由并行任务交付（frontend/src/components/editor/BranchGraph.tsx）；文件落盘后自动挂载。")}
+        {tr("editor.branch.counts", { decisions: doc.stats?.decisions ?? 0, combos: doc.stats?.combos ?? 0 }, `当前 ${doc.stats?.decisions ?? 0} 个决策点 / ${doc.stats?.combos ?? 0} 条组合。`)}
       </div>
       )}
     </div>
@@ -2720,7 +2918,7 @@ export default function StoryEditorPage() {
         }}
       >
       <InspectorWindow
-        title={specOf(id).title}
+        title={tr(`editor.panel.title.${id}`, undefined, specOf(id).title)}
         state={winStateFor(id)}
         onChange={(next) => onWinChange(id, next)}
         shellKind={isMapPanel(id) ? "map" : "dock"}
@@ -2739,25 +2937,25 @@ export default function StoryEditorPage() {
     );
   };
 
-  const title = meta.title || id || "（未命名剧本）";
+  const title = meta.title || id || tr("editor.info.unnamed", undefined, "（未命名剧本）");
 
   return (
     <div className={`editor-page${readOnly ? " readonly" : ""}`} ref={rootRef}>
       <div className="browser-header ed-header">
-        <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回">
+        <button className="back-icon" onClick={() => navigate(-1)} aria-label={tr("editor.toolbar.back", undefined, "返回")}>
           ◀
         </button>
         <div className="ed-title">
           <h1>{title}</h1>
           <span className="ed-sub">
-            {id || "（无包 ID）"} · <code>{sourceName}</code>
-            {loadState === "loading" ? " · 载入中…" : ""}
+            {id || tr("editor.stage.noPackId", undefined, "（无包 ID）")} · <code>{sourceName}</code>
+            {loadState === "loading" ? tr("editor.toolbar.loading", undefined, " · 载入中…") : ""}
           </span>
         </div>
         <span className="ed-spacer" />
         <div className="ed-viewtabs">
-          <button className="ed-btn" onClick={runLint} title="重新运行校验（实时诊断也会自动刷新）">
-            校验
+          <button className="ed-btn" onClick={runLint} title={tr("editor.toolbar.lintTitle", undefined, "重新运行校验（实时诊断也会自动刷新）")}>
+            {tr("editor.toolbar.lint", undefined, "校验")}
           </button>
           <button
             className="ed-btn"
@@ -2765,16 +2963,24 @@ export default function StoryEditorPage() {
               mapToggle("preview", true);
               void openPreview();
             }}
-            title="用当前编辑内容直接开演整篇（不必先保存；预览 = Map，开演时自动放进工作台）"
+            title={tr("editor.toolbar.previewTitle", undefined, "用当前编辑内容直接开演整篇（不必先保存；预览 = Map，开演时自动放进工作台）")}
           >
-            预览
+            {tr("editor.toolbar.preview", undefined, "预览")}
+          </button>
+          <button
+            className="ed-btn"
+            data-editor-action="indent-region"
+            onClick={() => indentRegion("region")}
+            title={tr("editor.indent.title", undefined, "给选中的分支线路加两格缩进；只为可读，送引擎前会自动去掉行首空白")}
+          >
+            {tr("editor.indent.button", undefined, "缩进区域")}
           </button>
           <button
             className="ed-btn"
             onClick={() => setShowInspector((value) => !value)}
-            title="显示/隐藏控制器检视器"
+            title={tr("editor.toolbar.inspectorTitle", undefined, "显示/隐藏控制器检视器")}
           >
-            {showInspector ? "收起检视器" : "检视器"}
+            {showInspector ? tr("editor.toolbar.inspectorShow", undefined, "收起检视器") : tr("editor.toolbar.inspectorHide", undefined, "检视器")}
           </button>
           <button
             className={`ed-btn${inTree("branch") ? " on" : ""}`}
@@ -2782,18 +2988,18 @@ export default function StoryEditorPage() {
             disabled={!BranchGraphPart}
             title={
               BranchGraphPart
-                ? "分支图 = Map：按 Decision/Predicate 画剧情走向；开/关都在工作台里（拖标题条可拼接）"
-                : "分支图由并行任务交付；文件落盘后自动可用"
+                ? tr("editor.toolbar.branchTitleReady", undefined, "分支图 = Map：按 Decision/Predicate 画剧情走向；开/关都在工作台里（拖标题条可拼接）")
+                : tr("editor.toolbar.branchTitleTodo", undefined, "分支图由并行任务交付；文件落盘后自动可用")
             }
           >
-            ⌥ 分支图
+            {tr("editor.toolbar.branch", undefined, "⌥ 分支图")}
           </button>
           <button
             className={`ed-btn${inTree("preview") ? " on" : ""}`}
             onClick={() => mapToggle("preview")}
-            title="预览 = Map：把它放进 / 移出工作台（开演用左边的「预览」按钮）"
+            title={tr("editor.toolbar.previewPanelTitle", undefined, "预览 = Map：把它放进 / 移出工作台（开演用左边的「预览」按钮）")}
           >
-            预览面板
+            {tr("editor.toolbar.previewPanel", undefined, "预览面板")}
           </button>
           <button
             className="ed-btn"
@@ -2801,24 +3007,24 @@ export default function StoryEditorPage() {
             disabled={!ControllerWizardPart}
             title={
               ControllerWizardPart
-                ? "图形化插入一个控制器（分类 → 指令 → 参数 → 预览 → 插入）"
-                : "插入向导由并行任务交付；文件落盘后自动可用"
+                ? tr("editor.toolbar.wizardTitleReady", undefined, "图形化插入一个控制器（分类 → 指令 → 参数 → 预览 → 插入）")
+                : tr("editor.toolbar.wizardTitleTodo", undefined, "插入向导由并行任务交付；文件落盘后自动可用")
             }
           >
-            插入控制器…
+            {tr("editor.toolbar.wizardOpen", undefined, "插入控制器…")}
           </button>
           {/* 命名布局（BRIEF §2.4）：切换 / 另存为 / 重置 / 删除。 */}
           <span className="ed-layout" data-layout-bar="1">
             <select
               className="ed-layout-select"
               value={layoutPick}
-              aria-label="布局"
-              title="切换已保存的工作台布局"
+              aria-label={tr("editor.layout.aria", undefined, "布局")}
+              title={tr("editor.layout.selectTitle", undefined, "切换已保存的工作台布局")}
               onChange={(event) => setLayoutPick(event.target.value)}
             >
               {(layoutNames.length ? layoutNames : [DEFAULT_LAYOUT_NAME]).map((name) => (
                 <option key={name} value={name}>
-                  布局：{name}
+                  {tr("editor.layout.option", { name }, `布局：${name}`)}
                   {name === activeLayoutName ? " ✓" : ""}
                 </option>
               ))}
@@ -2827,44 +3033,44 @@ export default function StoryEditorPage() {
               className="ed-btn"
               data-layout-action="load"
               onClick={() => chooseLayout(layoutPick)}
-              title="切换到选中的布局（切走前会把当前布局存回它自己的名字）"
+              title={tr("editor.layout.loadTitle", undefined, "切换到选中的布局（切走前会把当前布局存回它自己的名字）")}
             >
-              切换
+              {tr("editor.layout.load", undefined, "切换")}
             </button>
             <button
               className="ed-btn"
               data-layout-action="save-as"
               onClick={() => {
-                const name = window.prompt("布局另存为（名字）：", layoutPick === DEFAULT_LAYOUT_NAME ? "" : layoutPick);
+                const name = window.prompt(tr("editor.layout.saveAsPrompt", undefined, "布局另存为（名字）："), layoutPick === DEFAULT_LAYOUT_NAME ? "" : layoutPick);
                 if (!name) return;
                 saveAsLayout(name);
                 setLayoutPick(name.trim());
               }}
-              title="把当前布局另存为一个新名字"
+              title={tr("editor.layout.saveAsTitle", undefined, "把当前布局另存为一个新名字")}
             >
-              另存为…
+              {tr("editor.layout.saveAs", undefined, "另存为…")}
             </button>
             <button
               className="ed-btn"
               data-layout-action="reset"
               onClick={resetLayout}
-              title="把当前布局恢复成默认（工具面板左 / 编辑区上 / 舞台下）"
+              title={tr("editor.layout.resetTitle", undefined, "把当前布局恢复成默认（工具面板左 / 编辑区上 / 舞台下）")}
             >
-              重置
+              {tr("editor.layout.reset", undefined, "重置")}
             </button>
             {layoutPick !== DEFAULT_LAYOUT_NAME && layoutNames.includes(layoutPick) && (
               <button
                 className="ed-btn"
                 data-layout-action="delete"
                 onClick={() => deleteLayoutNamed(layoutPick)}
-                title={`删除布局「${layoutPick}」`}
+                title={tr("editor.layout.deleteTitle", { name: layoutPick }, `删除布局「${layoutPick}」`)}
               >
-                删除
+                {tr("editor.layout.delete", undefined, "删除")}
               </button>
             )}
           </span>
-          <button className="ed-btn" onClick={reload} title="放弃未保存改动，从磁盘重新载入">
-            重新载入
+          <button className="ed-btn" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
+            {tr("editor.toolbar.reload", undefined, "重新载入")}
           </button>
           <button
             className="ed-btn primary"
@@ -2872,10 +3078,10 @@ export default function StoryEditorPage() {
             disabled={busy === "save"}
             title="Ctrl+S"
           >
-            {busy === "save" ? "保存中…" : "保存"}
+            {busy === "save" ? tr("editor.toolbar.saving", undefined, "保存中…") : tr("editor.toolbar.save", undefined, "保存")}
           </button>
         </div>
-        <span className={`ed-dirty${isDirty ? " on" : ""}`}>{isDirty ? "未保存" : "已保存"}</span>
+        <span className={`ed-dirty${isDirty ? " on" : ""}`}>{isDirty ? tr("editor.status.dirty", undefined, "未保存") : tr("editor.status.saved", undefined, "已保存")}</span>
       </div>
 
       {/* 行定位条：上一行/下一行 + 滑杆 + 「预览到此处」（截到该行、不必保存）。 */}
@@ -2884,25 +3090,25 @@ export default function StoryEditorPage() {
           className="ed-scrub-btn"
           onClick={() => jumpToLine(Math.max(1, caret.line - 1))}
           disabled={caret.line <= 1}
-          title="光标上移一行"
+          title={tr("editor.scrub.upTitle", undefined, "光标上移一行")}
         >
-          ▲ 上一行
+          {tr("editor.scrub.up", undefined, "▲ 上一行")}
         </button>
         <button
           className="ed-scrub-btn"
           onClick={() => jumpToLine(Math.min(lineStarts.length, caret.line + 1))}
           disabled={caret.line >= lineStarts.length}
-          title="光标下移一行"
+          title={tr("editor.scrub.downTitle", undefined, "光标下移一行")}
         >
-          ▼ 下一行
+          {tr("editor.scrub.down", undefined, "▼ 下一行")}
         </button>
-        <span>定位</span>
+        <span>{tr("editor.scrub.label", undefined, "定位")}</span>
         <input
           type="range"
           min={1}
           max={Math.max(1, lineStarts.length)}
           value={Math.min(lineStarts.length, Math.max(1, scrubLine))}
-          aria-label="剧本行定位"
+          aria-label={tr("editor.scrub.aria", undefined, "剧本行定位")}
           onChange={(event) => jumpToLine(Number(event.target.value))}
         />
         <input
@@ -2910,36 +3116,36 @@ export default function StoryEditorPage() {
           min={1}
           max={Math.max(1, lineStarts.length)}
           value={Math.min(lineStarts.length, Math.max(1, scrubLine))}
-          aria-label="行号"
+          aria-label={tr("editor.scrub.gutterAria", undefined, "行号")}
           onChange={(event) => jumpToLine(Number(event.target.value) || 1)}
         />
         <span>/ {lineStarts.length}</span>
         <span className="grow" />
-        {previewUpto > 0 && <span>预览截到第 {previewUpto} 行</span>}
+        {previewUpto > 0 && <span>{tr("editor.scrub.cutNotice", { line: previewUpto }, `预览截到第 ${previewUpto} 行`)}</span>}
         <button
           className="ed-scrub-btn"
           onClick={() => void openPreview(caret.line)}
-          title="按当前光标行截断剧本，从第一行开演到此处（不必先保存）"
+          title={tr("editor.scrub.cutHereTitle", undefined, "按当前光标行截断剧本，从第一行开演到此处（不必先保存）")}
         >
-          ▶ 预览到此处
+          {tr("editor.scrub.cutHere", undefined, "▶ 预览到此处")}
         </button>
         {previewUpto > 0 && (
-          <button className="ed-scrub-btn" onClick={() => void openPreview()} title="预览整篇">
-            预览全篇
+          <button className="ed-scrub-btn" onClick={() => void openPreview()} title={tr("editor.scrub.playAllTitle", undefined, "预览整篇")}>
+            {tr("editor.scrub.playAll", undefined, "预览全篇")}
           </button>
         )}
       </div>
 
       {!inTauri() && (
         <div className="ed-alert" role="status">
-          <span>只读演示：当前不在桌面应用内，保存 / 载入包内文件需要 Tauri（可加 `?text=…` 直接试编辑）。</span>
+          <span>{tr("editor.status.readonlyBanner", undefined, "只读演示：当前不在桌面应用内，保存 / 载入包内文件需要 Tauri（可加 `?text=…` 直接试编辑）。")}</span>
         </div>
       )}
 
       {error && (
         <div className="ed-alert" role="alert">
           <span>{error}</span>
-          <button onClick={() => setError("")} aria-label="关闭提示">
+          <button onClick={() => setError("")} aria-label={tr("editor.error.dismiss", undefined, "关闭提示")}>
             ✕
           </button>
         </div>
@@ -2964,7 +3170,7 @@ export default function StoryEditorPage() {
           if (event.target === event.currentTarget) setWizardOpen(false);
         }}>
           <div className="ed-wizard-card">
-            <Suspense fallback={<div className="ed-inspector-empty">正在载入插入向导…</div>}>
+            <Suspense fallback={<div className="ed-inspector-empty">{tr("editor.wizard.loading", undefined, "正在载入插入向导…")}</div>}>
               <ControllerWizardPart
                 model={model ?? null}
                 open={wizardOpen}
@@ -2985,31 +3191,40 @@ export default function StoryEditorPage() {
           {caret.line}:{caret.col}
         </span>
         <span>
-          控制器 {controllerCount} / 决策 {doc.stats?.decisions ?? 0}
+          {tr("editor.status.counters", { controllers: controllerCount, decisions: doc.stats?.decisions ?? 0 }, `控制器 ${controllerCount} / 决策 ${doc.stats?.decisions ?? 0}`)}
         </span>
-        <span>行数 {lineStarts.length}</span>
+        <span>{tr("editor.status.lines", { lines: lineStarts.length }, `行数 ${lineStarts.length}`)}</span>
+        {indentHint ? (
+          <span className="ed-indent-hint" role="status" data-indent-hint="1">
+            {indentHint}
+          </span>
+        ) : null}
         <span className={errorCount ? "error" : ""}>
-          {errorCount ? `${errorCount} 个错误` : diagnostics.length ? `${diagnostics.length} 条提示` : "无诊断"}
+          {errorCount
+            ? tr("editor.status.errors", { count: errorCount }, `${errorCount} 个错误`)
+            : diagnostics.length
+              ? tr("editor.status.hints", { count: diagnostics.length }, `${diagnostics.length} 条提示`)
+              : tr("editor.status.clean", undefined, "无诊断")}
         </span>
         <button
           className="ed-status-btn"
           onClick={() => doUndo()}
           disabled={historySizes.undo === 0}
-          title="撤销（Ctrl+Z）"
+          title={tr("editor.toolbar.undoTitle", undefined, "撤销（Ctrl+Z）")}
         >
-          撤销 {historySizes.undo}
+          {tr("editor.toolbar.undoCount", { count: historySizes.undo }, `撤销 ${historySizes.undo}`)}
         </button>
         <button
           className="ed-status-btn"
           onClick={() => doRedo()}
           disabled={historySizes.redo === 0}
-          title="重做（Ctrl+Shift+Z / Ctrl+Y）"
+          title={tr("editor.toolbar.redoTitle", undefined, "重做（Ctrl+Shift+Z / Ctrl+Y）")}
         >
-          重做 {historySizes.redo}
+          {tr("editor.toolbar.redoCount", { count: historySizes.redo }, `重做 ${historySizes.redo}`)}
         </button>
         <span className="grow" />
-        <span>{previewOpen ? (previewLive ? "预览运行中" : "预览准备中") : "预览关闭"}</span>
-        <span className={isDirty ? "dirty" : "saved"}>{busy ? "保存中…" : isDirty ? "未保存" : "已保存"}</span>
+        <span>{previewOpen ? (previewLive ? tr("editor.preview.stateLive", undefined, "预览运行中") : tr("editor.preview.statePreparing", undefined, "预览准备中")) : tr("editor.preview.stateClosed", undefined, "预览关闭")}</span>
+        <span className={isDirty ? "dirty" : "saved"}>{busy ? tr("editor.status.saving", undefined, "保存中…") : isDirty ? tr("editor.status.dirty", undefined, "未保存") : tr("editor.status.saved", undefined, "已保存")}</span>
       </div>
     </div>
   );

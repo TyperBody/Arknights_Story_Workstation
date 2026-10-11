@@ -117,6 +117,7 @@
 //   0x1016 DecisionOptionsMissing        Decision 缺 options（runtime warn, 不弹面板）
 //   0x1017 OrphanPredicate              Predicate 前没有（未合流的）Decision
 //   0x1018 UnknownDecisionValue          Predicate 引用了 Decision 里不存在的值
+//   0x1019 BadIndentation               区域缩进的层级不对（提示级；引擎会归一化）
 //   0x2000 UnknownWarning                兜底警告（YSS: UnknownWarning）
 //   0x2001 NoSuchResource               资源不存在（保留：需要项目资源表才能查）
 //   0x2002 NotReadByEngine              指令未在运行时注册（`[End]`）或参数当前版本不读
@@ -167,6 +168,7 @@ import {
   parseLine as parseDslLine,
   parseScript,
   splitTopLevel,
+  stripIndentForEngine,
 } from "./storyPack.js";
 
 /** 指令参考（人读文档）。 */
@@ -415,6 +417,7 @@ export const DIAGNOSTIC_TABLE = [
   { code: 0x1016, hex: "1016", name: "DecisionOptionsMissing", severity: "error", zh: "Decision 缺 options（不弹面板、只 warn）", yss: "（DSL 专有）" },
   { code: 0x1017, hex: "1017", name: "OrphanPredicate", severity: "warning", zh: "Predicate 前没有（未合流的）Decision", yss: "（DSL 专有）" },
   { code: 0x1018, hex: "1018", name: "UnknownDecisionValue", severity: "warning", zh: "Predicate 引用了 Decision 中不存在的值", yss: "（DSL 专有）" },
+  { code: 0x1019, hex: "1019", name: "BadIndentation", severity: "warning", zh: "区域缩进的层级不对（引擎会归一化；只提示）", yss: "（DSL 专有）" },
   { code: 0x2000, hex: "2000", name: "UnknownWarning", severity: "warning", zh: "内部警告（兜底）", yss: "UnknownWarning" },
   { code: 0x2001, hex: "2001", name: "NoSuchResource", severity: "warning", zh: "资源不存在（需要项目资源表）", yss: "NoSuchResource" },
   { code: 0x2002, hex: "2002", name: "NotReadByEngine", severity: "warning", zh: "运行时未注册该指令 / 该参数当前版本不读", yss: "（DSL 专有）" },
@@ -1949,44 +1952,69 @@ function paramSpans(raw) {
  */
 export function parseLine(input, lineNumber = 0) {
   const raw = String(input ?? "");
+  // 区域缩进：诊断/span 都按**去行首空白**的 `body` 计算，`shift` 是行首空白
+  // 长度，写回前统一平移 —— 行首空格/Tab 在整条链路上都等价于"不存在"。
+  const body = stripIndentForEngine(raw);
+  // `stripIndentForEngine` 只对 `[` 开头的行生效；`body !== raw` 时前缀就是
+  // 行首空白，`raw` 不含前导空白的行（旁白）→ `lead = ""`。
+  const lead = body === raw ? "" : raw.slice(0, raw.length - body.length);
+  const shift = lead.length;
+  /** @param {Diagnostic[]} list span 从 `body` 坐标系搬到整行坐标系 */
+  const unshift = (list) => {
+    if (!shift) return;
+    for (const d of list) { d.from += shift; d.to += shift; }
+  };
+  // 区域缩进：后面所有 span / entity / 文档级形态判定都跑在 `body` 上；
+  // `unshift` 把诊断 span 平移回整行坐标后再补行首 Tab 的 100C 提示。
+  const pushLeadTab = () => {
+    const at = lead.indexOf("\t");
+    if (at === -1 || !dsl) return;
+    diagnostics.push(diag("UseSpaceInsteadTab", line, at, at + 1,
+      "行首缩进用了 Tab；区域缩进惯例是两个空格（引擎会归一化，不影响播放）",
+      "把行首 Tab 换成两个空格", "warning"));
+  };
+  // 缩进版与顶格版诊断**逐条等价**（只差 `shift` 的整体偏移）—— 这就是
+  // "编辑器容忍区域缩进"。
   const line = Number.isFinite(lineNumber) ? Math.trunc(Number(lineNumber)) : 0;
   /** @type {Diagnostic[]} */
   const diagnostics = [];
 
-  if (!raw.trim()) {
+  if (!body.trim()) {
     return {
-      ok: true, line, raw, kind: "blank", controller: null, controllerRaw: null, entity: "",
+      ok: true, line, raw, leading: lead, kind: "blank", controller: null, controllerRaw: null, entity: "",
       canonical: null, spec: null, category: null, tier: null, required: [], optional: [], params: [],
       missing: [], text: "", speaker: "", comment: "", malformed: "", diagnostics,
     };
   }
-  if (/^\s*\/\//.test(raw)) {
+  if (/^\s*\/\//.test(body)) {
     return {
-      ok: true, line, raw, kind: "comment", controller: null, controllerRaw: null, entity: "",
+      ok: true, line, raw, leading: lead, kind: "comment", controller: null, controllerRaw: null, entity: "",
       canonical: null, spec: null, category: null, tier: null, required: [], optional: [], params: [],
-      missing: [], text: "", speaker: "", comment: raw.replace(/^\s*\/\/\s?/, ""), malformed: "", diagnostics,
+      missing: [], text: "", speaker: "", comment: body.replace(/^\s*\/\/\s?/, ""), malformed: "", diagnostics,
     };
   }
 
-  const dsl = parseDslLine(raw, line);
-  structureDiagnostics(dsl.malformed ?? "", line, raw, diagnostics);
+  const dsl = parseDslLine(body, line);
+  structureDiagnostics(dsl.malformed ?? "", line, body, diagnostics);
 
   // 裸行 → 旁白；裸 `[key=value]` → dialog（storyPack 的兜底）
   if (dsl.kind !== "command" && dsl.kind !== "dialogue") {
-    if (!dsl.malformed && raw.trim()) {
-      diagnostics.push(diag("NarrationLine", line, 0, raw.length, "裸文本行：只会作为旁白出现（无说话人、无对白条样式）", '建议写成 [name=""] 或 [Dialog]'));
+    const narrator = entityOf(body);
+    if (!dsl.malformed && body.trim()) {
+      diagnostics.push(diag("NarrationLine", line, 0, body.length, "裸文本行：只会作为旁白出现（无说话人、无对白条样式）", '建议写成 [name=""] 或 [Dialog]'));
     }
     if (dsl.malformed) {
-      const last = raw.length;
+      const last = body.length;
       if (diagnostics.length === 0) diagnostics.push(diag("UnknownError", line, 0, Math.max(1, last), dsl.malformed));
     }
-    const narrator = entityOf(raw);
-    // 带点号的游戏内指令（`[Battle.Pause]`、`[Activity.ResetToEntry]`）：storyPack
-    // 落 narration，但它在引擎里是合法 command（网页端忽略）→ 归 C 级。
     const namespaced = NAMESPACE_RE.test(narrator);
+    unshift(diagnostics);
+    // 缩进的命名空间指令行（`  [Battle.Pause]`）也吃 100C 提示。
+    pushLeadTab();
+    diagnostics.sort((a, b) => (a.from - b.from) || (a.code - b.code));
     return {
       ok: !diagnostics.some((d) => d.severity === "error"),
-      line, raw, kind: "narration", controller: null, controllerRaw: namespaced ? narrator : null,
+      line, raw, leading: lead, kind: "narration", controller: null, controllerRaw: namespaced ? narrator : null,
       entity: narrator,
       canonical: null, spec: null, category: namespaced ? "Judge" : null, tier: namespaced ? "C" : null,
       required: [], optional: [], params: [], missing: [],
@@ -1995,7 +2023,7 @@ export function parseLine(input, lineNumber = 0) {
   }
 
   const rawCommand = dsl.kind === "dialogue" ? "dialog" : String(dsl.command ?? "dialog");
-  const entity = entityOf(raw);
+  const entity = entityOf(body);
   // `[Battle.Pause]` / `[Battle.LockFunction(mask=…)]` / `[Activity.ResetToEntry]`：
   // 带点号的**游戏内**命令（语料 1,663 行）。storyPack 对它们要么落 narration、
   // 要么（head 含 `=` 时）兜底成 `dialog`；这里认出真名并按"网页端忽略"处理。
@@ -2016,17 +2044,17 @@ export function parseLine(input, lineNumber = 0) {
       // 游戏内指令（战斗/活动/生息演算的 UI 动作）：上游 parser 的 `[.|\w]*`
       // 认点号、按字面 dispatcher；网页端 StoryPlayer 没有这个 case → 静默忽略
       // 该行。所以这里是 warning（0x2003），不是"未知指令"（0x1002 error）。
-      const cased = String(dsl.commandRaw ?? entityRawOf(raw)).trim();
-      const hit = raw.indexOf(cased) >= 0 ? raw.indexOf(cased) : raw.indexOf(entity);
+      const cased = String(dsl.commandRaw ?? entityRawOf(body)).trim();
+      const hit = body.indexOf(cased) >= 0 ? body.indexOf(cased) : body.indexOf(entity);
       const at = Math.max(0, hit);
       diagnostics.push(diag("TierCInstruction", line, at, Math.max(at + 1, at + cased.length),
         `游戏内命名空间指令：${cased}（战斗/活动 UI 动作，网页端忽略该行，其余照播）`,
         "二创里基本用不到；留着不影响播放，删掉更清爽"));
     } else if (tier === "C") {
-      const at = raw.indexOf(rawCommand);
+      const at = body.indexOf(rawCommand);
       diagnostics.push(diag("TierCInstruction", line, Math.max(0, at), Math.max(1, at + rawCommand.length), `C 级指令（游戏内/依赖运行时信号）：${rawCommand}（网页端多数忽略）`));
     } else if (tier === null) {
-      const at = raw.indexOf(rawCommand);
+      const at = body.indexOf(rawCommand);
       const fixed = SPELLING_FIX[rawCommand];
       const guess = fixed ?? nearest(rawCommand, CONTROLLERS.map((s) => s.command));
       diagnostics.push(diag("NoSuchController", line, Math.max(0, at), Math.max(1, at + rawCommand.length),
@@ -2034,22 +2062,22 @@ export function parseLine(input, lineNumber = 0) {
         guess ? `是否想写 [${guess}(…)]？` : `可用的 A/B 级指令见 CONTROLLERS（${MODELED.size} 个）`));
     } else if (tier === "A" || tier === "B") {
       if (rawCommand === "end") {
-        diagnostics.push(diag("NotReadByEngine", line, 1, Math.max(2, raw.indexOf("]")), "`[End]` 未在运行时注册 → warn `unknown_command end` 后停在最后一帧", "改用 [endtip(block=true)] 或 [Blocker(a=1, r=0, g=0, b=0, fadetime=1, block=true)]"));
+        diagnostics.push(diag("NotReadByEngine", line, 1, Math.max(2, body.indexOf("]")), "`[End]` 未在运行时注册 → warn `unknown_command end` 后停在最后一帧", "改用 [endtip(block=true)] 或 [Blocker(a=1, r=0, g=0, b=0, fadetime=1, block=true)]"));
       }
     }
   } else {
     if (spec.runtimeRegistered === false) {
-      diagnostics.push(diag("NotReadByEngine", line, 1, Math.max(2, raw.indexOf("]")),
+      diagnostics.push(diag("NotReadByEngine", line, 1, Math.max(2, body.indexOf("]")),
         `运行时未注册该指令：${rawCommand}`, spec.note));
     }
     if (spec.tier === "C") {
-      diagnostics.push(diag("TierCInstruction", line, 1, Math.max(2, raw.indexOf("]")), `C 级指令：${spec.command}（网页端多数忽略）`));
+      diagnostics.push(diag("TierCInstruction", line, 1, Math.max(2, body.indexOf("]")), `C 级指令：${spec.command}（网页端多数忽略）`));
     }
   }
   if (!spec) {
     const fixed = SPELLING_FIX[rawCommand];
     if (fixed) {
-      const at = raw.indexOf(rawCommand);
+      const at = body.indexOf(rawCommand);
       diagnostics.push(diag("SpellingDrift", line, Math.max(0, at), Math.max(1, at + rawCommand.length), `拼写漂移：${rawCommand} → ${fixed}（引擎按字面分发，官方语料里也有）`, `改成 [${fixed}(…)]`));
     }
   }
@@ -2057,11 +2085,12 @@ export function parseLine(input, lineNumber = 0) {
   // ── 参数 ────────────────────────────────────────────────────────────────
   // 兜底形态 `[Delay=2]`（无括号）：storyPack 把 `[...]` 里唯一的 `k=v` 收进
   // args，但没有参数表 span；这里补一条 spans，保证"见到的键都进诊断"。
-  const spans = paramSpans(raw);
-  if (raw[0] === "[" && spans.length === 0 && Object.keys(dsl.args).length) {
-    const closeAt = raw.lastIndexOf("]");
+  // 所有 span 都用去行首空白后的 `body` 算，`unshift` 时统一平移回整行。
+  const spans = paramSpans(body);
+  if (body[0] === "[" && spans.length === 0 && Object.keys(dsl.args).length) {
+    const closeAt = body.lastIndexOf("]");
     for (const [key, value] of Object.entries(dsl.args)) {
-      const at = raw.indexOf(`${key}=`);
+      const at = body.indexOf(`${key}=`);
       if (at === -1) continue;
       spans.push({
         key,
@@ -2175,7 +2204,7 @@ export function parseLine(input, lineNumber = 0) {
       const gap = {
         name: m.name, type: m.type, hint: m.hint, value: undefined, raw: "", provided: false,
         known: true, corpusOnly: Boolean(m.corpusOnly),
-        from: 1, to: Math.max(2, raw.indexOf("]") > 0 ? raw.indexOf("]") : Math.min(2, raw.length)),
+        from: 1, to: Math.max(2, body.indexOf("]") > 0 ? body.indexOf("]") : Math.min(2, body.length)),
         ...(m.default !== undefined ? { default: m.default } : {}),
         ...(m.enums ? { enums: m.enums } : {}),
       };
@@ -2197,9 +2226,12 @@ export function parseLine(input, lineNumber = 0) {
   }
 
   // 对话 / 正文空白惯例（YSS 100B/100C 的 DSL 版）
-  const bracketAt = raw.indexOf("]");
-  const headEnd = bracketAt === -1 ? raw.length : bracketAt + 1;
-  const tabAt = raw.indexOf("\t");
+  // 坐标全部相对 `body`（去行首空白后的行）；`diag` 的偏移在写回前统一加 `shift`。
+  const bracketAt = body.indexOf("]");
+  const headEnd = bracketAt === -1 ? body.length : bracketAt + 1;
+  // 行首 Tab：区域缩进用**空格**，行首 Tab 保留提示（100C，提示级）。
+  // 由 `pushLeadTab()` 在 `unshift` 之后追加（span 相对整行）。
+  const tabAt = body.search(/\t/);
   if (tabAt >= 0) {
     if (tabAt < headEnd) {
       // 语料里 `[...]` 内的 Tab 只出现在超长 Tutorial 的续行里（5 处）；
@@ -2212,11 +2244,8 @@ export function parseLine(input, lineNumber = 0) {
       diagnostics.push(diag("UseSpaceInsteadTab", line, tabAt, tabAt + 1, "行内出现了 Tab（正文/缩进）", "正文里改成空格"));
     }
   }
-  if (raw.startsWith("\t")) {
-    diagnostics.push(diag("UseSpaceInsteadTab", line, 0, 1, "行首缩进用了 Tab；引擎只对 `[` 开头的行做指令解析", "行首改空格（或顶格写）"));
-  }
   if (dsl.kind === "dialogue" || (rawCommand === "dialog" && !isDialogueForm && String(dsl.command) === "dialog")) {
-    const rest = raw.slice(headEnd);
+    const rest = body.slice(headEnd);
     // 语料实测：紧贴 `]`（`parser.ts:117` 的 `match[5]` 不吃前导空白）285131 行、
     // 两空格 70060 行、单空格 11997 行、Tab 549 行 —— **都能播**。所以这里只对
     // "带正文却只用一个空格"给一条提示级 warning（二创惯例是两个空格）。
@@ -2224,7 +2253,7 @@ export function parseLine(input, lineNumber = 0) {
       diagnostics.push(diag("UseSpaceInsteadTab", line, headEnd, headEnd + 1, "`]` 后只用了 1 个空格；二创惯例是两个空格", '补成两个空格'));
     }
     if (!String(dsl.text ?? "").trim() && dsl.kind === "dialogue") {
-      diagnostics.push(diag("EmptyDialogue", line, headEnd, Math.max(headEnd + 1, raw.length), "空对白：引擎隐藏对话框（可当分节拍）"));
+      diagnostics.push(diag("EmptyDialogue", line, headEnd, Math.max(headEnd + 1, body.length), "空对白：引擎隐藏对话框（可当分节拍）"));
     }
   }
   if (/[ \t]+$/.test(raw)) {
@@ -2240,10 +2269,10 @@ export function parseLine(input, lineNumber = 0) {
     const at = headEnd + tailBracket;
     diagnostics.push(diag("UnclosedSymbol", line, at, at + 1, "正文里出现了 `]`：引擎按**最后一个** `]` 截断整行", "正文里避免裸 `]`（或写成全角）"));
   }
-  if (raw[0] === "[" && /^\[\s*name\s*=/.test(raw) && dsl.kind !== "dialogue") {
+  if (body[0] === "[" && /^\[\s*name\s*=/.test(body) && dsl.kind !== "dialogue") {
     // `[name="A"]  他说]然后走了`：head 里多出一个 `]` → NAME_RE 失配，落进
     // `[key=value]` 兜底；引擎的 `args.name` 会是 `"A"]  他说`。
-    const at = raw.indexOf("]", 6);
+    const at = body.indexOf("]", 6);
     if (at >= 0) {
       diagnostics.push(diag("UnclosedSymbol", line, at, at + 1,
         "正文里出现了 `]`：引擎按**最后一个** `]` 截断整行，说话人会被读成 `name` 的值",
@@ -2253,11 +2282,14 @@ export function parseLine(input, lineNumber = 0) {
   if (String(dsl.text ?? "").indexOf("]") === -1 && String(dsl.tail ?? "").indexOf("]") === -1) {
     const stray = spans.find((span) => span.valueRaw.includes(")]"));
     if (stray) {
-      const at = raw.indexOf(")]", stray.valueFrom);
+      const at = body.indexOf(")]", stray.valueFrom);
       if (at >= 0) diagnostics.push(diag("UnclosedSymbol", line, at, at + 1, "参数值里出现了 `]`：引擎按**最后一个** `]` 截断整行", "确认这一行只有一个 `]`"));
     }
   }
-
+  // 所有 span 从 `body` 坐标系搬到整行坐标系（含行首空白）。
+  unshift(diagnostics);
+  pushLeadTab();
+  indentDiagnostics(lead, line, diagnostics);
   diagnostics.sort((a, b) => (a.from - b.from) || (a.code - b.code));
 
   return {
@@ -2267,7 +2299,7 @@ export function parseLine(input, lineNumber = 0) {
     kind: dsl.kind === "dialogue" ? "dialogue" : "command",
     controller: rawCommand,
     controllerRaw: dsl.commandRaw ?? (dsl.kind === "dialogue" ? "name" : rawCommand),
-    entity: entityOf(raw),
+    entity: entity,
     canonical: spec ? spec.canonical : null,
     spec,
     category: spec ? spec.category : null,
@@ -2497,6 +2529,153 @@ export function documentOf(text) {
  */
 export function blocksOf(text) {
   return parseScript(String(text ?? "")).map((line) => parseLine(line.raw, line.lineNumber));
+}
+
+// ── 区域缩进（纯函数：编辑器 UI / 离线 selftest 共用） ─────────────────────
+//
+// 语义（与 storyPack.stripIndentForEngine 配套）：
+//   缩进 = **可读性**。行首空格/Tab 在编辑器里等价于"不存在"（`parseLine`
+//   已容忍），送引擎前由 `stripIndentForEngine` 去掉；因此区域缩进**不改变
+//   播放**。层级约定（任务书）：
+//     level 0：`[Decision]` 自身、`[End]`/收尾
+//     level 1：`[Decision]` 的 `[Predicate(references=…)]`（线路头）
+//     level 2+：线路体（该 Predicate 之后、到下一条线路/合流/EOF）
+//   每条线路体**独立**计数：`[Decision]` 之后出现第 2 条 `[Predicate]` 即
+//   开新线路，层级回到 1，其体从 2 重新开始。
+
+/** 一级缩进 = 两个空格。 */
+export const INDENT_UNIT = "  ";
+
+/**
+ * 区域缩进：`text` 里 `[from, to)` 的行整体**加**（`direction` 为正/`"indent"`）
+ * 或**减**（负/`"outdent"`）一级（= `INDENT_UNIT`）。混合选择按"全部缩进 /
+ * 全部反缩进"处理（不做"对齐到最小缩进"的智能推断）。
+ *
+ * 逐行处理：**只**改行首空白（`^[ \t]+`），因此不会碰字符串字面量里的空白；
+ * 空行与"行尾 `\` 续行"的下一个物理行也照改（续行去缩进是安全的，见
+ * `stripIndentForEngine`）。反缩进容量 = 该行实际缩进宽度（Tab 记 4，扣到
+ * 不超过 `INDENT_UNIT`），顶格行原样。
+ *
+ * @param {string} text
+ * @param {number} from 起始字符偏移
+ * @param {number} to 结束字符偏移（开区间；`from > to` 时自动交换）
+ * @param {"indent"|"outdent"|1|-1} direction
+ * @returns {{text: string, caret: {from: number, to: number}, lines: number}}
+ */
+export function indentLines(text, from, to, direction) {
+  const src = String(text ?? "");
+  const clamp = (value) => Math.max(0, Math.min(src.length, Math.trunc(Number(value) || 0)));
+  const lo = Math.min(clamp(from), clamp(to));
+  const hi = Math.max(clamp(from), clamp(to));
+  const indent = direction === "indent" || Number(direction) === 1;
+  const first = src.lastIndexOf("\n", Math.max(0, lo - 1)) + 1;
+  // 选区 [from, to)：`to` 落在下一行行首（`to-1` 是本行行尾）时**不含**下一行
+  // ——"选到行尾"不该把下一行也缩进；`to === from`（光标）按本行整行处理。
+  const anchor = hi > lo ? hi - 1 : lo;
+  let last = src.indexOf("\n", Math.min(anchor, src.length));
+  if (last === -1) last = src.length;
+  let lines = 0;
+  const out = src.slice(first, last).split("\n").map((line) => {
+    lines += 1;
+    if (indent) return INDENT_UNIT + line;
+    return outdentOne(line);
+  });
+  return { text: src.slice(0, first) + out.join("\n") + src.slice(last), caret: { from: lo, to: hi }, lines };
+}
+
+/**
+ * 去掉开头**一级**（两个空格；行首 Tab 当一个制表位、够一级就整个吃掉）。
+ * @param {string} line @returns {string}
+ */
+function outdentOne(line) {
+  const head = /^[ \t]+/.exec(line)?.[0] ?? "";
+  if (!head) return line;
+  let used = 0;
+  let width = 0;
+  for (const ch of head) {
+    if (width >= INDENT_UNIT.length) break;
+    width += ch === "\t" ? 4 : 1;
+    used += 1;
+  }
+  return line.slice(used);
+}
+
+/**
+ * `regionIndentPlan(text)`：把 `[Decision]` 区域**整段**重排成层级缩进版
+ * （幂等；`regionIndentPlan(plan.text).text === plan.text`）。规则见上方注释：
+ * `[Decision]` 顶格、其 `[Predicate]` 缩进一级、线路体再缩进一级（两级）；
+ * 线路体在下一条线路/合流 `[Predicate]`、`[End]`/`[endtip]` 或 EOF 处收束。
+ * 只改**非空行**的行首空白；`@tag` 在缩进判定里去、写回时保留。
+ *
+ * @param {string} text
+ * @returns {{text: string, changed: number, lines: number}}
+ */
+export function regionIndentPlan(text) {
+  const src = String(text ?? "").replace(/\r\n?/g, "\n");
+  const rows = src.split("\n");
+  let level = 0;      // 当前层级（Decision 区域内的线路层级）
+  let inside = false;  // 是否在（未收束的）Decision 区域内
+  let changed = 0;
+  const out = rows.map((line) => {
+    const command = regionHeadCommand(line);
+    const bare = line.replace(/^[ \t]+/, "");
+    if (!bare.trim()) return line;
+    if (command === "decision") {
+      inside = true;
+      level = 0;
+    } else if (command === "predicate") {
+      inside = true;
+      level = 1;   // 本行是线路头：1 级；其后的体 = 线路头 + 一级 = 2 级
+    } else if (command === "end" || command === "endtip") {
+      inside = false;
+      level = 0;
+    }
+    const want = command === "decision" || command === "end" || command === "endtip" ? 0
+      : command === "predicate" ? 1
+        : inside ? level + 1
+          : 0;
+    const target = INDENT_UNIT.repeat(want) + bare;
+    if (target !== line) changed += 1;
+    return target;
+  });
+  return { text: out.join("\n"), changed, lines: rows.length };
+}
+
+/**
+ * 一行里的命令名（`[Decision]` → `decision`；`[name="X"]` → `dialog`；旁白 → null）。
+ * `@tag` 去掉，行首空白允许。
+ * @param {string} line @returns {string|null}
+ */
+function regionHeadCommand(line) {
+  const body = line.replace(/^[ \t]+/, "");
+  if (!body.startsWith("[")) return null;
+  const close = body.indexOf("]");
+  if (close === -1) return null;
+  const head = body.slice(1, close);
+  if (/^\s*name\s*=/.test(head)) return "dialog";
+  const open = head.indexOf("(");
+  const name = (open === -1 ? head : head.slice(0, open)).split("@")[0].trim();
+  return /^[A-Za-z_]\w*$/.test(name) ? name.toLowerCase() : null;
+}
+
+/**
+ * 区域缩进的**单行**提示（0x1019，提示级）：逐行的 `parseLine` 看不到文档
+ * 结构（Decision/Predicate 由 `regionIndentPlan` 整段重排），这里只提示"目测
+ * 会歪"的写法 —— 行首空格宽度不是两格的整数倍（惯例：两空格一级）。
+ * 行首 Tab 另由 `UseSpaceInsteadTab`（100C）提示。
+ *
+ * `lead` 是**整行**的行首空白；span 相对整行，故在 `unshift` 之后调用。
+ *
+ * @param {string} lead
+ * @param {number} line
+ * @param {Diagnostic[]} out
+ */
+function indentDiagnostics(lead, line, out) {
+  if (!lead || lead.includes("\t")) return;
+  if (lead.length % INDENT_UNIT.length === 0) return;
+  out.push(diag("BadIndentation", line, 0, lead.length,
+    `行首缩进 ${lead.length} 格，不是 ${INDENT_UNIT.length} 的整数倍（区域缩进惯例：两空格一级）`,
+    `改成 ${INDENT_UNIT.repeat(Math.max(1, Math.round(lead.length / INDENT_UNIT.length)))}（或顶格写）`));
 }
 
 // ── 补全 ────────────────────────────────────────────────────────────────────

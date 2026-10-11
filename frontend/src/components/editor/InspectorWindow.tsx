@@ -28,6 +28,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useT } from "../../i18n/index.ts";
 import "./inspectorWindow.css";
 import { clampWindowState, parseWindowState, writeWindowState, type WindowState } from "./windowState";
 import type { PanelChromeProps } from "./inspectorWindow";
@@ -146,6 +147,7 @@ export default function InspectorWindow({
   absoluteRect = false,
   style,
 }: InspectorWindowProps) {
+  const tr = useT();
   const rootRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   /** 指针在壳内：`Escape` 在"刚拖完没点过输入框"时也要能关。 */
@@ -432,15 +434,15 @@ export default function InspectorWindow({
         onDoubleClick={shell === "map" ? toggle : undefined}
         title={
           floating
-            ? "拖动移动 · 双击回停靠"
+            ? tr("editor.window.barFloat", undefined, "拖动移动 · 双击回停靠")
             : shell === "map"
-              ? "拖动拼接 · 双击（或 ⧉）浮动"
-              : "常驻面板：拖到别的面板边缘拼接 · 折叠 ▾ 收起"
+              ? tr("editor.window.barMap", undefined, "拖动拼接 · 双击（或 ⧉）浮动")
+              : tr("editor.window.barDock", undefined, "常驻面板：拖到别的面板边缘拼接 · 折叠 ▾ 收起")
         }
       >
         {icon && <span className="ed-win-icon">{icon}</span>}
         <span className="ed-win-title">{title}</span>
-        {folded && <span className="ed-win-fold-hint">已收起</span>}
+        {folded && <span className="ed-win-fold-hint">{tr("editor.window.folded", undefined, "已收起")}</span>}
         <span className="ed-win-grow" />
         {foldHandler && shell === "dock" && !showFloatButton ? (
           <button
@@ -448,8 +450,8 @@ export default function InspectorWindow({
             className="ed-win-collapse"
             data-win-action="fold"
             onClick={foldHandler}
-            title={folded ? "展开" : "收起"}
-            aria-label={folded ? "展开面板" : "收起面板"}
+            title={folded ? tr("editor.toolbar.foldShow", undefined, "展开") : tr("editor.toolbar.foldHide", undefined, "收起")}
+            aria-label={folded ? tr("editor.window.expandPanel", undefined, "展开面板") : tr("editor.window.collapsePanel", undefined, "收起面板")}
             aria-expanded={!folded}
           >
             {folded ? "▸" : "▾"}
@@ -461,8 +463,8 @@ export default function InspectorWindow({
             className="ed-win-btn ed-win-fold"
             data-win-action="fold"
             onClick={foldHandler}
-            title={folded ? "展开" : "收起"}
-            aria-label={folded ? "展开面板" : "收起面板"}
+            title={folded ? tr("editor.toolbar.foldShow", undefined, "展开") : tr("editor.toolbar.foldHide", undefined, "收起")}
+            aria-label={folded ? tr("editor.window.expandPanel", undefined, "展开面板") : tr("editor.window.collapsePanel", undefined, "收起面板")}
             aria-expanded={!folded}
           >
             {folded ? "▸" : "▾"}
@@ -474,8 +476,8 @@ export default function InspectorWindow({
             className="ed-win-btn ed-win-float"
             data-win-action="float"
             onClick={toggle}
-            title={floating ? "停靠回工作台" : "浮动窗口"}
-            aria-label={floating ? "停靠窗口" : "浮动窗口"}
+            title={floating ? tr("editor.window.dockBack", undefined, "停靠回工作台") : tr("editor.window.floatWindow", undefined, "浮动窗口")}
+            aria-label={floating ? tr("editor.window.dockWindow", undefined, "停靠窗口") : tr("editor.window.floatWindow", undefined, "浮动窗口")}
           >
             ⧉
           </button>
@@ -486,8 +488,8 @@ export default function InspectorWindow({
             className="ed-win-btn ed-win-close"
             data-win-action="close"
             onClick={onClose}
-            title="关闭（Esc）"
-            aria-label="关闭窗口"
+            title={tr("editor.window.closeEsc", undefined, "关闭（Esc）")}
+            aria-label={tr("editor.window.closeWindow", undefined, "关闭窗口")}
           >
             ✕
           </button>
@@ -503,7 +505,7 @@ export default function InspectorWindow({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        title={onResizeShare && !floating ? "拖动调整比例" : "拖动调整大小"}
+        title={onResizeShare && !floating ? tr("editor.window.resizeShare", undefined, "拖动调整比例") : tr("editor.window.resizeFree", undefined, "拖动调整大小")}
       />
     </div>
   );
