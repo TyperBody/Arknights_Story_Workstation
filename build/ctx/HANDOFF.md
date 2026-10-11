@@ -26,6 +26,7 @@ npm run test:editor                 # 168 + 149
 npm run test:stage                  # 82
 npm run test:mirror                 # 121/121 + rust-mirror-live 13 + live-download 3
 npm run test:starter                # 17/17（`--native` 追加真 WebKitGTK seed 断言 → 18）
+npm run test:harness                # 14 个 harness 全绿（scripts/harness/run.mjs；见 docs/dev/harness.md）
 node scripts/fanfic/fetch-starter-assets.mjs --check   # 287 张 / 15,301,040 B / problems=[]
 npm run test:workbench             # demo-check 22/22 · stage-zoom 38 · window-chrome 5/5 · workbench-drag 3/3 · branch-shot 59 · engine-failure 2/2
 npm run test:workbench:model       # 62/62
