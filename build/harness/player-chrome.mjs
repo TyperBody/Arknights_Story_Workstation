@@ -1,0 +1,23 @@
+// 播放器底栏（§ 设置 → 播放器底栏）：`show` / `auto`（默认；纯隐藏）/ `hide` 三档契约。
+//   node build/harness/player-chrome.mjs      # 纯静态断言（读源码 + CSS 注入字符串）
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+let pass = 0, fail = 0;
+const t = (l, ok, d = "") => { if (ok) { pass += 1; console.log(`ok   ${l}${d ? ` — ${d}` : ""}`); } else { fail += 1; console.log(`FAIL ${l}${d ? ` — ${d}` : ""}`); } };
+
+const ui = readFileSync(resolve("frontend/src/lib/uiSettings.ts"), "utf8");
+const boot = readFileSync(resolve("frontend/src/lib/storyPlayerBoot.ts"), "utf8");
+const settings = readFileSync(resolve("frontend/src/pages/SettingsPage.tsx"), "utf8");
+
+t("默认档 = auto", /PLAYER_CHROME_VALUES[\s\S]{0,200}?\?\s*\(raw as PlayerChrome\)\s*:\s*"auto"/.test(ui), "");
+t("auto 是默认档（不写 key）", /value === "auto"\)\s*localStorage\.removeItem/.test(ui), "");
+t("auto 档无 3 秒定时器（纯隐藏）", /CHROME_AUTO[\s\S]{0,2000}?setHidden\(true\)/.test(boot) && !/setTimeout\([\s\S]{0,200}3000/.test(boot), "");
+t("auto 档：指针几何命中即显示", /pointermove"[\s\S]{0,60}onMove/.test(boot) && /getBoundingClientRect\(\)/.test(boot), "");
+t("auto 档：移出即收起", /pointerleave"[^)]*setHidden\(true\)/.test(boot) || /onOut/.test(boot), "");
+t("CSS：收起态透明度 + 不接收指针", /ark-chrome-auto[\s\S]{0,120}ark-chrome-hidden\{opacity:0;pointer-events:none/.test(boot.replace(/\s+/g, "")), "");
+t("CSS：展开态由 html.ark-chrome-open 决定", /ark-chrome-auto\.ark-chrome-open/.test(boot.replace(/\s+/g, "")), "");
+t("hide 档仍是 display:none", /ark-chrome-hide[\s\S]{0,80}display:none/.test(boot.replace(/\s+/g, "")), "");
+t("设置页文案与默认一致（auto=默认）", /底栏常藏，指针移上去才显示/.test(settings), "");
+t("设置页三档循环仍存在", /\["show",\s*"auto",\s*"hide"\]/.test(settings), "");
+console.log(`\n${pass} pass / ${fail} fail`);
+if (fail) process.exitCode = 1;

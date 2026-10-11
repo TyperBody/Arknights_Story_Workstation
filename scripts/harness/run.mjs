@@ -46,6 +46,9 @@ const GROUPS = {
     ["p4-shell-unit.mjs", "窗口壳纯逻辑（兜底表/注册表/resolveChrome）"],
     ["p4-shell-probe.mjs", "窗口壳交互（折叠/⧉/拖动/缩放/✕）"],
   ],
+  player: [
+    ["player-chrome.mjs", "播放器底栏三档（auto=默认纯隐藏/指针几何命中/hide）"],
+  ],
 };
 
 const argv = process.argv.slice(2);
