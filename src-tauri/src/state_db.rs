@@ -308,6 +308,21 @@ mod tests {
     }
 
     #[test]
+    fn lives_outside_every_cache_root() {
+        // 「清除所有缓存」= 删 `cache/` + `assets/` + `media/`（`commands::cache::all_cache_roots`）。
+        // `state.db` 在**资源目录根**（不是这些子目录里）→ 清缓存不动"记忆"。
+        let db = db_path();
+        let roots = ["cache", "assets", "media"];
+        assert_eq!(db.file_name().and_then(|n| n.to_str()), Some("state.db"));
+        for sub in roots {
+            assert!(
+                !db.starts_with(crate::data_root::data_root().join(sub)),
+                "state.db 不能落在 {sub}/ 里"
+            );
+        }
+    }
+
+    #[test]
     fn survives_corrupt_file_by_rebuilding() {
         let dir = std::env::temp_dir().join(format!("arkstage-state-test-corrupt-{}", now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
