@@ -112,8 +112,12 @@ if (!win()) {
 }
 await sleep(0);
 
-for (const label of ["cold", "warm"]) {
+for (const label of ["cold", "warm", "cleared"]) {
   if (label === "cold") { rmSync(dataDir, { recursive: true, force: true }); mkdirSync(dataDir, { recursive: true }); }
+  // 「清除所有缓存」= 删 `cache/` + `media/`（**不动** `state.db`）：记忆必须还在。
+  if (label === "cleared") {
+    for (const sub of ["cache", "media"]) rmSync(join(dataDir, sub), { recursive: true, force: true });
+  }
   const run = await launch(`state-${label}.log`);
   const text = run.read();
   check(`${label}: 应用起来了`, Boolean(run.win), run.win ? `win=${run.win}` : "无窗口");
@@ -152,6 +156,23 @@ for (const label of ["cold", "warm"]) {
       rows.some((r) => r.startsWith("workspace:prts-editor-wb:")),
       `dz=${d1}/${d2} rows=${JSON.stringify(rows).slice(0, 220)}`);
     shot("state-cold-editor-dragged.png");
+  } else if (label === "cleared") {
+    await sleep(5000);
+    sh(`DISPLAY=${display} xdotool windowmove --sync ${run.win} 0 0 2>/dev/null`);
+    sh(`DISPLAY=${display} xdotool windowactivate --sync ${run.win} 2>/dev/null`);
+    await sleep(2000);
+    const d1 = await clickNav(604, 415, 2.5);
+    sh(`DISPLAY=${display} xdotool key Escape`);
+    await sleep(400);
+    const d2 = d1 === null ? null : await clickNav(464, 209, 4.0);
+    await sleep(2000);
+    shot("state-cleared-editor.png");
+    const rows = sqlite("select key||'='||value from kv where scope='workspace'")?.rows ?? [];
+    check("cleared: 清掉 cache/media 后布局仍在 state.db", rows.some((r) => r.startsWith("prts-editor-wb:default=")),
+      `dz=${d1}/${d2} ${JSON.stringify(rows).slice(0, 160)}`);
+    // 视图状态（面板开关）：分支图仍是开的（冷启动时点开的）
+    const view = rows.find((r) => r.startsWith("prts-editor-wb:view=")) ?? "";
+    check("cleared: 面板开关（视图状态）也还在", /branch/.test(view), view.slice(0, 120));
   } else {
     await sleep(4000);
     shot("state-warm-home.png");
@@ -159,7 +180,8 @@ for (const label of ["cold", "warm"]) {
     // （`[state] snapshot scope=workspace n=N`，N>0 才算真读到）。
     const persist = sqlite("select key||'='||value from kv where scope='workspace' and key like '%default'")?.rows ?? [];
     check("warm: 布局仍在库里（重启不丢）", persist.length > 0, JSON.stringify(persist).slice(0, 160));
-    const readBack = (text.match(/\[state\] snapshot scope=workspace n=(\d+)/g) ?? []).join(",");
+    // ⚠️ 用**新读一次**的日志：`text` 是启动早期抓的，hydrate 的 DEBUG 行更晚。
+    const readBack = (run.read().match(/\[state\] snapshot scope=workspace n=(\d+)/g) ?? []).join(",");
     const n = Number(/n=(\d+)/.exec(readBack)?.[1] ?? 0);
     check("warm: 启动时从 state.db 读到了这些键（hydrate 生效）", n > 0, readBack || "无 snapshot 日志");
   }
