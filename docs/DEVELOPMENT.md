@@ -224,11 +224,14 @@ Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust �
 | 产物 | 命令 | 说明 |
 |---|---|---|
 | `Arkstage_1.2.0_x64-setup.exe`（NSIS 安装器，~26 MB） | `bash scripts/desktop-build.sh windows` | `targets: nsis`，`webviewInstallMode: embedBootstrapper`；`build/toolchain/target-win` 缓存，LTO 链接 ~4 min |
-| `Arkstage_1.2.0_windows_x64-portable.zip`（免安装，~26 MB） | `bash scripts/desktop-build.sh windows` 后按下方组装 | **必须**把 `target-win/.../release/resources/assets`（随包起步素材）一起打进 zip，否则「素材随包」失效 |
+| `Arkstage_<ver>_windows_x64-portable.zip`（免安装，~26 MB） | `bash scripts/build-windows-portable.sh` | 自带 `Arkstage.exe` + `WebView2Loader.dll` + **`resources/assets/**`**（随包起步素材，287 张） |
 
-⚠️ `scripts/build-windows-portable.sh` 里的 `REL_DIR` 仍写死 `src-tauri/target/...`；
-本机用 `CARGO_TARGET_DIR=build/toolchain/target-win` 时要从那里取 exe 与 `resources/`：
-`app.exe` → `Arkstage.exe`、`WebView2Loader.dll`、`resources/assets/**`。
+`build-windows-portable.sh` 现在**自己**处理这些（2026-10-12）：`CARGO_TARGET_DIR` 默认
+`build/toolchain/target-win`（与 `desktop-build.sh windows` 同一个目录 → 先出 NSIS 再打便携包
+**复用**同一份跨编译产物；此前写死 `src-tauri/target/...` 会整个 Windows 依赖图重编，实测 +76 min）、
+`rustup` 走 `$CARGO_HOME/bin`（bare 环境下 PATH 里没有）、exe 发布名 `Arkstage.exe`、
+并把 `src-tauri/resources/assets` 拷进 `resources/`（`--no-bundle` 不会自动拷 `bundle.resources`）。
+预构建清理**只删** `target/...`（除非 `KEEP_TARGET=1`）。
 
 ## CI / Release
 
