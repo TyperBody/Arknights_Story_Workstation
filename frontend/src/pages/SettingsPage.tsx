@@ -34,6 +34,13 @@ const MIRROR_LABELS: Record<MirrorSource, { label: string; hint: string }> = {
   custom: { label: "自定义源", hint: "自填模板 URL；占位符 {url} / {key} / {host} / {path}" },
 };
 
+/** 起步素材集三类的中文名（Rust `curated.json` 的 group）。 */
+const STARTER_GROUP_LABELS: Record<string, string> = {
+  core: "UI 小图",
+  background: "背景",
+  portrait: "立绘",
+};
+
 /** 下载源示例 URL（设置页「当前会拼成…」预览。以引擎入口为样例；`example` 处是上游产物哈希）。 */
 const SAMPLE_URL = "https://static.prts.wiki/widgets/production/StoryPlayer.example.js";
 
@@ -49,6 +56,16 @@ interface CacheStatus {
   asset_db_cached: boolean;
   cached_stories: string[];
   total_size_bytes: number;
+}
+
+/** 随包「起步素材集」的概况（Rust `StarterSetInfo`，serde camelCase）。 */
+interface StarterSetInfo {
+  files: number;
+  bytes: number;
+  groups: Record<string, number>;
+  installed: number;
+  present: boolean;
+  dir: string;
 }
 
 interface LibraryDirInfo {
@@ -91,6 +108,7 @@ export default function SettingsPage() {
   // 「下载器当前真正生效的源」——从 Rust 读回（`download_settings_get`），
   // 用于证明设置页的选择确实推到了下载引擎 / prts-cdn（而不只是 UI 预览）。
   const [rustMirror, setRustMirror] = useState<MirrorSource | null>(null);
+  const [starter, setStarter] = useState<StarterSetInfo | null>(null);
   const [envInfo, setEnvInfo] = useState("");
   const [catalog, setCatalog] = useState<CatalogSummary | null>(null);
 
@@ -100,6 +118,7 @@ export default function SettingsPage() {
     refreshCacheStatus();
     invoke<ResourceDirInfo>("get_resource_dir").then(setResDir).catch(() => {});
     invoke<LibraryDirInfo>("get_library_dir").then(setLibraryDir).catch(() => {});
+    invoke<StarterSetInfo>("starter_set_info").then(setStarter).catch(() => {});
     getDownloadSettings()
       .then((s) => {
         setConcurrency(s.concurrency);
@@ -184,6 +203,22 @@ export default function SettingsPage() {
       return out ?? "—（该源对本样例不适用 / 缺模板）";
     } catch {
       return "—";
+    }
+  };
+
+  /** 「补齐随包素材」：把安装包里的起步素材集复制进资源目录（幂等）。 */
+  const syncStarterSet = async () => {
+    try {
+      const copied = await invoke<number>("starter_set_sync");
+      const info = await invoke<StarterSetInfo>("starter_set_info");
+      setStarter(info);
+      showMsg(
+        copied > 0
+          ? `已补齐随包素材：新增 ${copied} 个文件（共 ${info.installed} 个可用）。`
+          : `随包素材已是最新（${info.installed} 个可用）。`,
+      );
+    } catch (error) {
+      showMsg(`补齐失败：${error instanceof Error ? error.message : String(error)}`, 6000);
     }
   };
 
@@ -624,6 +659,30 @@ export default function SettingsPage() {
           ) : (
             <div>正在读取缓存状态...</div>
           )}
+          <div style={{ marginTop: "8px" }}>
+            随包素材：
+            {starter ? (
+              <>
+                {starter.files} 张 / {formatBytes(starter.bytes)}（
+                {Object.entries(starter.groups)
+                  .map(([group, count]) => `${STARTER_GROUP_LABELS[group] ?? group} ${count}`)
+                  .join("、")}
+                ）{starter.present ? "，已就位" : "；资源目录里还没有，点右侧按钮补齐"}，
+                离线可用；缺失的素材首次播放时自动下载并缓存。
+              </>
+            ) : (
+              "读取中…"
+            )}
+            {starter && !starter.present && (
+              <button
+                className="nav-btn"
+                style={{ fontSize: "12px", marginLeft: "8px" }}
+                onClick={syncStarterSet}
+              >
+                补齐随包素材
+              </button>
+            )}
+          </div>
           {compression.tier !== "off" && (
             <div style={{ marginTop: "6px", display: "flex", alignItems: "center", gap: "10px" }}>
               <span>

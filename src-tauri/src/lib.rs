@@ -153,23 +153,38 @@ fn attributes_offline(err: &str) -> bool {
 /// pack sharing those keys) play with **zero network**: the engine's canonical URL
 /// resolves to the shipped art before the media store or PRTS is consulted.
 fn bundled_sample_asset(key: &str) -> Option<Vec<u8>> {
-    let dir = data_root::data_root().join("assets").join("sample");
-    log::debug!("[prts-cdn] overlay lookup key={key} dir={}", dir.display());
-    let manifest = std::fs::read_to_string(dir.join("bundles.json")).ok()?;
-    let table: std::collections::HashMap<String, String> = serde_json::from_str(&manifest).ok()?;
-    let name = table.get(key)?;
-    // The manifest ships with the app; still refuse anything that isn't a bare file
-    // name so a tampered copy can't escape the sample dir.
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
-        return None;
+    for dir in overlay_dirs() {
+        log::debug!("[prts-cdn] overlay lookup key={key} dir={}", dir.display());
+        let Ok(manifest) = std::fs::read_to_string(dir.join("bundles.json")) else {
+            continue;
+        };
+        let Ok(table) = serde_json::from_str::<std::collections::HashMap<String, String>>(&manifest)
+        else {
+            continue;
+        };
+        let Some(name) = table.get(key) else { continue };
+        // The manifest ships with the app; still refuse anything that isn't a bare
+        // file name so a tampered copy can't escape the overlay dir.
+        if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+            return None;
+        }
+        let bytes = std::fs::read(dir.join(name)).ok();
+        // `info!`：自带素材的供给是「离线可播」的关键事实，原生自检要按行统计。
+        log::info!(
+            "[prts-cdn] overlay hit key={key} name={name} dir={} bytes={}",
+            dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+            bytes.as_ref().map(Vec::len).unwrap_or(0)
+        );
+        return bytes;
     }
-    let bytes = std::fs::read(dir.join(name)).ok();
-    // `info!`：自带素材的供给是「离线可播」的关键事实，原生自检要按行统计。
-    log::info!(
-        "[prts-cdn] overlay hit key={key} name={name} bytes={}",
-        bytes.as_ref().map(Vec::len).unwrap_or(0)
-    );
-    bytes
+    None
+}
+
+/// Overlay lookup order: the curated starter set (P9 — the assets a fan-fic is
+/// most likely to reference) first, then the 8-asset sample pack.
+fn overlay_dirs() -> [std::path::PathBuf; 2] {
+    let assets = data_root::data_root().join("assets");
+    [assets.join("starter"), assets.join("sample")]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -408,6 +423,9 @@ pub fn run() {
             assets::pack_asset_path,
             assets::bundled_asset_keys,
             assets::seed_sample_assets_cmd,
+            // Bundled starter asset set (P9): 起步素材集概况 + 补齐
+            assets::starter_set_info,
+            assets::starter_set_sync,
             // Managed bulk downloads
             download::download_start,
             download::download_add,

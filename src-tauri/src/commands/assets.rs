@@ -263,6 +263,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn starter_summary_matches_the_shipped_manifest() {
+        let (files, bytes, groups) = starter_summary();
+        assert!(files >= 200, "起步素材集条目太少：{files}");
+        assert!(bytes > 8 * 1024 * 1024, "起步素材集太小：{bytes}");
+        assert!(bytes <= 25 * 1024 * 1024, "起步素材集超预算：{bytes}");
+        assert_eq!(
+            groups.get("core").copied().unwrap_or(0)
+                + groups.get("background").copied().unwrap_or(0)
+                + groups.get("portrait").copied().unwrap_or(0),
+            files
+        );
+        assert!(groups.get("background").copied().unwrap_or(0) >= 60);
+        assert!(groups.get("portrait").copied().unwrap_or(0) >= 80);
+    }
+
+    #[test]
+    fn bundled_keys_merge_starter_then_sample() {
+        let keys = bundled_asset_keys_at(&std::env::temp_dir().join("prts-starter-keys-none"));
+        // 目录不存在 → 回落随包内置清单（starter + sample 合并）。
+        assert!(keys.contains(&"torappu.prts.wiki/assets/avg/background/bg_black.png".to_string()));
+        assert!(keys.iter().any(|k| k.starts_with("torappu.prts.wiki/assets/avg/background/")));
+        assert!(keys.len() > 250, "合并后的 key 数不足：{}", keys.len());
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(sorted, keys, "key 列表应有序");
+        assert_eq!(sorted.len(), {
+            let mut dedup = sorted.clone();
+            dedup.dedup();
+            dedup.len()
+        });
+    }
+
+    #[test]
+    fn starter_seed_copies_files_and_reports_presence() {
+        let root = std::env::temp_dir().join(format!("prts_starter_{}", std::process::id()));
+        let source = root.join("bundle-resources");
+        let data = root.join("data");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        // 一张「安装包里的」图 + 一个不该被复制的非图片文件。
+        std::fs::write(source.join("bg_black.webp"), b"RIFF____WEBP").unwrap();
+        std::fs::write(source.join("notes.txt"), b"skip me").unwrap();
+        let copied = seed_starter_assets_at(&data, &source).unwrap();
+        assert_eq!(copied, 1);
+        let info = starter_set_info_at(&data);
+        assert!(info.present);
+        assert_eq!(info.installed, 1);
+        assert!(info.files > 200);
+        assert!(data.join("assets/starter/bg_black.webp").is_file());
+        assert!(!data.join("assets/starter/notes.txt").exists());
+        assert!(data.join("assets/starter/bundles.json").is_file());
+        // 幂等：第二次不再复制。
+        assert_eq!(seed_starter_assets_at(&data, &source).unwrap(), 0);
+        // 缺资源的目录 → 报告「只有清单」。
+        let empty = starter_set_info_at(&root.join("no-such-data"));
+        assert!(!empty.present);
+        assert_eq!(empty.installed, 0);
+        assert!(empty.files > 200);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn engine_integrity_rejects_html_and_accepts_expected_markers() {
         assert!(validate_engine_asset(
             "krliov.toolbox.js",
@@ -574,6 +637,13 @@ fn seed_library_at(library: &std::path::Path) -> Result<SeededInfo, String> {
         // 顺带落一份「资源目录」可见的样例素材（`<root>/assets/sample/`，含 SOURCES.md）。
         if let Some(root) = library.parent().and_then(|p| p.parent()) {
             let _ = seed_sample_assets(root);
+            // 起步素材集（P9）：随包文件复制进资源目录（幂等）。随包资源缺失时
+            // `seed_starter_assets` 返回 0，不报错。
+            match seed_starter_assets(root, assets_resource_dir().as_deref()) {
+                Ok(copied) if copied > 0 => log::info!("[starter] seeded {copied} file(s)"),
+                Ok(_) => {}
+                Err(error) => log::warn!("[starter] seed failed: {error}"),
+            }
         }
         seeded = 1;
     }
@@ -613,6 +683,176 @@ const SAMPLE_LOCAL_MAP: &str =
 /// 完整）；包内副本 `library/<pack>/assets/**` 由协议处理器直接读，无需复制。
 /// 覆盖层清单（canonical key → 文件名）：seed 与 `bundled_asset_keys_at` 共用。
 const SAMPLE_BUNDLES: &str = include_str!("../../resources/assets/sample/bundles.json");
+
+/// 起步素材集（P9）的清单：**只内置清单**（`include_str!`），文件本身随安装包
+/// resources 发布（`tauri.conf.json::bundle.resources`）——几百张图不能逐个
+/// `include_bytes!`（会把二进制撑爆）。seed 时从**安装包资源目录**复制到
+/// `<资源目录>/assets/starter/`；资源目录缺失（开发运行 / 老安装包）时退化为
+/// 「只有清单、没有文件」：覆盖层查不到就照常走网络 + 缓存（不会回归）。
+const STARTER_BUNDLES: &str = include_str!("../../resources/assets/starter/bundles.json");
+const STARTER_CURATED: &str = include_str!("../../resources/assets/starter/curated.json");
+/// 随包资源的相对目录名（与 `tauri.conf.json` 的 `bundle.resources` 对应）。
+const STARTER_RESOURCE_DIR: &str = "resources/assets/starter";
+
+/// 起步素材集的概况（设置页「随包素材」那一行）。serde camelCase。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarterSetInfo {
+    /// 清单里的条目数（= 随包 key 数；不等于磁盘上的文件数）。
+    pub files: usize,
+    /// 清单里的总字节数（`curated.json` 的 `bytes`）。
+    pub bytes: u64,
+    /// 三类各多少：`{"background": 120, "core": 7, "portrait": 160}`。
+    pub groups: std::collections::BTreeMap<String, usize>,
+    /// 磁盘上实际可供给的文件数（资源目录里 `assets/starter/**` 的图）。
+    pub installed: usize,
+    /// 资源目录里有没有起步素材集（false = 只有清单，缺失走网络）。
+    pub present: bool,
+    /// 资源目录位置（便于用户排查「为什么没有随包素材」）。
+    pub dir: String,
+}
+
+/// 读清单（内置的那份）：`(条目数, 字节, 每组条目数)`。坏清单 → 全 0（不抛）。
+fn starter_summary() -> (usize, u64, std::collections::BTreeMap<String, usize>) {
+    let mut groups: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(STARTER_CURATED) else {
+        return (0, 0, groups);
+    };
+    let entries = value
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for entry in &entries {
+        if let Some(group) = entry.get("group").and_then(|v| v.as_str()) {
+            *groups.entry(group.to_string()).or_insert(0) += 1;
+        }
+    }
+    let bytes = value.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+    (entries.len(), bytes, groups)
+}
+
+/// 图片扩展名白名单（起步素材集里只有 PNG/WebP）。
+fn is_starter_image(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".png") || lower.ends_with(".webp") || lower.ends_with(".jpg") || lower.ends_with(".jpeg")
+}
+
+/// 起步素材集的概况（`starter_set_info` 命令的核心，可测）。
+pub(crate) fn starter_set_info_at(root: &std::path::Path) -> StarterSetInfo {
+    let (files, bytes, groups) = starter_summary();
+    let dir = root.join("assets").join("starter");
+    let installed = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries
+            .flatten()
+            .filter(|e| e.path().is_file() && is_starter_image(&e.file_name().to_string_lossy()))
+            .count(),
+        Err(_) => 0,
+    };
+    StarterSetInfo {
+        files,
+        bytes,
+        groups,
+        installed,
+        present: installed > 0,
+        dir: dir.to_string_lossy().to_string(),
+    }
+}
+
+/// 把随包的起步素材集复制进资源目录（幂等：同名同大小即跳过）。
+///
+/// `source` = 安装包 resources 里的 `<...>/resources/assets/starter`。找不到
+/// （开发运行 / 老安装包）→ `Ok(0)`，仅记一条 debug：**不是错误**，缺失的素材
+/// 照旧「首次播放时下载并缓存」。
+fn seed_starter_assets(
+    root: &std::path::Path,
+    source: Option<&std::path::Path>,
+) -> Result<usize, String> {
+    let Some(source) = source else { return Ok(0) };
+    if !source.is_dir() {
+        log::debug!("[starter] 随包资源目录缺失：{}", source.display());
+        return Ok(0);
+    }
+    let dir = root.join("assets").join("starter");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create starter dir: {e}"))?;
+    let mut copied = 0usize;
+    for entry in std::fs::read_dir(source).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !is_starter_image(&name) {
+            continue;
+        }
+        let target = dir.join(&name);
+        let same = std::fs::metadata(&target)
+            .ok()
+            .zip(std::fs::metadata(&path).ok())
+            .is_some_and(|(a, b)| a.len() == b.len());
+        if same {
+            continue;
+        }
+        std::fs::copy(&path, &target)
+            .map_err(|e| format!("Failed to copy starter {name}: {e}"))?;
+        copied += 1;
+    }
+    // 清单/出处也复制一份：用户在「资源目录」里能看到来源，协议处理器也能读。
+    let _ = std::fs::write(dir.join("SOURCES.md"), include_str!("../../resources/assets/starter/SOURCES.md"));
+    let _ = std::fs::write(dir.join("curated.json"), STARTER_CURATED);
+    let _ = std::fs::write(dir.join("bundles.json"), STARTER_BUNDLES);
+    Ok(copied)
+}
+
+/// 起步素材集概况（设置 →「随包素材」那一行）。
+#[tauri::command]
+pub async fn starter_set_info() -> Result<StarterSetInfo, String> {
+    Ok(starter_set_info_at(&crate::data_root::data_root()))
+}
+
+/// 「补齐随包素材」：把安装包里的起步素材集复制进资源目录（幂等）。
+/// 返回复制/更新的文件数；随包资源缺失时返回 0（调用方按 `present` 展示）。
+#[tauri::command]
+pub async fn starter_set_sync(app: tauri::AppHandle) -> Result<usize, String> {
+    let root = crate::data_root::data_root();
+    let source = starter_resource_dir(&app);
+    let copied = seed_starter_assets(&root, source.as_deref())?;
+    log::info!(
+        "[starter] sync copied={copied} installed={}",
+        starter_set_info_at(&root).installed
+    );
+    Ok(copied)
+}
+
+/// 安装包 resources 里的起步素材集目录（`…/resources/assets/starter`）。
+fn starter_resource_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    let base = app.path().resource_dir().ok()?;
+    let dir = base.join(STARTER_RESOURCE_DIR);
+    dir.is_dir().then_some(dir)
+}
+
+/// 无 `AppHandle` 的启动路径（`seed_library_sync`）用的 resources 目录探测：
+/// 依次试 exe 旁的 `resources/`（Windows/Linux 打包布局）、`../Resources/`
+/// （macOS .app）、exe 同级的 `resources/assets/starter`。找不到 → None。
+pub(crate) fn assets_resource_dir() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let candidates = [
+        dir.join(STARTER_RESOURCE_DIR),
+        dir.join("..").join("Resources").join(STARTER_RESOURCE_DIR),
+        dir.join("resources").join("resources").join("assets").join("starter"),
+    ];
+    candidates.into_iter().find(|p| p.is_dir())
+}
+
+/// 自检/测试用：起步素材集 seed 的入口（显式给 source 目录）。
+pub(crate) fn seed_starter_assets_at(
+    root: &std::path::Path,
+    source: &std::path::Path,
+) -> Result<usize, String> {
+    seed_starter_assets(root, Some(source))
+}
 
 fn seed_sample_assets(root: &std::path::Path) -> Result<usize, String> {
     const FILES: [(&str, &[u8]); 8] = SAMPLE_ASSET_FILES;
@@ -657,24 +897,29 @@ pub async fn bundled_asset_keys() -> Result<Vec<String>, String> {
 /// `bundled_asset_keys` 的核心（可测）：目录里没有 bundles.json（例如用户从没
 /// 启动过 seed）时回落到随包内置的那份——判定结果与首次 seed 之后一致。
 pub(crate) fn bundled_asset_keys_at(root: &std::path::Path) -> Vec<String> {
-    let manifest = root.join("assets").join("sample").join("bundles.json");
-    let text = std::fs::read_to_string(&manifest)
-        .unwrap_or_else(|_| SAMPLE_BUNDLES.to_string());
-    match serde_json::from_str::<std::collections::HashMap<String, String>>(&text) {
-        Ok(table) => {
-            let mut keys: Vec<String> = table
+    // `starter`（P9 起步素材集）在前、`sample` 在后：两侧都有同一个 key 时，
+    // 前端只需知道「这个 key 归覆盖层」，实际取字节由协议处理器按同一顺序查。
+    let mut keys = Vec::new();
+    for (dir, fallback) in [("starter", STARTER_BUNDLES), ("sample", SAMPLE_BUNDLES)] {
+        let manifest = root.join("assets").join(dir).join("bundles.json");
+        let text = std::fs::read_to_string(&manifest).unwrap_or_else(|_| fallback.to_string());
+        let Ok(table) = serde_json::from_str::<std::collections::HashMap<String, String>>(&text)
+        else {
+            continue;
+        };
+        keys.extend(
+            table
                 .into_iter()
                 // 与协议处理器同一套「裸文件名」校验：畸形的表项不算命中。
                 .filter(|(_, name)| {
                     !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains("..")
                 })
-                .map(|(key, _)| key)
-                .collect();
-            keys.sort();
-            keys
-        }
-        Err(_) => Vec::new(),
+                .map(|(key, _)| key),
+        );
     }
+    keys.sort();
+    keys.dedup();
+    keys
 }
 
 /// 已装剧本包**自带素材**的绝对路径解析：`pack_asset_path(packId, name)`。
