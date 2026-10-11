@@ -1868,10 +1868,26 @@
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 12px;
+  /* 面板被拖窄时：状态文字先省略号，不要让 bar 溢出 / 换行。 */
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
+/* 标题与按钮都不参与收缩——被压的只该是中间的状态文字。 */
+.ed-preview-bar > span:first-child,
+.ed-preview-bar .ed-btn {
+  flex: none;
+}
+
+/* 状态文字必须**单行**：`flex: 1` + 汉字可任意断行 → 会被挤成
+   「一个字一列」把整条 bar 撑成十几行高（预览里那串竖排字）。 */
 .ed-preview-bar .grow {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ed-preview-frame {
