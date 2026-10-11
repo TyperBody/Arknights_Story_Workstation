@@ -1,6 +1,7 @@
 # 验收 harness 一览（无头、可独立跑）
 
-> 每个 harness 都是 `node build/harness/<name>.mjs`：**自带断言、自带退出码、可单独跑**。
+> 每个 harness 都有两个等价入口：`node scripts/harness/<name>.mjs`（推荐，随源码走）
+> 与 `node build/harness/<name>.mjs`（真身；`build/` 是中间产物目录）。**自带断言、自带退出码、可单独跑**。
 > 一条命令跑全套：`npm run test:harness`（= `node scripts/harness/run.mjs`；`--list` 看清单，
 > 也可只跑某组：`… run.mjs shell assets` / 某项：`… run.mjs branch-shot`）。
 > 浏览器段需要 dev server：`( nohup npm run dev > /tmp/arkstage-vite.log 2>&1 & )`（:5174）。
