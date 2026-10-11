@@ -100,8 +100,8 @@ fi
 # inside artifacts/ so the archive root is a single `arkstage-portable/` folder
 # rather than the nested `build/artifacts/arkstage-portable/` path.
 if command -v zip >/dev/null; then
-  ( cd "$ARTIFACTS_DIR" && rm -f "$PORTABLE_ZIP" "$(basename "$OUT").zip" \
-      && zip -rq "$PORTABLE_ZIP" "$(basename "$OUT")" )
+  ( cd "$ARTIFACTS_DIR" && rm -f "$(basename "$PORTABLE_ZIP")" "$(basename "$OUT").zip" \
+      && zip -rq "$(basename "$PORTABLE_ZIP")" "$(basename "$OUT")" )
 fi
 
 # Clean the heavy intermediate cross-compile target dir (KEEP_TARGET=1 to keep).
