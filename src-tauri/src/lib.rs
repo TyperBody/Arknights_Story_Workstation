@@ -86,6 +86,67 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// One cache-through step: `chain` order, first 2xx wins. Returns the bytes and
+/// the source id that served them. Validation mirrors the per-source download
+/// engine (`media::validate_asset_bytes`): an HTML error page from a mirror is not
+/// an asset and must fall through to the next source.
+async fn fetch_from_chain(
+    client: &reqwest::Client,
+    key: &str,
+    mirror: &str,
+    custom: Option<&str>,
+) -> Result<(Vec<u8>, &'static str), String> {
+    let chain = media::source_chain(key, mirror, custom);
+    if chain.is_empty() {
+        return Err(format!("no applicable source: {key}"));
+    }
+    let mut last = String::from("no attempt");
+    for (source, url) in &chain {
+        if !net::allow_online() {
+            return Err("offline".to_string());
+        }
+        log::debug!("[prts-cdn] source={source} key={key}");
+        match client
+            .get(url)
+            .header("Referer", "https://prts.wiki/")
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                match resp.bytes().await {
+                    Ok(bytes) => {
+                        if !status.is_success() {
+                            last = format!("HTTP {status} from {source}");
+                            continue;
+                        }
+                        match media::validate_asset_bytes(key, &bytes) {
+                            Ok(()) => {
+                                // Real-time compression (same as the offline store
+                                // path): WebP bytes go under the `.png` key.
+                                let bytes = compress::maybe_transcode_image(key, bytes.to_vec());
+                                return Ok((bytes, source));
+                            }
+                            Err(error) => {
+                                last = format!("{source}: invalid upstream asset ({error})");
+                            }
+                        }
+                    }
+                    Err(e) => last = format!("{source}: read error: {e}"),
+                }
+            }
+            Err(e) => last = format!("{source}: fetch error: {e}"),
+        }
+    }
+    Err(last)
+}
+
+/// Local-only convenience so the match arm above stays readable (and a future
+/// offline-specific error mapping has one place to live).
+fn attributes_offline(err: &str) -> bool {
+    err == "offline"
+}
+
 /// First hit of the bundled sample-asset overlay: read
 /// `<data root>/assets/sample/bundles.json` (canonical key → filename) and return
 /// the file's bytes when `key` is bundled. This lets the built-in sample (and any
@@ -115,6 +176,8 @@ fn bundled_sample_asset(key: &str) -> Option<Vec<u8>> {
 pub fn run() {
     tauri::Builder::default()
         .register_asynchronous_uri_scheme_protocol("prts-cdn", |_app, request, responder| {
+            // Make sure the process-wide mirror settings exist before the first hit.
+            let _ = download::mirror_settings();
             // URL format:
             //   macOS/Linux: prts-cdn://localhost/{host}/{path}
             //   Windows:     http://prts-cdn.localhost/{host}/{path}
@@ -181,54 +244,42 @@ pub fn run() {
                 return;
             }
 
-            // 4) Online: fetch, persist to store (cache-through), serve.
-            // Own the path for the async block (the borrowed `uri` doesn't live to 'static).
+            // 4) Online: fetch through the SAME source chain the download engine
+            // uses (preferred mirror → the other mirrors → official fallback),
+            // persist to the store under the canonical key (cache-through), serve.
+            // Own the path for the async block (the borrowed `uri` doesn't live
+            // to 'static).
             let path = path.to_string();
+            let mirror_key = media::canonical_key(&target_url);
             tauri::async_runtime::spawn(async move {
                 let path = path.as_str();
                 let client = net::client();
-                match client
-                    .get(&target_url)
-                    .header("Referer", "https://prts.wiki/")
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        match resp.bytes().await {
-                            Ok(bytes) => {
-                                if let Err(error) = media::validate_asset_bytes(&target_url, &bytes)
-                                {
-                                    respond_err(
-                                        responder,
-                                        502,
-                                        format!("Invalid upstream asset: {error}"),
-                                    );
-                                    return;
-                                }
-                                // Real-time compression: when a tier is enabled and
-                                // this is an image, store + serve the WebP bytes.
-                                let stored = compress::maybe_transcode_image(
-                                    &target_url,
-                                    bytes.to_vec(),
-                                );
-                                let _ = media::write_local(&media_root, &target_url, &stored);
-                                let ct = sniff_content_type(&stored, path);
+                let (mirror, custom) = download::mirror_settings().effective();
+                match mirror_key {
+                    None => respond_err(responder, 502, format!("Unmappable key: {target_url}")),
+                    Some(key) => {
+                        match fetch_from_chain(client, &key, &mirror, custom.as_deref()).await {
+                            Ok((bytes, hit_source)) => {
+                                media::write_local(&media_root, &key, &bytes).ok();
+                                log::info!("[prts-cdn] source={hit_source} key={key}");
+                                download::note_protocol_source(hit_source);
+                                let ct = sniff_content_type(&bytes, path);
                                 let r = tauri::http::Response::builder()
                                     .status(200)
                                     .header("Content-Type", ct)
                                     .header("Access-Control-Allow-Origin", "*")
-                                    .body(stored)
+                                    .body(bytes)
                                     .unwrap();
                                 responder.respond(r);
                             }
-                            Err(e) => respond_err(responder, 502, format!("Read error: {}", e)),
+                            Err(e) if attributes_offline(&e) => respond_err(responder, 502, e),
+                            Err(e) => respond_err(
+                                responder,
+                                502,
+                                format!("Chain exhausted for {key}: {e}"),
+                            ),
                         }
                     }
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        respond_err(responder, status, format!("Upstream returned {}", status));
-                    }
-                    Err(e) => respond_err(responder, 502, format!("Fetch error: {}", e)),
                 }
             });
         })
@@ -300,6 +351,10 @@ pub fn run() {
             }
             // Register the managed download engine (bulk predownload jobs).
             download::init(app.handle());
+            // The selected download source lives process-wide (MirrorSettings), so
+            // the engine and the `prts-cdn://` handler read the same value as
+            // soon as one exists (default `pack` until the frontend pushes).
+            let _ = download::mirror_settings();
             // Restore compression mode + resume an interrupted batch if any.
             compress::init(app.handle());
             // First run: drop the bundled fan-fiction sample pack into
@@ -364,6 +419,10 @@ pub fn run() {
             download::download_status,
             download::download_settings_get,
             download::download_settings_set,
+            // Mirror-source probes (settings page / native scripts)
+            download::mirror_probe_url,
+            download::mirror_probe_chain,
+            download::system_counts,
             download::keepalive_set_reading,
             download::keepalive_set_manifest,
             // Network policy

@@ -26,6 +26,7 @@ function eq(name, actual, expected) {
 }
 
 const routes = await import(pathToFileURL(resolve(ROOT, "src/akstage/assetRouting.js")).href);
+const rustParity = await import(pathToFileURL(resolve(HERE, "mirror-rust-parity.mjs")).href);
 const catalogMod = await import(pathToFileURL(resolve(ROOT, "src/akstage/engineCatalog.js")).href);
 const mirrorPath = await import(pathToFileURL(resolve(HERE, "mirrorPath.mjs")).href);
 
@@ -33,6 +34,7 @@ const mirrorPath = await import(pathToFileURL(resolve(HERE, "mirrorPath.mjs")).h
 // `appSettings.ts` 是 TS（Node 直接 import 不了）：这里做**源码级**断言，保证默认值/
 // 值域/key 名与 BRIEF §3.2 一致 —— 也就是 UI 与下载器共享的那份契约。
 const settingsSrc = readFileSync(resolve(ROOT, "frontend/src/lib/appSettings.ts"), "utf8");
+const preSrc = readFileSync(resolve(ROOT, "frontend/src/lib/predownload.ts"), "utf8");
 ok("appSettings localStorage key = prts-app-settings", settingsSrc.includes('"prts-app-settings"'));
 ok("appSettings 下载并发默认 12", /downloadConcurrency:\s*12/.test(settingsSrc));
 ok("appSettings manifest 并发默认 10", /manifestConcurrency:\s*10/.test(settingsSrc));
@@ -42,8 +44,10 @@ ok("appSettings 下载并发上限 32 / 下限 1",
 ok("appSettings manifest 并发 1…16",
   /MANIFEST_CONCURRENCY_MAX\s*=\s*16/.test(settingsSrc) && /MANIFEST_CONCURRENCY_MIN\s*=\s*1/.test(settingsSrc));
 ok("appSettings 坏 JSON 回落（try/catch）", settingsSrc.includes("JSON.parse") && settingsSrc.includes("catch"));
-ok("appSettings mirror 仅 5 个合法值",
-  /MIRROR_VALUES[^=]*=\s*\["pack",\s*"jsd",\s*"fastly",\s*"ghproxy",\s*"custom"\]/.test(settingsSrc));
+ok("appSettings mirror 6 个合法值（含官方 prts）",
+  /MIRROR_VALUES[^=]*=\s*\["pack",\s*"prts",\s*"jsd",\s*"fastly",\s*"ghproxy",\s*"custom"\]/.test(settingsSrc));
+ok("predownload 把 mirror/customMirror 推给 Rust（下载器与 prts-cdn 读同一份）",
+  /download_settings_set"[\s\S]{0,400}mirror: merged\.mirror/.test(preSrc) && /customMirror: merged\.customMirror/.test(preSrc));
 
 /* ------------------------------------------------------------------ A. 路由 */
 const SAMPLE = [
@@ -192,6 +196,14 @@ ok("客户端 URL 与发布路径对齐",
 const verdicts = mirrorPath.planFromVersions(versions);
 ok("planFromVersions 无重复路径", new Set(verdicts.map((v) => v.path)).size === verdicts.length);
 
+/* ------------------------------- A2. Rust/JS 模板一致性（下载引擎一侧） */
+// 「设置→下载源」在 Rust 下载器/prts-cdn 里真正生效后，两边各持一份模板：
+// assetRouting.js（UI 预览 + 引擎候选）与 src-tauri/src/media.rs（真正取字节）。
+// 任何一侧改了模板而另一侧没跟，这里立刻红。
+for (const r of rustParity.rustParityChecks(ROOT, routes)) {
+  ok(r.name, r.pass, r.detail ?? "");
+}
+
 /* ------------------------------------------------------------ C. 镜像布局 */
 eq("mirrorPathFor 基本", mirrorPath.mirrorPathFor("static.prts.wiki/widgets/production/x.js"), "mirror/prts/static.prts.wiki/widgets/production/x.js");
 eq("mirrorPathFor 去 prts: 前缀", mirrorPath.mirrorPathFor("prts:torappu.prts.wiki/assets/avg/background/bg_black.png"), "mirror/prts/torappu.prts.wiki/assets/avg/background/bg_black.png");
@@ -226,4 +238,5 @@ console.log(`  ✓ 路由：${routes.SOURCE_IDS.length} 源 × ${SAMPLE.length} 
 console.log(`  ✓ 设置契约：prts-app-settings（下载 12/清单 10/不限速）`);
 console.log(`  ✓ 目录：${entries.length} 条（engine ${catalogMod.engineEntries().length} / css ${entries.filter((e) => e.kind === "css").length} / js ${entries.filter((e) => e.kind === "js").length} / font ${entries.filter((e) => e.kind === "font").length} / data ${entries.filter((e) => e.kind === "data").length}）`);
 console.log(`  ✓ 镜像布局：${mirrorPath.mirrorPathFor(CSS)}`);
+console.log(`  ✓ Rust/JS 模板一致性：${results.filter((r) => r.name.startsWith("A2")).length} 条断言`);
 console.log(`  ✓ catalog-data.json 读取成功（${readFileSync(resolve(ROOT, "src/akstage/catalog-data.json"), "utf8").length} 字节）`);

@@ -161,6 +161,27 @@ scripts/run-tests.sh     # 以上全部
 
 `test-e2e.sh` 需要 `Xvfb`、`xdotool`、ImageMagick，且需联网（prts.wiki）；它会临时清空本地缓存以保证结果确定。详见 [`scripts/README.md`](../scripts/README.md)。
 
+### 下载源 / 镜像（「设置 → 下载源」）
+
+同一份模板表存在两处，**必须逐字符一致**：`src/akstage/assetRouting.js::MIRRORS`
+（设置页预览 + 引擎候选 + 离线脚本）与 `src-tauri/src/media.rs`（`MIRROR_TPL_*`
+常量，真正取字节：下载引擎 `download.rs::fetch_item` 与 `prts-cdn://`
+cache-through）。`node tools/mirror/mirror-selftest.mjs` 的 **A2** 断言组会读
+Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust 单测
+`media::tests::mirror_url_matches_asset_routing_templates` 写死同一组期望）。
+
+- 源顺序：`首选源 → custom(有模板) → pack(官方) → 其余镜像 → prts`，首个 2xx 即成功；
+  URL 按源拼，**落盘永远按 canonical key**（`media::write_local(root, key, …)`），
+  所以换源不产生重复缓存、不改目录结构。
+- 选中源存 Rust 进程级 `download::MirrorSettings`（`download_settings_set` 推送），
+  下载 worker 每次取字节时现读 —— 换源对**已在跑**的任务也生效。
+- 可镜像 host 限 `MIRRORABLE_HOSTS`（`static/torappu/media.prts.wiki` + `code.jquery.com`）；
+  其余 host 一律官方直连。
+- 探针：`mirror_probe_url` / `mirror_probe_chain` / `system_counts`（含 `jobs[].sources`
+  与 `protocolSources` 的每源命中计数），供原生脚本或设置页排查「换了源到底走没走」。
+- 日志：命中源会打 `[download] source=jsd key=…` 与 `[prts-cdn] source=jsd key=…`
+  （`RUST_LOG=debug` 看每次尝试，`info` 看最终命中）。
+
 > ⚠️ 已知限制：Linux 的 WebKitGTK 可能缺少 mp3/ogg 编解码器导致**音频不出声**，画面正常；Windows / macOS 自带编解码器无此问题。
 
 ## CI / Release

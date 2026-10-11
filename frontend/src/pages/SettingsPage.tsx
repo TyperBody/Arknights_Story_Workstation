@@ -27,6 +27,7 @@ import { catalogSummary, mirrorUrl, type CatalogSummary } from "../lib/engineCat
 /** 下载源下拉项（`SOURCE_IDS` 的中文标签 + 说明）。 */
 const MIRROR_LABELS: Record<MirrorSource, { label: string; hint: string }> = {
   pack: { label: "随包快照 + 官方直连", hint: "优先用安装包内的引擎，缺失时直连 PRTS（默认）" },
+  prts: { label: "PRTS 官方直连", hint: "始终从 prts.wiki 官方域名拉取" },
   jsd: { label: "jsDelivr", hint: "cdn.jsdelivr.net，大陆访问通常更快" },
   fastly: { label: "Fastly CDN", hint: "fastly.jsdelivr.net，jsDelivr 的备用线路" },
   ghproxy: { label: "gh-proxy", hint: "经 gh-proxy.com 前缀加速 GitHub 镜像仓" },
@@ -120,7 +121,12 @@ export default function SettingsPage() {
     setRateLimitKbps(kbps);
     setAppSettings({ downloadConcurrency: c, manifestConcurrency: m, rateLimit: kbps * 1024 });
     try {
-      await setDownloadSettings({ concurrency: c, rateLimitBps: kbps * 1024 });
+      await setDownloadSettings({
+        concurrency: c,
+        rateLimitBps: kbps * 1024,
+        mirror: appSettings.mirror,
+        customMirror: appSettings.customMirror,
+      });
       showMsg(
         `已保存：下载并发 ${c}、清单并发 ${m}，` + (kbps === 0 ? "不限速" : `限速 ${kbps} KB/s`),
       );
@@ -129,14 +135,41 @@ export default function SettingsPage() {
     }
   };
 
+  /**
+   * 实现里「选中的源**真的生效**」的那一处：写 localStorage（UI 回显）之外，
+   * 把 `mirror` / `customMirror` 推给 Rust（`download_settings_set`）。Rust 持
+   * 进程级 MirrorSettings，下载引擎的取字节链与 `prts-cdn://` 都即时读它 ——
+   * 换源对**已在跑**的下载也生效，无需重启。
+   */
+  const pushMirrorToRust = useCallback(
+    async (mirror: MirrorSource, customMirror: string) => {
+      try {
+        await setDownloadSettings({
+          concurrency,
+          rateLimitBps: Math.round(rateLimitKbps) * 1024,
+          mirror,
+          customMirror,
+        });
+      } catch (e) {
+        showMsg(`已存到应用设置；同步到下载器失败: ${e instanceof Error ? e.message : String(e)}`, 6000);
+      }
+    },
+    [concurrency, rateLimitKbps],
+  );
+
   /** 选下载源（`mirror` ∈ `SOURCE_IDS`）；`custom` 需配合模板。 */
   const chooseMirror = (next: MirrorSource) => {
     setAppSettings({ mirror: next });
-    showMsg(`下载源已切换：${MIRROR_LABELS[next].label}${next === "custom" && !appSettings.customMirror ? "（记得填模板）" : ""}`);
+    void pushMirrorToRust(next, appSettings.customMirror);
+    showMsg(
+      `下载源已切换：${MIRROR_LABELS[next].label}` +
+        (next === "custom" && !appSettings.customMirror ? "（记得填模板）" : "（已同步到下载器）"),
+    );
   };
 
   const saveCustomMirror = (next: string) => {
     setAppSettings({ customMirror: next });
+    void pushMirrorToRust(appSettings.mirror, next);
   };
 
   // 「当前源会拼成…」预览：把样例 URL 交给**同一套** mirrorUrl（与下载路径一致）。

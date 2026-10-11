@@ -15,7 +15,7 @@ import { useSyncExternalStore } from "react";
 const STORAGE_KEY = "prts-app-settings";
 
 /** 素材下载源。`pack` = 随包快照 + 官方直连（默认，不断网也能用）。 */
-export type MirrorSource = "pack" | "jsd" | "fastly" | "ghproxy" | "custom";
+export type MirrorSource = "pack" | "prts" | "jsd" | "fastly" | "ghproxy" | "custom";
 
 /** 舞台素材来源（透传给 P2 的 `stageCatalog`；本模块只负责存取）。 */
 export type StageSource = string;
@@ -56,7 +56,9 @@ export const DOWNLOAD_CONCURRENCY_MAX = 32;
 export const MANIFEST_CONCURRENCY_MIN = 1;
 export const MANIFEST_CONCURRENCY_MAX = 16;
 
-const MIRROR_VALUES: readonly MirrorSource[] = ["pack", "jsd", "fastly", "ghproxy", "custom"];
+// 与 `src/akstage/assetRouting.js::SOURCE_IDS` / Rust `media::SOURCE_IDS` 一致
+// （`prts` = 官方直连；镜像模板表在 assetRouting.js）。
+const MIRROR_VALUES: readonly MirrorSource[] = ["pack", "prts", "jsd", "fastly", "ghproxy", "custom"];
 const BANNER_CAP = 64;
 const MAX_URL_LEN = 512;
 

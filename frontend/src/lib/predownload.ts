@@ -823,28 +823,62 @@ export async function runPredownload(
 }
 
 // ---------------------------------------------------------------------------
-// Download settings (concurrency + bandwidth limit). The backend holds these in
-// memory for the session; we mirror them to localStorage and re-apply on
-// startup so they survive restarts.
+// Download settings (concurrency + bandwidth limit + the selected download
+// source). The backend holds these in memory for the session (`download.rs`);
+// we mirror them to localStorage and re-apply on startup so they survive
+// restarts.
 // ---------------------------------------------------------------------------
 
 export interface DownloadSettings {
   concurrency: number;
   rateLimitBps: number; // bytes/sec; 0 = unlimited
+  /** Source the download engine / `prts-cdn://` actually fetch from. */
+  mirror?: string;
+  /** Template for `mirror: "custom"` (`{url}` / `{key}` / `{host}` / `{path}`). */
+  customMirror?: string | null;
 }
 
 const SETTINGS_KEY = "prts-download-settings";
+
+/** Merge the persisted mirror fields under a caller-supplied concurrency/limit pair. */
+function withPersistedMirror(s: DownloadSettings): DownloadSettings {
+  let persisted: Partial<DownloadSettings> = {};
+  try {
+    persisted = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<DownloadSettings>;
+  } catch {
+    persisted = {};
+  }
+  return {
+    concurrency: s.concurrency,
+    rateLimitBps: s.rateLimitBps,
+    mirror: s.mirror ?? persisted.mirror ?? "pack",
+    customMirror: s.customMirror ?? persisted.customMirror ?? null,
+  };
+}
 
 export async function getDownloadSettings(): Promise<DownloadSettings> {
   return await invoke<DownloadSettings>("download_settings_get");
 }
 
+/**
+ * Push concurrency / bandwidth limit AND the selected download source to Rust
+ * (`download_settings_set`). Rust keeps `mirror` / `customMirror` in the
+ * process-wide `MirrorSettings`, which the download engine and the `prts-cdn://`
+ * handler read live — so a source switch applies to already-running jobs.
+ */
 export async function setDownloadSettings(s: DownloadSettings): Promise<void> {
+  const merged = withPersistedMirror(s);
   await invoke("download_settings_set", {
-    concurrency: s.concurrency,
-    rateLimitBps: s.rateLimitBps,
+    concurrency: merged.concurrency,
+    rateLimitBps: merged.rateLimitBps,
+    mirror: merged.mirror,
+    customMirror: merged.customMirror,
   });
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+  } catch {
+    /* quota / private mode: Rust still has it */
+  }
 }
 
 /** Re-apply persisted download settings to the backend (call once at startup). */
@@ -853,10 +887,7 @@ export async function applyPersistedDownloadSettings(): Promise<void> {
   if (!raw) return;
   try {
     const s = JSON.parse(raw) as DownloadSettings;
-    await invoke("download_settings_set", {
-      concurrency: s.concurrency,
-      rateLimitBps: s.rateLimitBps,
-    });
+    await setDownloadSettings(s);
   } catch {
     /* ignore malformed persisted settings */
   }
