@@ -8,7 +8,7 @@
  */
 
 /** 支持的语言（顺序 = 语言开关里的展示顺序）。 */
-import { getItem, setItem } from "../lib/stateStore";
+import { getItem, setItem } from "../lib/stateStore.ts";
 
 export const LOCALES = ["zh-Hans", "en-US"] as const;
 
