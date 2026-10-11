@@ -2840,7 +2840,8 @@ export default function StoryEditorPage() {
       <div className="ed-preview-resize" onPointerDown={onDragStart} title={tr("editor.preview.resizeTitle", undefined, "拖动调整高度")} />
       <div className="ed-preview-bar">
         <span>{tr("editor.preview.title", undefined, "预览")}</span>
-        <span className="grow">{previewStatus}</span>
+        {/* 单行 + 省略号（CSS）；全文悬停可见：状态里可能带换行的多行 loader 报错。 */}
+        <span className="grow" title={previewStatus || undefined}>{previewStatus}</span>
         <button
           className="ed-btn"
           onClick={() => void openPreview(previewUpto > 0 ? previewUpto : undefined)}

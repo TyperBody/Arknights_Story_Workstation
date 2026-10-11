@@ -100,3 +100,20 @@ npm run test:editor && npm run test:stage             # 编辑器 / 舞台内核
 | 不要每次爬、要缓存、素材随包 | `resources/engine/v1`（3.4 MB，`include_bytes!`）+ pack→cache→network |
 | 设计里可以换下载镜像源 | 设置 → 「下载源」（pack/prts/jsd/fastly/ghproxy/custom）+ `assetRouting.js` 源表 |
 | 并发拉满 | `downloadConcurrency=30`（滑杆 1…32）、`manifestConcurrency=10`、默认不限速 |
+
+## 7. 编辑器 i18n 契约（`frontend/src/i18n/`）
+
+- **目录（照 LangBot `web/src/i18n` 的拆分）**：`index.ts`（`resources` + `useLocale`/`useT`，
+  React 侧唯一入口）、`lib.ts`（纯逻辑，Node 可直接 import：`translate` / `createI18n` /
+  `prts-language`）、`locales/<lang>.ts`（根，`const xx = { common, editor }; export default xx;`）、
+  `locales/<ns>/<lang>.ts`（命名空间，一行 `import editor from "./editor/zh-Hans"` 后 shorthand 展开）。
+- **参照语言 = `zh-Hans`**；缺失键回退链：当前语言 → `zh-Hans` → 调用点的 `defaultValue` → 末段。
+  所以**迁移文案时务必带 `defaultValue`（原文）**，漏翻只会显示原文，不会露出 `editor.foo.bar`。
+- **门禁**：`node frontend/scripts/check-i18n.mjs`（逐行解析、不 eval；**递归**命名空间子目录；
+  缺键/多键都 `exit 1`）。新增命名空间 = 新建 `locales/<ns>/{zh-Hans,en-US}.ts` + 根文件里
+  `import` 一行；新增键 = 两个语言文件同时加，否则 CI 报 `Missing/Extra keys`。
+- **语言开关**：设置 → 「语言」（`LOCALE_LABELS`），写入 `localStorage: prts-language`；页面
+  `useLocale()` 订阅、`useT()` 的引用按语言稳定（可安全放进 `useMemo` 依赖）。
+- **回归**：`node build/harness/_i18n-check.mjs`（运行时查找/插值/回退/持久化，7 断言）、
+  `node build/harness/_i18n-ui-check.mjs`（切到 en-US 后编辑器页文案，17 断言；截图
+  `build/harness/shots/editor-{zh,en}.png`）。

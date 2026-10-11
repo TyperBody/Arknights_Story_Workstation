@@ -189,6 +189,33 @@ LOG ALL 的符号分析（`engine/log/symbolicFlow.ts`）把每条「选择组�
 
 这条是**工具链约定**，不影响引擎语义：引擎只看到去掉 `@tag` 后的产物。
 
+## 5.5 缩进（可读性约定，不影响语义）
+
+`[Decision]` 区域可以排成层级：`[Decision]` 顶格、它的每个 `[Predicate]`
+（含合流）缩进 **1 级 = 两个空格**、线路体再缩进 **1 级**：
+
+```
+[Decision(options="A;B", values="1;2")]
+  [Predicate(references="1")]
+    [name="阿米娅"]  走这边。
+  [Predicate(references="2")]
+    [name="杜宾"]  明白了。
+  [Predicate(references="1;2")]
+    [name="阿米娅"]  出发吧。
+[endtip(block=true)]
+```
+
+- **引擎不 trim**：`parser.ts` 的 `commandRegex = /^\[\s*…/` 没有 `m` 标志、跑在
+  整行上，所以**行首有空白 = 该行落 `narration`**（整行当旁白文本显示）。
+- 因此打包/送引擎前要归一化：`storyPack.stripIndentForEngine`（`library.stripControls`
+  会调它）只对**去缩进后以 `[` 开头**的行去掉行首空白；纯旁白行与 `\` 续行的物理行
+  原样保留。归一化后与顶格版**逐字节相等**，`revision` 也一致。
+- 编辑器（`/editor/:packId`）里：工具条「缩进区域」= 整段 `regionIndentPlan`
+  （幂等，与选区无关）；跨行选区 + `Tab` / `Shift+Tab` = `indentLines` 一格；
+  `Ctrl/Cmd+Alt+I` = 缩进区域，`Ctrl/Cmd+[` / `]` = 反缩进 / 缩进。
+  一次动作为一条撤销条目；行首 **Tab** 与「宽度非 2 的整数倍」各有提示级诊断
+  （`UseSpaceInsteadTab` / `BadIndentation`）。
+
 ## 6. 分支 lint 清单
 
 `node scripts/fanfic/lint.mjs <packDir>`（纯函数 `lintScript()`，
