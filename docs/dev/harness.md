@@ -34,5 +34,8 @@
    坏输入返回默认值并**不抛**（harness 里有 garbage 用例）。
 3. **失败必可定位**：断言失败打印 `label — detail`（带测量值/计数），exit code ≠ 0；runner 汇总每组的
    `n/m`，并把失败项的**最后 14 行**贴出来。
-4. **顺序**：`tsc -b` + `eslint` → 产品自测（`test:editor/stage/mirror/starter/selfcontained`）→
+4. **抖动处理**：`scripts/harness/run.mjs` 对**浏览器** harness 失败会**重试一次**（同机连跑时
+   偶发 GPU stall / zygote 竞争）；日志里会打 `(retry×1)`。**两次都失败才算失败**。
+   各 harness 自己也等懒加载部件（`[data-wb-panel]` / `[data-stage-svg]`）而不是固定 `sleep`。
+5. **顺序**：`tsc -b` + `eslint` → 产品自测（`test:editor/stage/mirror/starter/selfcontained`）→
    `cargo test` → `npm run test:harness`（浏览器段）→ 收口提交。
