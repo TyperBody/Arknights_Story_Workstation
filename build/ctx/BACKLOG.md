@@ -17,7 +17,11 @@
   ③ 给 `engineRead:false` 的字段加统一 tooltip（"引擎不读这个键，改了不起作用"）；
   ④ `data-inspector-*` 锚点 + `build/harness/inspector-form.mjs`。
 
-## 2. 其它
+## 2. 已完成（原 backlog 第 1 项之外的补充）
+- ✅ 命名布局：工具栏 `[data-layout-bar]`（另存为 / 切换 / 重置 / 删除）+ `layout-named.mjs` 9 断言。
+- ✅ 播放器底栏默认 `auto`（纯隐藏，指针命中即显示）+ `player-chrome.mjs` 10 断言、并发默认 30。
+
+## 3. 其它
 - 镜像仓 `djkcyl/arkstage-mirror` 仍是空的（需人工建仓 + `MIRROR_TOKEN` + 跑 publish-mirror）。
 - Windows/Android 真机未验（本机只有 Linux + WebKitGTK）。
 - `state: BranchGraph` 的一条 eslint warning（`react-hooks/exhaustive-deps`，`current`/`deps`）——非错误，留待顺手清理。
