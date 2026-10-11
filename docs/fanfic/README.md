@@ -267,6 +267,12 @@ Yayin Story Studio / ASERStudio 的 AStorySyntax 思路）——左侧行号 + �
 - 回归：`node scripts/fanfic/editorIndent-selftest.mjs`（114 断言：解析容忍 /
   诊断对拍 / 归一化逐字节 / `buildHook` / `indentLines` / `regionIndentPlan` 层级与
   幂等 / demo `runtime.json` 的 `story.script` 对拍）。
+- **编辑器 UI（2026-10-11）**：工具条 `[data-editor-action="indent-region"]`「缩进区域」
+  = `regionIndentPlan(整篇)`（幂等，与选区无关）；跨行选区 + `Tab` / `Shift+Tab` =
+  `indentLines` 一格；`Ctrl/Cmd+Alt+I` = 缩进区域，`Ctrl/Cmd+[` / `]` = 反缩进 / 缩进
+  （无选区 = 整篇）。一次动作为**一条撤销条目**；状态栏出 `[data-indent-hint]`（`role="status"`）。
+  回归：`node build/harness/_indent-ui-check.mjs`（11 断言）。
+
 
 ### 演出动效（为什么"动画好奇怪"）
 

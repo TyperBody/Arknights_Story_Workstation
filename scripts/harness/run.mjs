@@ -49,6 +49,13 @@ const GROUPS = {
   ],
   player: [
     ["player-chrome.mjs", "播放器底栏三档（auto=默认纯隐藏/指针几何命中/hide）"],
+    ["_playersettings-check.mjs", "底栏默认 auto + 去掉 3 秒定时器（源码/CSS/运行时三查）"],
+  ],
+  editor: [
+    ["_stage-clip-check.mjs", "⑧ 舞台裁剪恒 16:9（50~170%）+ 舞台可调大小"],
+    ["_indent-ui-check.mjs", "⑧ 区域缩进 UI（按钮/快捷键/Tab/撤销/提示）"],
+    ["_i18n-check.mjs", "⑧ i18n 运行时（zh-Hans/en-US 查找与语言持久化）"],
+    ["_i18n-ui-check.mjs", "⑧ 语言切换后编辑器页文案变英文"],
   ],
 };
 

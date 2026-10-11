@@ -1868,7 +1868,7 @@ export default function StoryEditorPage() {
       if (key === "i" && event.altKey) {
         // Ctrl/Cmd+Alt+I：整段重排 `[Decision]` 区域（task-5，与页内 textarea 同语义）。
         event.preventDefault();
-        indentRegion("region");
+        indentRegionRef.current("region");
         return;
       }
       if (key === "z" && !event.shiftKey) {
@@ -1882,7 +1882,7 @@ export default function StoryEditorPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doRedo, doSave, doUndo, indentRegion]);
+  }, [doRedo, doSave, doUndo]);
 
   // 有未保存改动时，关页/刷新给一次浏览器原生确认（不用 window.confirm）。
   useEffect(() => {
@@ -2117,7 +2117,7 @@ export default function StoryEditorPage() {
     return 0;
   }, []);
 
-  /** 缩进区域：`mode="region"` 整段重排；否则对选区 ± 一格。 */
+  /** 缩进区域：`mode="region"` 整段重排（`regionIndentPlan`）；否则对选区 ± 一格。 */
   const indentRegion = useCallback(
     (mode: "region" | "indent" | "outdent" = "region") => {
       const full = textRef.current;
@@ -2127,31 +2127,31 @@ export default function StoryEditorPage() {
       const hasRange = to > from && full.slice(from, to).includes("\n");
       const api = modelRef.current;
 
-      if (mode === "region" && !hasRange) {
+      if (mode === "region") {
+        // 「区域」= `[Decision]`/`[Predicate]` 的层级重排：整篇重算（幂等，只动
+        // Decision 区域内的行），所以**与选区无关** —— 用户选不选都一样。
+        const plan = api?.regionIndentPlan ? api.regionIndentPlan(full) : fallbackRegionIndent(full);
+        if (plan.text !== full) {
+          applyEdit(0, full.length, plan.text, caret.offset);
+          showIndentHint(plan.changed ?? Math.max(0, (plan.lines ?? 0)));
+          return;
+        }
         const line = decisionLineAt(from);
         if (!line) {
           setIndentHint(tr("editor.indent.noDecision", undefined, "光标不在 [Decision] 区域里：先选中要缩进的行再点「缩进区域」。"));
           window.setTimeout(() => setIndentHint(""), 2600);
           return;
         }
-        const plan = api?.regionIndentPlan
-          ? api.regionIndentPlan(full)
-          : fallbackRegionIndent(full);
-        if (plan.text === full) {
-          setIndentHint(tr("editor.indent.noChange", undefined, "这一区域已经是缩进好的：没有需要改的行。"));
-          window.setTimeout(() => setIndentHint(""), 2600);
-          return;
-        }
-        applyEdit(0, full.length, plan.text, caret.offset);
-        showIndentHint(plan.changed ?? Math.max(0, (plan.lines ?? 0)));
+        setIndentHint(tr("editor.indent.noChange", undefined, "这一区域已经是缩进好的：没有需要改的行。"));
+        window.setTimeout(() => setIndentHint(""), 2600);
         return;
       }
 
       // 选区（或整份文本）：按行 ± 一格。
       const range = hasRange ? ([from, to] as const) : ([0, full.length] as const);
       const result = api?.indentLines
-        ? api.indentLines(full, range[0], range[1], mode === "region" ? "indent" : mode)
-        : fallbackIndentLines(full, range[0], range[1], mode === "region" ? "indent" : mode);
+        ? api.indentLines(full, range[0], range[1], mode)
+        : fallbackIndentLines(full, range[0], range[1], mode);
       if (result.text === full) {
         setIndentHint(tr("editor.indent.noChange", undefined, "这一区域已经是缩进好的：没有需要改的行。"));
         window.setTimeout(() => setIndentHint(""), 2600);
@@ -2159,7 +2159,27 @@ export default function StoryEditorPage() {
       }
       const caretFrom = result.caret?.from ?? range[0];
       const caretTo = result.caret?.to ?? range[1];
-      applyEdit(0, full.length, result.text, Math.min(caretFrom, result.text.length), Math.min(caretTo, result.text.length));
+      // 缩进会让后面的字符整体平移：把选区**重新落到被改的那几行**的整行范围上
+      // （否则「Tab 一下再 Shift+Tab」选到的已经不是同一批行 —— 用户实测的坑）。
+      const spanOfLines = (value: string, lineIndex: number, count: number): { from: number; to: number } => {
+        const rows = value.split("\n");
+        const firstLine = Math.min(Math.max(0, lineIndex), Math.max(0, rows.length - 1));
+        const lastLine = Math.min(rows.length - 1, firstLine + Math.max(0, count - 1));
+        let from = 0;
+        for (let i = 0; i < firstLine; i += 1) from += rows[i].length + 1;
+        let to = from;
+        for (let i = firstLine; i <= lastLine; i += 1) to += rows[i].length + (i < lastLine ? 1 : 0);
+        return { from, to };
+      };
+      const lineIndex = full.slice(0, range[0]).split("\n").length - 1;
+      const reselect = result.caret ? null : spanOfLines(result.text, lineIndex, result.lines ?? 1);
+      applyEdit(
+        0,
+        full.length,
+        result.text,
+        Math.min(reselect ? reselect.from : caretFrom, result.text.length),
+        Math.min(reselect ? reselect.to : caretTo, result.text.length)
+      );
       showIndentHint(result.lines ?? 0);
     },
     [applyEdit, caret.offset, decisionLineAt, showIndentHint, tr]

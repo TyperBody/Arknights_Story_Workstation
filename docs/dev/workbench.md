@@ -55,10 +55,15 @@
 cd <repo>
 ( nohup npm run dev > /tmp/arkstage-vite.log 2>&1 & )   # harness 前置：dev server :5174
 node build/harness/demo-check.mjs                      # 编辑器/舞台/分支图/拼接 端到端
+node build/harness/_stage-clip-check.mjs               # 舞台裁剪（16:9）+ 舞台/日志可调大小（51）
+node build/harness/_indent-ui-check.mjs                # 区域缩进 UI（11）
+node build/harness/_i18n-check.mjs                    # i18n 运行时（7）
+node build/harness/player-chrome.mjs                  # 播放器底栏（默认纯隐藏，10）
 node scripts/fanfic/branchGraph-selftest.mjs           # 分支图语义（73）
 node build/harness/branch-shot.mjs                     # dify 布局零重叠 + 截图
 node build/ctx/… 见 build/harness/*.mjs
 npx tsc -b frontend                                   # 类型
+node frontend/scripts/check-i18n.mjs                  # locales 键对齐（zh-Hans 为参照）
 npm run test:editor && npm run test:stage             # 编辑器 / 舞台内核
 ```
 
@@ -67,7 +72,18 @@ npm run test:editor && npm run test:stage             # 编辑器 / 舞台内核
 - 镜像仓 `djkcyl/arkstage-mirror`（或 `assetRouting.js` 的 `MIRROR_REPO/MIRROR_REF`）需**先建空仓 + 配 `MIRROR_TOKEN`（contents:write）**，再手动跑一次 `.github/workflows/publish-mirror.yml`（只发引擎层 25 条 / ~17.6 MB）。未跑前 jsd/fastly/ghproxy 404 是**预期**，`buildSourceOrder` 会自动回退 `pack` → 官方直链。
 - Windows / Android 上需真机验证 `snapshot.json` 的 `include_bytes!` 包体与 CSP；`snapshot.json` 升级引擎时由 `scripts/fanfic/build-engine-bundle.mjs` 重生成，并 bump `src-tauri/resources/engine/v<N>/`。
 
-## 6. 2026-10-11 反馈对照
+## 6. 编辑器反馈对照（第二轮：舞台 / 缩进 / i18n / 底栏）
+
+| 用户原话 | 落点 |
+|---|---|
+| 播放器底栏要默认自动隐藏、**不要 3 秒无操作淡出** | `uiSettings.getPlayerChrome()` 默认 `auto`；`storyPlayerBoot::installPlayerChrome` 的 `auto` = 纯隐藏（`html.ark-chrome-auto` + 指针几何命中，无定时器）。回归 `node build/harness/player-chrome.mjs` |
+| 下载并发数默认 30 | `appSettings.DEFAULT_SETTINGS.downloadConcurrency=30`、`download::DEFAULT_CONCURRENCY=30` |
+| 舞台缩放「素材扭曲」 | **viewBox 之外的内容没被裁**：`StagePane` 加 `<clipPath id="ark-stage-clip">`（rect == 当前 viewBox），画布内容整体入组。150% 实测可见盒 AR 1.7875（摘掉 clip = 2.6813）。回归 `node build/harness/_stage-clip-check.mjs`（51 断言） |
+| 舞台 / 日志不能自由调大小 | `StagePane` 根高 `fill` → `[data-wb-panel=stage]` 拖多大舞台多大（`data-stage-fill="1"`）；`DebugConsole` 加 `[data-dbg-resize="1"]` 手柄 + `prts-debug-console-size` 记忆 |
+| 编辑器「增加区域缩进」 | 内核 `storyPack.stripIndentForEngine` + `editorModel.{indentLines,regionIndentPlan}`（`npm run test:editor` 含 114 断言）；UI：`[data-editor-action="indent-region"]` / `Tab`·`Shift+Tab`·`Ctrl+Alt+I`，一次动作一条撤销；入口见 `_indent-ui-check.mjs` |
+| 「与他一样的拆分 i18n」（LangBot） | `frontend/src/i18n/`（`index.ts` + `lib.ts` + `locales/<lang>.ts` + `locales/editor/<lang>.ts`），`frontend/scripts/check-i18n.mjs` 移植 LangBot 的逐行解析器（递归命名空间子目录，reference = `zh-Hans`，缺/多键 exit 1）；语言存 `prts-language`，设置 → 语言 |
+
+## 7. 2026-10-11 反馈对照
 
 | 用户原话 | 落点 |
 |---|---|

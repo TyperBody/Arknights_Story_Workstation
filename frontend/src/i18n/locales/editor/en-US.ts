@@ -450,6 +450,9 @@ export default {
     button: "Indent region",
     done: "Indented {{count}} lines (playback is unaffected)",
     title:
-      "Add two spaces of indentation to the selected branch bodies; this is for readability only — leading whitespace is stripped before the script reaches the engine",
+      "Re-layout every route of the [Decision] region with level indentation; this is for readability only — leading whitespace is stripped before the script reaches the engine",
+    noDecision:
+      "The caret is not inside a [Decision] region: select the lines you want to indent first.",
+    noChange: "This region is already indented: nothing to change.",
   },
 };
