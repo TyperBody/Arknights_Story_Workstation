@@ -256,3 +256,23 @@ git tag v1.0.0 && git push origin v1.0.0
 # 预发布版
 git tag v1.0.0-beta.1 && git push origin v1.0.0-beta.1
 ```
+
+## 本机状态：`state.db`（SQLite）
+
+编辑器排版、面板开关/浮动窗、语言、播放器底栏、已读……这类**"记忆"**存
+`<资源目录>/state.db`（`src-tauri/src/state_db.rs`，表 `kv(scope,key,value,updated_at)`），
+**不在** `cache/` + `assets/` + `media/` 里 —— 「清除所有缓存」只删后者（
+`commands::cache::all_cache_roots()`），所以清缓存不会丢习惯；换机带上 `state.db` 即带走全部状态。
+
+- Rust 命令：`state_db_get/set/del/snapshot/set_many/import/info`（`src-tauri/src/lib.rs` 注册）；
+  启动 `setup` 里打一行 `[state] sqlite ready: <path> (N 条)`（**失败只 warn**，前端回落）。
+  `PRTS_DB=<file>` 可换库路径（原生测试/多 profile）。
+- 前端唯一入口 `frontend/src/lib/stateStore.ts`：`hydrate()`（每 scope 一次 `state_db_snapshot`
+  + 一次性 `state_db_import` 旧 `localStorage`）→ `getItem` 同步读 / `setItem` 合并写（50ms → `state_db_set_many`）。
+  降级：无 Tauri / DB 坏 → `localStorage`（`stateBackend()` 可查）→ 纯内存。
+- ⚠️ **时序**：`main.tsx` 的 `await hydrate()` 必须在 `ReactDOM.render` 之前；页面里凡是
+  "渲染期读持久化"（`workbenchBoot()`）都要**惰性**（`useState(() => …)`），不能在模块顶层跑。
+- 回归：`node build/harness/state-db.mjs`（原生三段：cold 写入 / warm 读回 / 清 cache 后仍在；
+  `--unit` 纯断言）、`node build/harness/state-db-frontend.mjs`（假 Tauri 桥 + 真 chromium）、
+  `cargo test --release --lib state_db`（3：UPSERT/scope 隔离、坏库重建、不落在缓存目录里）。
+  ⚠️ `frontendDist`（`build/dist`）是**编译期**嵌进二进制的：改完前端要 `cargo build` 才会进原生包。
