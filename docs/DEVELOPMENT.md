@@ -179,8 +179,13 @@ Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust �
   其余 host 一律官方直连。
 - 探针：`mirror_probe_url` / `mirror_probe_chain` / `system_counts`（含 `jobs[].sources`
   与 `protocolSources` 的每源命中计数），供原生脚本或设置页排查「换了源到底走没走」。
-- 日志：命中源会打 `[download] source=jsd key=…` 与 `[prts-cdn] source=jsd key=…`
-  （`RUST_LOG=debug` 看每次尝试，`info` 看最终命中）。
+- 日志：命中源会打 `[download] source=jsd key=…`、`[prts-cdn] source=jsd key=…` 与
+  `[engine-update] source=jsd url=…`（`RUST_LOG=debug` 看每次尝试，`info` 看最终命中）。
+- **引擎层也走同一源链**：`commands/story_player.rs::fetch_text`（模块 / 样式 / 3 张
+  sidecar）与 `commands/assets.rs::refresh_engine_asset`（jQuery / PreloadJS / toolbox /
+  CSS，返回 `AssetSnapshot.source`）都调用 `media::source_chain`；`from_html` 的
+  `WIDGET_BASE` / `SIDECARS` 常量值不变。**边界**：镜像仓只发引擎层 —— `prts.wiki/w/…`
+  的 HTML（剧情索引 / 页面 / oldid）保持官方直连（`wiki.rs` 不参与源链）。
 
 > ⚠️ 已知限制：Linux 的 WebKitGTK 可能缺少 mp3/ogg 编解码器导致**音频不出声**，画面正常；Windows / macOS 自带编解码器无此问题。
 

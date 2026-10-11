@@ -14,6 +14,13 @@ t("Rust 有 MIRROR_TPL_JSD 常量", /MIRROR_TPL_JSD/.test(rust));
 t("Rust 有 source_chain（源链）", /pub fn source_chain/.test(rust));
 t("下载器用 source_chain（不再写死 prts_url）", /source_chain|mirror_url/.test(dl));
 t("prts-cdn 协议也走源链", /mirror_url|source_chain/.test(readFileSync(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8")));
+const sp = readFileSync(new URL("../../src-tauri/src/commands/story_player.rs", import.meta.url), "utf8");
+const assists = readFileSync(new URL("../../src-tauri/src/commands/assets.rs", import.meta.url), "utf8");
+t("引擎快照抓取走源链（story_player.rs）", /source_chain/.test(sp) && /mod tests/.test(sp));
+t("引擎依赖热更新走源链（assets.rs）", /source_chain/.test(assists));
+t("AssetSnapshot 透露命中源", /pub source: Option<String>/.test(assists));
+t("wiki HTML 保持官方（story_player 只对 mirrorable host 走链）",
+  /\/w\//.test(readFileSync(new URL("../../src-tauri/src/commands/wiki.rs", import.meta.url), "utf8")) && !/source_chain/.test(readFileSync(new URL("../../src-tauri/src/commands/wiki.rs", import.meta.url), "utf8")));
 t("镜像前缀唯一：mirror/prts", routes.MIRROR_PREFIX === "mirror/prts" && readFileSync(new URL("../../tools/mirror/mirrorPath.mjs", import.meta.url), "utf8").includes('MIRROR_PREFIX = "mirror/prts"'));
 
 const key = "static.prts.wiki/widgets/production/StoryPlayer.BQgSL6Cy.js";

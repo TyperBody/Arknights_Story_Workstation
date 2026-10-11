@@ -75,31 +75,80 @@ fn module_dependencies(source: &str) -> Vec<String> {
         .collect()
 }
 
-async fn fetch_text(url: &str) -> Result<String, String> {
-    crate::net::ensure_online()?;
-    let response = crate::net::client()
-        .get(url)
-        .header("Referer", "https://prts.wiki/")
-        .send()
-        .await
-        .map_err(|e| format!("StoryPlayer {url}: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("StoryPlayer {url}: {e}"))?;
-    if response
-        .content_length()
-        .is_some_and(|n| n > 16 * 1024 * 1024)
-    {
+/// Engine modules / styles / sidecars are **mirrorable** (`static.prts.wiki`,
+/// `torappu.prts.wiki`): fetch them through the same source chain as the media
+/// downloader (`download::fetch_item` / `prts-cdn://`).
+///
+/// Boundary: the mirror repo only carries the engine layer — **wiki HTML**
+/// (`https://prts.wiki/w/…`, `api.php`) stays official (`wiki.rs`), and so does any
+/// non-mirrorable host (its `source_chain` collapses to the official link).
+pub(crate) fn text_source_chain(url: &str) -> Vec<(&'static str, String)> {
+    let (mirror, custom) = crate::download::mirror_settings().effective();
+    crate::media::source_chain(url, &mirror, custom.as_deref())
+}
+
+/// One 2xx response's payload, with the same guards for every source:
+/// non-empty, ≤ 16 MB, and never an HTML error page dressed as an asset.
+fn accept_text(url: &str, status_ok: bool, content_length: Option<u64>, bytes: Vec<u8>) -> Result<String, String> {
+    if !status_ok {
+        return Err(format!("StoryPlayer {url}: HTTP error"));
+    }
+    if content_length.is_some_and(|n| n > 16 * 1024 * 1024) {
         return Err(format!("StoryPlayer asset too large: {url}"));
     }
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
     if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
         return Err(format!("Invalid StoryPlayer asset size: {url}"));
     }
-    let text = String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())?;
+    let text = String::from_utf8(bytes).map_err(|e| format!("StoryPlayer {url}: {e}"))?;
     if text.trim_start().starts_with('<') {
         return Err(format!("HTML returned for StoryPlayer asset: {url}"));
     }
     Ok(text)
+}
+
+/// Fetch one engine text through the selected source chain (preferred source →
+/// custom → official → the other mirrors), first 2xx wins. Errors keep the URL so
+/// the frontend banner can show it; the last error is reported when every source
+/// failed (e.g. an empty mirror repo falls back to the official link and only
+/// fails if that fails too).
+async fn fetch_text(url: &str) -> Result<String, String> {
+    crate::net::ensure_online()?;
+    let chain = text_source_chain(url);
+    let mut last: Option<String> = None;
+    for (source, candidate) in &chain {
+        let response = crate::net::client()
+            .get(candidate)
+            .header("Referer", "https://prts.wiki/")
+            .send()
+            .await;
+        let (status_ok, content_length, bytes) = match response {
+            Ok(resp) => {
+                let status_ok = resp.status().is_success();
+                let content_length = resp.content_length();
+                match resp.bytes().await {
+                    Ok(bytes) => (status_ok, content_length, bytes.to_vec()),
+                    Err(e) => {
+                        last = Some(format!("StoryPlayer {candidate}: {e}"));
+                        continue;
+                    }
+                }
+            }
+            Err(e) => {
+                last = Some(format!("StoryPlayer {candidate}: {e}"));
+                continue;
+            }
+        };
+        match accept_text(url, status_ok, content_length, bytes) {
+            Ok(text) => {
+                if *source != "pack" && *source != "prts" {
+                    log::debug!("[story_player] source={source} url={candidate}");
+                }
+                return Ok(text);
+            }
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| format!("StoryPlayer {url}: no applicable source")))
 }
 
 /// Manifest 抓取并发（BRIEF §3.2：与设置项的 10 路对齐）。
@@ -252,6 +301,44 @@ pub async fn from_html(html: &str) -> Result<Option<WidgetBundleData>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_source_chain_prefers_mirror_and_keeps_official_fallback() {
+        // 默认（pack）：官方直连一条。
+        crate::download::mirror_settings().set("pack", None);
+        let chain = text_source_chain("https://static.prts.wiki/assets/scenario/krliov.toolbox.js");
+        assert_eq!(chain.first().unwrap().0, "pack");
+        assert_eq!(
+            chain.first().unwrap().1,
+            "https://static.prts.wiki/assets/scenario/krliov.toolbox.js"
+        );
+        // 选 jsd：镜像排第一，官方仍在链里兜底（镜像仓没发布时靠它）。
+        crate::download::mirror_settings().set("jsd", None);
+        let jsd = text_source_chain("https://static.prts.wiki/assets/scenario/krliov.toolbox.js");
+        assert_eq!(jsd.first().unwrap().0, "jsd");
+        assert!(jsd.first().unwrap().1.starts_with("https://cdn.jsdelivr.net/gh/"));
+        assert!(jsd.iter().any(|(_, url)| url.starts_with("https://static.prts.wiki/")));
+        // sidecar（torappu）同样走镜像；wiki HTML / 不可镜像 host 只有官方。
+        let sidecar = text_source_chain("https://torappu.prts.wiki/assets/avg/character.json");
+        assert_eq!(sidecar.first().unwrap().0, "jsd");
+        assert!(sidecar[0].1.contains("/mirror/prts/torappu.prts.wiki/assets/avg/character.json"));
+        let html = text_source_chain("https://prts.wiki/w/%E5%89%A7%E6%83%85%E4%B8%80%E8%A7%88");
+        assert_eq!(html.len(), 1);
+        assert_eq!(html[0].0, "pack");
+        assert_eq!(html[0].1, "https://prts.wiki/w/%E5%89%A7%E6%83%85%E4%B8%80%E8%A7%88");
+        // 还原默认，别影响同进程其它测试。
+        crate::download::mirror_settings().set("pack", None);
+    }
+
+    #[test]
+    fn accept_text_keeps_the_guards() {
+        assert!(accept_text("u", true, None, b"const a=1;".to_vec()).is_ok());
+        assert!(accept_text("u", false, None, b"const a=1;".to_vec()).is_err());
+        assert!(accept_text("u", true, None, Vec::new()).is_err());
+        assert!(accept_text("u", true, Some(17 * 1024 * 1024), b"x".to_vec()).is_err());
+        assert!(accept_text("u", true, None, b"<!DOCTYPE html><html>".to_vec()).is_err());
+        assert!(accept_text("u", true, None, vec![0xff, 0xfe]).is_err());
+    }
     #[test]
     fn detects_modern_player_without_legacy_dom_and_rejects_foreign_entry() {
         let html = format!("<script src='{WIDGET_BASE}StoryPlayer.hash.js' type='module'></script><link href='{WIDGET_BASE}style.hash.css' rel='stylesheet'>");

@@ -12,6 +12,11 @@ fn assets_dir() -> Result<PathBuf, String> {
 
 /// Download an asset file (image/audio) and save it locally.
 /// Returns the local file path.
+///
+/// Note: the font (`NotoSans.ttf`, `static.prts.wiki`) and the other engine deps
+/// are mirrorable — they go through `refresh_engine_asset` / the source chain. This
+/// legacy single-URL command is only used as a fallback with an explicit URL, so it
+/// keeps the caller's URL as-is.
 #[tauri::command]
 pub async fn download_asset(
     url: String,
@@ -66,6 +71,9 @@ pub struct AssetSnapshot {
     /// was retained. The caller may surface the warning without losing playback.
     pub fresh: bool,
     pub warning: Option<String>,
+    /// Source that actually served the fresh bytes (`pack`/`prts`/`jsd`/`fastly`/
+    /// `ghproxy`); `None` when the cached copy was kept (refresh failed).
+    pub source: Option<String>,
 }
 
 /// Fresh-first update for executable engine dependencies. New bytes are validated
@@ -85,28 +93,53 @@ pub async fn refresh_engine_asset(url: String, filename: String) -> Result<Asset
         let _ = std::fs::remove_file(&path);
     }
 
+    // Engine deps live on mirrorable hosts (`static.prts.wiki`, `code.jquery.com`):
+    // try the selected source first, then the other mirrors, official last — same
+    // chain as the media downloader / `prts-cdn://`. A 404 from an empty mirror
+    // repo simply moves on to the next candidate.
     let refreshed = async {
         crate::net::ensure_online()?;
-        let resp = crate::net::client()
-            .get(&url)
-            .header("Referer", "https://prts.wiki/")
-            .send()
-            .await
-            .map_err(|e| format!("Failed to refresh {filename}: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {} refreshing {url}", resp.status()));
+        let (mirror, custom) = crate::download::mirror_settings().effective();
+        let mut last = format!("Failed to refresh {filename}");
+        for (source, candidate) in crate::media::source_chain(&url, &mirror, custom.as_deref()) {
+            let resp = match crate::net::client()
+                .get(&candidate)
+                .header("Referer", "https://prts.wiki/")
+                .send()
+                .await
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    last = format!("Failed to refresh {filename}: {e}");
+                    continue;
+                }
+            };
+            if !resp.status().is_success() {
+                last = format!("HTTP {} refreshing {candidate}", resp.status());
+                continue;
+            }
+            let bytes = match resp.bytes().await {
+                Ok(bytes) => bytes.to_vec(),
+                Err(e) => {
+                    last = format!("Failed to read {filename}: {e}");
+                    continue;
+                }
+            };
+            validate_engine_asset(&filename, &bytes)?;
+            atomic_write(&path, &bytes)?;
+            if source != "pack" && source != "prts" {
+                log::debug!("[engine-update] source={source} url={candidate}");
+            }
+            return Ok::<(Vec<u8>, &'static str), String>((bytes, source));
         }
-        let bytes = resp.bytes().await.map_err(|e| e.to_string())?.to_vec();
-        validate_engine_asset(&filename, &bytes)?;
-        atomic_write(&path, &bytes)?;
-        Ok::<Vec<u8>, String>(bytes)
+        Err(last)
     }
     .await;
 
-    let (bytes, fresh, warning) = match refreshed {
-        Ok(bytes) => (bytes, true, None),
+    let (bytes, fresh, warning, source) = match refreshed {
+        Ok((bytes, source)) => (bytes, true, None, Some(source.to_string())),
         Err(error) => match cached {
-            Some(bytes) => (bytes, false, Some(error)),
+            Some(bytes) => (bytes, false, Some(error), None),
             None => return Err(error),
         },
     };
@@ -119,6 +152,7 @@ pub async fn refresh_engine_asset(url: String, filename: String) -> Result<Asset
         sha256: format!("{:x}", Sha256::digest(&bytes)),
         fresh,
         warning,
+        source,
     })
 }
 
@@ -256,6 +290,7 @@ mod tests {
         .unwrap();
         assert!(result.fresh);
         assert_eq!(result.sha256.len(), 64);
+        assert!(result.source.is_some(), "fresh bytes must report their source");
     }
 }
 

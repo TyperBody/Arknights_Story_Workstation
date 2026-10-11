@@ -92,6 +92,8 @@ interface AssetSnapshot {
   sha256: string;
   fresh: boolean;
   warning?: string | null;
+  /** Source that served the fresh bytes; `null` when the cached copy was kept. */
+  source?: string | null;
 }
 
 /** Fresh-first hot update for all executable/style engine dependencies. */
@@ -106,6 +108,9 @@ export function refreshEngineDeps(): Promise<string> {
         });
         if (!snapshot.fresh && snapshot.warning) {
           pushLog("warn", `[engine-update] ${dep.filename}: ${snapshot.warning}`);
+        } else if (snapshot.fresh && snapshot.source) {
+          // 让「换了源真的生效」在调试面板可见（只在实际命中镜像时打一条）。
+          pushLog("info", `[engine-update] ${dep.filename}: source=${snapshot.source}`);
         }
         return `${dep.filename}:${snapshot.sha256}`;
       } catch (error) {
