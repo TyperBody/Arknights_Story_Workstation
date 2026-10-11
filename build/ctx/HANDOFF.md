@@ -13,7 +13,7 @@
 | 4 | 分支图不能移动 / 排版难看 | ✅ dify 风 DAG（`layoutGraph` 分层 + 正交折线 + 零重叠 + `⤢ 适配` + 平移缩放） |
 | 5 | `data:text/javascript` 资源加载失败噪音 | ✅ `pack→cache→网络` + 2 次退避重试 + **单条**人话横幅（URL + HTTP 状态）；`data:`/`blob:` 静默 |
 | 6 | 不要每次爬 / 要缓存 / 素材随包 | ✅ 随包 `resources/engine/v1` 3.4 MB（`include_bytes!`）+ 磁盘 cache（`widget-bundle-v7`） |
-| 7 | 设计里能换下载镜像源 | ✅ 设置 →「下载源」（pack/prts/jsd/fastly/ghproxy/custom）+ `assetRouting.js` 源表 |
+| 7 | 设计里能换下载镜像源 | ✅ 设置 →「下载源」（pack/prts/jsd/fastly/ghproxy/custom）；**Rust 侧真正生效**（`media::source_chain`：首选源→custom→官方→其余镜像→prts，首个 2xx；下载器与 `prts-cdn://` 都走；落盘仍按 canonical key） |
 | 8 | 并发拉满 | ✅ 下载 12（1…32）、manifest 10、默认不限速 |
 
 ## 验证（Lead 实跑）
@@ -24,13 +24,13 @@ npx eslint -c frontend/eslint.config.js frontend   # 0 error（1 warning: Branch
 npm run build                       # ✓ built
 npm run test:editor                 # 168 + 149
 npm run test:stage                  # 82
-npm run test:mirror                 # 96/96
+npm run test:mirror                 # 121/121 + rust-mirror-live 8 + live-download 3
 npm run test:workbench             # demo-check 22/22 · stage-zoom 38 · window-chrome 5/5 · workbench-drag 3/3 · branch-shot 59 · engine-failure 2/2
 npm run test:workbench:model       # 62/62
 node scripts/fanfic/branchGraph-selftest.mjs  # 73/73
 node scripts/fanfic/selfcontained-check.mjs   # 原生 WebKitGTK：PASSED（在线 + 断网，0 加载失败）
 cargo check --release --features custom-protocol   # ✓（7m51s）
-cargo test --release --lib                        # 55 passed
+cargo test --release --lib                        # 61 passed（含 mirror 模板 ⇄ JS 逐字节）
 ```
 
 ## 人工（非代码）
@@ -40,3 +40,4 @@ cargo test --release --lib                        # 55 passed
    `mirror/prts/<host>/<path>` 对齐（`assetRouting.js::MIRROR_PREFIX` ⇄ `mirrorPath.mjs::MIRROR_PREFIX`）。
 2. Windows WebView2 / Android 真机：验证 `snapshot.json`（`include_bytes!`）与 CSP；两处 `tsconfig`/包体未在 Linux 覆盖。
 3. `build/toolchain/env.sh` 的 `CARGO_TARGET_DIR` 花括号 bug 已修（曾把 `:-` 变成路径）。
+4. 换源后行为：下载器/协议**立即**按新源试（正在跑的任务也生效）；镜像仓为空 → 自动回落官方，日志 `source=… key=…`；`mirror_probe_url`/`mirror_probe_chain`/`system_counts` 可自查命中计数。
