@@ -218,6 +218,18 @@ Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust �
 - 设置 →「缓存管理」显示 `随包素材：N 张 / X MB`（`starter_set_info`），资源目录缺文件时可
   「补齐随包素材」（`starter_set_sync`）。
 
+
+### Windows 产物（交叉编译自 Linux）
+
+| 产物 | 命令 | 说明 |
+|---|---|---|
+| `Arkstage_1.2.0_x64-setup.exe`（NSIS 安装器，~26 MB） | `bash scripts/desktop-build.sh windows` | `targets: nsis`，`webviewInstallMode: embedBootstrapper`；`build/toolchain/target-win` 缓存，LTO 链接 ~4 min |
+| `Arkstage_1.2.0_windows_x64-portable.zip`（免安装，~26 MB） | `bash scripts/desktop-build.sh windows` 后按下方组装 | **必须**把 `target-win/.../release/resources/assets`（随包起步素材）一起打进 zip，否则「素材随包」失效 |
+
+⚠️ `scripts/build-windows-portable.sh` 里的 `REL_DIR` 仍写死 `src-tauri/target/...`；
+本机用 `CARGO_TARGET_DIR=build/toolchain/target-win` 时要从那里取 exe 与 `resources/`：
+`app.exe` → `Arkstage.exe`、`WebView2Loader.dll`、`resources/assets/**`。
+
 ## CI / Release
 
 - **CI**（`.github/workflows/ci.yml`）：每次 push / PR 运行静态检查；push 时额外为各平台构建安装包并作为 Workflow 产物上传（即「CI 版」）。
