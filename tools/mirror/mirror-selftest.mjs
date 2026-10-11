@@ -36,7 +36,7 @@ const mirrorPath = await import(pathToFileURL(resolve(HERE, "mirrorPath.mjs")).h
 const settingsSrc = readFileSync(resolve(ROOT, "frontend/src/lib/appSettings.ts"), "utf8");
 const preSrc = readFileSync(resolve(ROOT, "frontend/src/lib/predownload.ts"), "utf8");
 ok("appSettings localStorage key = prts-app-settings", settingsSrc.includes('"prts-app-settings"'));
-ok("appSettings 下载并发默认 12", /downloadConcurrency:\s*12/.test(settingsSrc));
+ok("appSettings 下载并发默认 30", /downloadConcurrency:\s*30/.test(settingsSrc));
 ok("appSettings manifest 并发默认 10", /manifestConcurrency:\s*10/.test(settingsSrc));
 ok("appSettings 限速默认 0", /rateLimit:\s*0/.test(settingsSrc));
 ok("appSettings 下载并发上限 32 / 下限 1",
@@ -235,7 +235,7 @@ if (failed.length) {
   process.exit(1);
 }
 console.log(`  ✓ 路由：${routes.SOURCE_IDS.length} 源 × ${SAMPLE.length} 样例`);
-console.log(`  ✓ 设置契约：prts-app-settings（下载 12/清单 10/不限速）`);
+console.log(`  ✓ 设置契约：prts-app-settings（下载 30/清单 10/不限速）`);
 console.log(`  ✓ 目录：${entries.length} 条（engine ${catalogMod.engineEntries().length} / css ${entries.filter((e) => e.kind === "css").length} / js ${entries.filter((e) => e.kind === "js").length} / font ${entries.filter((e) => e.kind === "font").length} / data ${entries.filter((e) => e.kind === "data").length}）`);
 console.log(`  ✓ 镜像布局：${mirrorPath.mirrorPathFor(CSS)}`);
 console.log(`  ✓ Rust/JS 模板一致性：${results.filter((r) => r.name.startsWith("A2")).length} 条断言`);

@@ -87,39 +87,73 @@ function installPreloadRewrite(
 /**
  * 「播放器底栏」（引擎 `.story-player > .n-card[aria-label="播放控制"]`，上游
  * `index.vue` 的 `<NCard aria-label="播放控制">`）的三种模式：
- * - `show`：默认显示；
+ * - `show`：始终显示；
  * - `hide`：`display:none`；
- * - `auto`：3 秒无操作淡出、指针/按键活动恢复（`.ark-chrome-hidden`）。
+ * - `auto`（默认）：**纯隐藏** —— 初始即收起，指针**移入底栏**才显示、
+ *   指针**移出**立即收起；没有「N 秒无操作」定时器。
  * 监听挂在 iframe 的 `document` 上——那个 realm 才是用户真正交互的地方。
  */
+/** `auto` 档的根类（CSS 见 `bootOnce` 注入的 layout：`html.ark-chrome-auto…`）。 */
+const CHROME_AUTO = "ark-chrome-auto";
+/** 「当前展开」根类（`auto` 档）。 */
+const CHROME_OPEN = "ark-chrome-open";
+/** 收起（隐藏）类：卡片自己带一份，隐藏态的 `pointer-events:none` 也在 CSS 里。 */
+const CHROME_HIDDEN = "ark-chrome-hidden";
+
 function installPlayerChrome(win: StoryPlayerWindow, mode: PlayerChrome): void {
   if (mode === "show") return;
   const doc = win.document;
-  const HIDDEN = "ark-chrome-hidden";
   const BUTTON = "[aria-label=\"播放控制\"]";
+  const CARD = `.story-player > .n-card${BUTTON}`;
+  const cardOf = (): Element | null => doc.querySelector(CARD);
   if (mode === "hide") {
     // 静态隐藏：一个类即可（样式在 layout 里），不必监听。
     doc.documentElement.classList.add("ark-chrome-hide");
     doc.querySelectorAll(".story-player > .n-card").forEach((node) => {
-      if (node.matches(BUTTON) || !node.querySelector("button")) node.classList.add(HIDDEN);
+      if (node.matches(BUTTON) || !node.querySelector("button")) node.classList.add(CHROME_HIDDEN);
     });
     return;
   }
-  const reveal = () => {
-    doc.querySelectorAll(`.story-player > .n-card.${HIDDEN}`).forEach((node) => node.classList.remove(HIDDEN));
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      // 面板上仍有指针/焦点（例如正在调播放速度）就不要收。
-      const card = doc.querySelector(`.story-player > .n-card${BUTTON}`);
-      if (card && (card.matches(":hover") || card.contains(doc.activeElement))) return;
-      card?.classList.add(HIDDEN);
-    }, 3000);
+  // 纯隐藏（无定时器）：
+  // - 收起态由**根类**兜底（`html.ark-chrome-auto:not(.ark-chrome-open)`）——引擎是
+  //   异步挂载的，底栏出现时可能还没有任何类，根类保证它一出现就是收起的；
+  // - 卡片上同时带 `.ark-chrome-hidden`，便于选择器/证据直接断言；
+  // - 收起态 `pointer-events:none`，卡片收不到 `pointerenter`，所以显示走
+  //   `pointermove` 的**几何**命中（指针落在底栏矩形内）；隐藏走 `pointerout`
+  //   离开卡片（含指针移出 iframe → `pointerleave`）。
+  const setHidden = (hidden: boolean): void => {
+    doc.documentElement.classList.add(CHROME_AUTO);
+    doc.documentElement.classList.toggle(CHROME_OPEN, !hidden);
+    doc.querySelectorAll(CARD).forEach((node) => node.classList.toggle(CHROME_HIDDEN, hidden));
   };
-  let timer = setTimeout(reveal, 3000);
-  const events: Array<keyof DocumentEventMap> = ["pointermove", "pointerdown", "keydown", "touchstart", "wheel"];
-  for (const name of events) doc.addEventListener(name, reveal, { passive: true });
-  // 首次挂载后立即进入「3 秒后隐藏」的节奏。
-  reveal();
+  const inCard = (target: EventTarget | null): boolean => {
+    const card = cardOf();
+    return Boolean(card && target instanceof Node && card.contains(target));
+  };
+  const onMove = (event: Event): void => {
+    const card = cardOf();
+    if (!card || !card.classList.contains(CHROME_HIDDEN)) return;
+    const { clientX, clientY } = event as PointerEvent;
+    const rect = card.getBoundingClientRect();
+    if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+      setHidden(false);
+    }
+  };
+  const onOver = (event: Event): void => {
+    if (inCard(event.target)) setHidden(false);
+  };
+  const onOut = (event: Event): void => {
+    // `relatedTarget` 仍在底栏内（卡片子元素之间移动）就不收。
+    if (inCard(event.target) && !inCard((event as PointerEvent).relatedTarget)) setHidden(true);
+  };
+  doc.addEventListener("pointermove", onMove, { passive: true });
+  doc.addEventListener("pointerover", onOver, { passive: true });
+  doc.addEventListener("pointerout", onOut, { passive: true });
+  doc.addEventListener("pointerleave", () => setHidden(true), { passive: true });
+  // 键盘用户（Tab 到播放速度等）：焦点在底栏内保持显示，焦点离开即收起。
+  doc.addEventListener("focusin", onOver, { passive: true });
+  doc.addEventListener("focusout", onOut);
+  setHidden(true);
 }
 
 /** iframe realm 内的自带素材替换：`fetch` / `Image.src` / `setAttribute` / Audio。 */
@@ -480,8 +514,11 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
         .story-player>section{flex:1;min-height:0;max-width:none!important;aspect-ratio:auto!important}
         .story-player>.n-card{flex:none;max-width:none!important;border-radius:0}
         .story-player .n-card__content{padding:6px 10px!important}
-        /* 播放器底栏：显示（默认）/ 自动隐藏 / 隐藏 —— 见 uiSettings.ts */
-        .story-player>.n-card.ark-chrome-hidden{opacity:0;pointer-events:none;transition:opacity .2s}
+        /* 播放器底栏：显示 / 自动隐藏（默认，纯隐藏：指针移上去才显示）/ 隐藏
+           —— 见 uiSettings.ts。auto 档：收起时卡片 .ark-chrome-hidden（透明度 +
+           不接收指针）；显示由 html.ark-chrome-open 决定（指针命中底栏矩形即加）。 */
+        html.ark-chrome-auto .story-player>.n-card.ark-chrome-hidden{opacity:0;pointer-events:none;transition:opacity .2s}
+        html.ark-chrome-auto.ark-chrome-open .story-player>.n-card[aria-label="播放控制"]{opacity:1!important;pointer-events:auto!important}
         html.ark-chrome-hide .story-player>.n-card[aria-label="播放控制"]{display:none!important}`;
       doc.head.appendChild(layout);
       installPlayerChrome(win, chrome);

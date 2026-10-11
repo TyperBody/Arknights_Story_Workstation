@@ -9,20 +9,23 @@ const HIDE_PLAYER_BACK_KEY = "prts-hide-player-back";
 const PLAYER_CHROME_KEY = "prts-player-chrome";
 const listeners = new Set<() => void>();
 
-/** 播放器底部控制条（引擎 `.story-player > .n-card[aria-label="播放控制"]`）的显示方式。 */
+/**
+ * 播放器底部控制条（引擎 `.story-player > .n-card[aria-label="播放控制"]`）的显示方式。
+ * `auto`（默认）= 纯隐藏：初始即收起，指针移入底栏才显示、移出立即隐藏（无定时器）。
+ */
 export type PlayerChrome = "show" | "auto" | "hide";
 
 const PLAYER_CHROME_VALUES: readonly PlayerChrome[] = ["show", "auto", "hide"];
 
-/** 当前「播放器底栏」设置（默认显示；非法/缺失一律回落到 `show`）。 */
+/** 当前「播放器底栏」设置（默认 `auto`：底栏常藏，指针移上去才显示；非法/缺失一律回落）。 */
 export function getPlayerChrome(): PlayerChrome {
   const raw = localStorage.getItem(PLAYER_CHROME_KEY);
-  return PLAYER_CHROME_VALUES.includes(raw as PlayerChrome) ? (raw as PlayerChrome) : "show";
+  return PLAYER_CHROME_VALUES.includes(raw as PlayerChrome) ? (raw as PlayerChrome) : "auto";
 }
 
 export function setPlayerChrome(value: PlayerChrome): void {
-  // `show` 是默认值：不写 key，回到默认即「清掉」。
-  if (value === "show") localStorage.removeItem(PLAYER_CHROME_KEY);
+  // `auto` 是默认值：不写 key，回到默认即「清掉」。
+  if (value === "auto") localStorage.removeItem(PLAYER_CHROME_KEY);
   else localStorage.setItem(PLAYER_CHROME_KEY, value);
   listeners.forEach((l) => l());
 }

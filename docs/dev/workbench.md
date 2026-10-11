@@ -35,10 +35,10 @@
 
 ## 3. 下载源 / 镜像
 
-- `appSettings.ts`：`mirror: pack|prts|jsd|fastly|ghproxy|custom`、`customMirror`、`downloadConcurrency`（默认 **12**，1…32）、`manifestConcurrency`（**10**）、`rateLimit`（0=不限速）。
+- `appSettings.ts`：`mirror: pack|prts|jsd|fastly|ghproxy|custom`、`customMirror`、`downloadConcurrency`（默认 **30**，1…32）、`manifestConcurrency`（**10**）、`rateLimit`（0=不限速）。
 - `src/akstage/assetRouting.js`：源模板集中在 `MIRRORS`；`routeFor/buildSourceOrder/mirrorUrl/describe`、`toMirrorKey ⇄ fromMirrorUrl`、`canonicalKey`。**镜像仓需先跑 `.github/workflows/publish-mirror.yml`**（默认 `djkcyl/arkstage-mirror@main`），否则镜像 404 → 自动回退 prts。
 - `src/akstage/engineCatalog.js` + `catalog-data.json`：引擎 25 条（css/js/font/src/data）、素材 19,861 条；`frontend/src/lib/engineCatalog.ts` 是 TS 包装。
-- Rust：`download::DEFAULT_CONCURRENCY = 12`、`MAX_CONCURRENCY = 32`；`setDownloadSettings` 由设置页写入。
+- Rust：`download::DEFAULT_CONCURRENCY = 30`、`MAX_CONCURRENCY = 32`；`setDownloadSettings` 由设置页写入。
 
 ## 3.5 观感证据（截图）
 
@@ -78,4 +78,4 @@ npm run test:editor && npm run test:stage             # 编辑器 / 舞台内核
 | data:URL 资源加载失败噪音 | `pushStatus` 单条人话横幅 + `data:`/`blob:` 静默 + 重试 2 次（1.5s/3s） |
 | 不要每次爬、要缓存、素材随包 | `resources/engine/v1`（3.4 MB，`include_bytes!`）+ pack→cache→network |
 | 设计里可以换下载镜像源 | 设置 → 「下载源」（pack/prts/jsd/fastly/ghproxy/custom）+ `assetRouting.js` 源表 |
-| 并发拉满 | `downloadConcurrency=12`（滑杆 1…32）、`manifestConcurrency=10`、默认不限速 |
+| 并发拉满 | `downloadConcurrency=30`（滑杆 1…32）、`manifestConcurrency=10`、默认不限速 |

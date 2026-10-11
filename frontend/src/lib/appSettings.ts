@@ -25,7 +25,7 @@ export interface AppSettings {
   mirror: MirrorSource;
   /** 自定义镜像模板（`{url}` = 原始直链，`{key}` = 规范化 key）。`custom` 源用。 */
   customMirror: string;
-  /** 下载并发（1…32，默认 12）。 */
+  /** 下载并发（1…32，默认 30）。 */
   downloadConcurrency: number;
   /** manifest 抓取并发（1…16，默认 10）。 */
   manifestConcurrency: number;
@@ -42,7 +42,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   mirror: "pack",
   customMirror: "",
-  downloadConcurrency: 12,
+  downloadConcurrency: 30,
   manifestConcurrency: 10,
   rateLimit: 0,
   engineAutoUpdate: true,

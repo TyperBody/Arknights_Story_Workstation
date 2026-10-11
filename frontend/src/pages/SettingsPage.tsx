@@ -275,16 +275,16 @@ export default function SettingsPage() {
     showMsg(next ? "已隐藏播放器内的返回按钮（用系统返回手势）" : "已显示播放器内的返回按钮");
   };
 
-  /** 「播放器底栏」三档：显示 → 自动隐藏 → 隐藏 → 显示。 */
+  /** 「播放器底栏」三档：自动隐藏 → 隐藏 → 显示 → 自动隐藏。 */
   const cyclePlayerChrome = () => {
     const order: PlayerChrome[] = ["show", "auto", "hide"];
     const next = order[(order.indexOf(playerChrome) + 1) % order.length];
     setPlayerChrome(next);
     setPlayerChromeState(next);
     showMsg(next === "show"
-      ? "播放器底栏：显示（默认）"
+      ? "播放器底栏：始终显示"
       : next === "auto"
-        ? "播放器底栏：自动隐藏（3 秒无操作后淡出，移动指针恢复）"
+        ? "播放器底栏：自动隐藏（默认；底栏常藏，指针移上去才显示）"
         : "播放器底栏：隐藏（可用「文本」面板查看对话）");
   };
 
@@ -562,7 +562,7 @@ export default function SettingsPage() {
             {playerChrome === "show"
               ? "播放时始终显示底部控制条（播放模式 / 播放速度那一行）"
               : playerChrome === "auto"
-                ? "3 秒无操作后淡出，移动指针 / 触摸即恢复"
+                ? "默认；底栏常藏，指针移上去才显示"
                 : "播放时隐藏底部控制条，画面更干净"}
           </span>
         </div>

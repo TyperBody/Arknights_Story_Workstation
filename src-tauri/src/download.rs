@@ -26,10 +26,10 @@ use tauri::{AppHandle, Emitter, Manager as _};
 
 /// Default number of concurrent workers per job. Matches the frontend default
 /// (`prts-download-settings` in predownload.ts and the Settings slider): the
-/// product decision is 「速度并发可以拉满」 → 12, configurable 1…32 at runtime
+/// product decision is 「速度并发可以拉满」 → 30, configurable 1…32 at runtime
 /// through the `download_settings_*` commands. The previous value (4) left most
 /// of the link idle on a normal connection.
-const DEFAULT_CONCURRENCY: usize = 12;
+const DEFAULT_CONCURRENCY: usize = 30;
 // `MAX_CONCURRENCY` is enforced by `Manager::set_concurrency`.
 #[allow(dead_code)]
 const MAX_CONCURRENCY: usize = 32;
