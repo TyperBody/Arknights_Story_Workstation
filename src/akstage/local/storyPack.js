@@ -81,6 +81,10 @@ export function parseScript(script) {
  * `  [Delay(time=1)]` → `[Delay(time=1)]`；`  裸旁白` 原样（行首空白是旁白
  * 展示文本的一部分）。行尾 `\` 的续行物理行由 `[` 行拼掉，保留缩进不影响播放。
  *
+ * 行首空白**空格 / Tab 混排都吃**：编辑器惯例是 `Tab` 一级（`tabSize = 8`），
+ * 而"Tab 对齐到 tab stop"会在 `\t` **前**补对齐空格 —— 两者都得整段吃掉，
+ * 送引擎的文本才与顶格版逐字节相等。
+ *
  * @param {string} text
  * @returns {string}
  */

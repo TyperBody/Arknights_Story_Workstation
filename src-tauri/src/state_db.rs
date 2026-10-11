@@ -139,6 +139,7 @@ pub fn report() -> Result<String, String> {
 /// 读一个键；没有 → `None`。
 #[tauri::command]
 pub async fn state_db_get(scope: String, key: String) -> Result<Option<String>, String> {
+    log::debug!("[state] get scope={scope} key={key}");
     with_conn(|conn| {
         conn.query_row(
             "SELECT value FROM kv WHERE scope = ?1 AND key = ?2",
@@ -177,7 +178,7 @@ pub async fn state_db_del(scope: String, key: String) -> Result<(), String> {
 /// 整个 scope 的快照（**一次 IPC** 完成 hydrate）。
 #[tauri::command]
 pub async fn state_db_snapshot(scope: String) -> Result<Vec<StateEntry>, String> {
-    with_conn(|conn| {
+    let rows = with_conn(|conn| {
         let mut stmt = conn
             .prepare("SELECT key, value, updated_at FROM kv WHERE scope = ?1")
             .map_err(|e| e.to_string())?;
@@ -191,12 +192,16 @@ pub async fn state_db_snapshot(scope: String) -> Result<Vec<StateEntry>, String>
             })
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
-    })
+    })?;
+    // 计数进日志（原生自检据此断言"这一启动确实从 state.db 读到了东西"）。
+    log::debug!("[state] snapshot scope={scope} n={}", rows.len());
+    Ok(rows)
 }
 
 /// 批量写（**一次 IPC 写多键**：`[(key, value)]`）。
 #[tauri::command]
 pub async fn state_db_set_many(scope: String, entries: Vec<(String, String)>) -> Result<usize, String> {
+    log::debug!("[state] set_many scope={scope} n={}", entries.len());
     with_conn(|conn| {
         let mut stmt = conn
             .prepare(

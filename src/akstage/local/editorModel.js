@@ -84,8 +84,13 @@
 //   completions(prefix, context) → Completion[]；`context` 见下方「补全的替换语义」
 //   formatLine(controller, values) → string（palette「插入」/ 未来 formatter）
 //   HOOVER (= HOVER)  Record<command, HoverEntry>；hoverFor(text, offset) → HoverInfo|null
+//   INDENT_UNIT       "\t"：一级缩进 = 1 个 Tab（惯例 `tabSize = 8`，对齐 VSCode 默认）
+//   indentLines(text, from, to, direction, options?) → {text, caret, lines}（区间缩进）
+//   regionIndentPlan(text, options?) → {text, changed, lines}（Decision 区域整段分层）
+//   tokenizeLine(raw) → {from, to, kind}[]：**整行字符偏移**的语法着色 span
+//                     （kind ∈ HIGHLIGHT_KINDS，覆盖整行、互不重叠）
 //   辅助：diagnostic / parseControllerSpec / lineDiagnosticsOf / diagnosticsByLine /
-//         documentOf / blocksOf / CATEGORY_LABELS
+//         documentOf / blocksOf / CATEGORY_LABELS / HIGHLIGHT_KINDS
 //
 // 补全的替换语义（UI 按 `[from, cursor)` 整段替换 `insertText` 即可）：
 //   - kind "controller"：`[Cha` → insertText `Character(name="")]`（含 `]`）；
@@ -1967,11 +1972,8 @@ export function parseLine(input, lineNumber = 0) {
   // 区域缩进：后面所有 span / entity / 文档级形态判定都跑在 `body` 上；
   // `unshift` 把诊断 span 平移回整行坐标后再补行首 Tab 的 100C 提示。
   const pushLeadTab = () => {
-    const at = lead.indexOf("\t");
-    if (at === -1 || !dsl) return;
-    diagnostics.push(diag("UseSpaceInsteadTab", line, at, at + 1,
-      "行首缩进用了 Tab；区域缩进惯例是两个空格（引擎会归一化，不影响播放）",
-      "把行首 Tab 换成两个空格", "warning"));
+    if (!dsl) return;
+    indentLeadDiagnostics(lead, line, diagnostics);
   };
   // 缩进版与顶格版诊断**逐条等价**（只差 `shift` 的整体偏移）—— 这就是
   // "编辑器容忍区域缩进"。
@@ -2542,28 +2544,136 @@ export function blocksOf(text) {
 //     level 2+：线路体（该 Predicate 之后、到下一条线路/合流/EOF）
 //   每条线路体**独立**计数：`[Decision]` 之后出现第 2 条 `[Predicate]` 即
 //   开新线路，层级回到 1，其体从 2 重新开始。
+//
+//   **单位 = 1 个 Tab**（`INDENT_UNIT = "\t"`，惯例 `tabSize = 8`）—— 对齐
+//   VSCode 的默认（`editor.insertSpaces: false` / `tabSize: 8`）：
+//     · 缩进 = 在行首现有缩进**之后**插一个 `\t`；若行首缩进当前所在**视觉列**
+//       `c` 不在 tab stop 上（`c % tabSize !== 0`，Tab 记 `tabSize` 列），先在
+//       **尾部**补 `tabSize - c` 个空格再插 `\t`（= "Tab 对齐到下一个 tab stop"）；
+//     · 反缩进 = 先吃掉行首缩进**尾部**的连续空格，再吃掉一个 `\t`；若尾部没有
+//       空格（含"光标在缩进中间"）→ 一直吃到**上一个 tab stop**（`c` 不在网格
+//       上时就是 `- (c % tabSize)` 列）。
+//   `options.unit` 覆盖单位（旧的两空格调用 `{unit: "  "}` 逐字节等价）。
 
-/** 一级缩进 = 两个空格。 */
-export const INDENT_UNIT = "  ";
+/** 一级缩进 = **一个 Tab**（惯例 `tabSize = 8`；VSCode 默认 Tab 插入 Tab）。 */
+export const INDENT_UNIT = "\t";
+
+/** 默认制表位宽度（VSCode 默认 `tabSize = 8`）。 */
+export const TAB_SIZE = 8;
+
+/**
+ * 缩进语义参数：`options.tabSize`（默认 8）与 `options.unit`（默认 `"\t"`）。
+ * `options` 省略 / 传 `+1` 之类非对象时全取默认。
+ * @param {unknown} options
+ * @returns {{tabSize: number, unit: string}}
+ */
+function indentOptions(options) {
+  const source = options && typeof options === "object" ? /** @type {Record<string, unknown>} */ (options) : {};
+  const rawTab = Math.trunc(Number(source.tabSize));
+  const unit = typeof source.unit === "string" && source.unit.length > 0 ? source.unit : INDENT_UNIT;
+  return {
+    tabSize: Number.isFinite(rawTab) && rawTab > 0 ? Math.min(64, rawTab) : TAB_SIZE,
+    unit,
+  };
+}
+
+/**
+ * 一串行首空白的**视觉列数**（Tab 跳到下一个 `tabSize` 网格，其余字符记 1 列）。
+ * @param {string} head
+ * @param {number} tabSize
+ * @returns {number}
+ */
+function visualWidth(head, tabSize) {
+  let column = 0;
+  for (const ch of head) column += ch === "\t" ? tabSize - (column % tabSize) : 1;
+  return column;
+}
+
+/**
+ * 在行首缩进**之后**插一个 Tab（`unit` 非 `\t` 时按"一个 unit"追加，保持旧调用）。
+ * 行首缩进不在 tab stop 上 → 先在尾部补空格对齐（`\\t` 没有列概念，补在尾部即
+ * 对齐 —— `stripIndentForEngine` 会把 `<对齐空格>\t` 整段吃掉，播放不受影响）。
+ * 例：`"      abc"`（6 列）→ `"        \tabc"`（补 2 空格对齐到 8 列，再插 `\t`）。
+ * @param {string} line
+ * @param {string} head 行首空白（`^[ \t]+` 的那一串）
+ * @param {number} tabSize
+ * @param {string} unit
+ * @returns {string}
+ */
+function indentOne(line, head, tabSize, unit) {
+  if (unit !== INDENT_UNIT) return unit + line;
+  const column = visualWidth(head, tabSize);
+  const pad = column % tabSize === 0 ? "" : " ".repeat(tabSize - (column % tabSize));
+  return `${head}${pad}${unit}${line.slice(head.length)}`;
+}
+
+/**
+ * 去掉行首**一级**（Tab；`unit` 非 `\t` 时按旧语义吃一个 unit 的宽度）。
+ * Tab 惯例（`unit === "\t"`）：先吃尾部连续空格，再吃一个 `\t`；没有空格就
+ * 吃到**上一个 tab stop**。旧语义（`unit === "  "`）：从左侧累加宽度
+ * （Tab 记 tabSize），到 `unit.length` 停 —— 与 task-2 的逐字节行为一致。
+ * @param {string} line
+ * @param {number} tabSize
+ * @param {string} unit
+ * @returns {string}
+ */
+function outdentOne(line, tabSize, unit) {
+  const head = /^[ \t]*/.exec(line)?.[0] ?? "";
+  if (!head) return line;
+  return outdentHead(head, tabSize, unit) + line.slice(head.length);
+}
+
+/**
+ * 「反缩进一级」后的行首空白（Tab 惯例 = VSCode 的 Shift+Tab）：
+ * 视觉宽度回退到**上一个 tab stop**（`width - (width % tabSize || tabSize)`），
+ * 逐字符**从右往左**吃（先吃空格、再吃 `\t`）。纯空格缩进同样吃（旧的两空格
+ * 缩进在 VSCode 语义下是 tab 内的空白）；`unit` 非 `\t` 时按旧语义从**左**吃
+ * 到 `unit.length` 列（与 task-2 的两空格行为逐字节一致）。
+ * @param {string} head
+ * @param {number} tabSize
+ * @param {string} unit
+ * @returns {string} 新的行首空白
+ */
+function outdentHead(head, tabSize, unit) {
+  if (!head) return head;
+  let end = head.length;
+  if (unit !== INDENT_UNIT) {
+    // 旧语义（unit = "  "）：从左往右吃，累加宽度到 unit.length 为止。
+    let used = 0;
+    let width = 0;
+    for (const ch of head) {
+      if (width >= unit.length) break;
+      width += ch === "\t" ? tabSize : 1;
+      used += 1;
+    }
+    return head.slice(used);
+  }
+  const column = visualWidth(head, tabSize);
+  const target = Math.max(0, column - (column % tabSize === 0 ? tabSize : column % tabSize));
+  while (end > 0 && visualWidth(head.slice(0, end), tabSize) > target) end -= 1;
+  return head.slice(0, end);
+}
 
 /**
  * 区域缩进：`text` 里 `[from, to)` 的行整体**加**（`direction` 为正/`"indent"`）
- * 或**减**（负/`"outdent"`）一级（= `INDENT_UNIT`）。混合选择按"全部缩进 /
- * 全部反缩进"处理（不做"对齐到最小缩进"的智能推断）。
+ * 或**减**（负/`"outdent"`）一级。混合选择按"全部缩进 / 全部反缩进"处理
+ * （不做"对齐到最小缩进"的智能推断）。
  *
  * 逐行处理：**只**改行首空白（`^[ \t]+`），因此不会碰字符串字面量里的空白；
  * 空行与"行尾 `\` 续行"的下一个物理行也照改（续行去缩进是安全的，见
- * `stripIndentForEngine`）。反缩进容量 = 该行实际缩进宽度（Tab 记 4，扣到
- * 不超过 `INDENT_UNIT`），顶格行原样。
+ * `stripIndentForEngine`）。单位为 1 个 Tab + `tabSize = 8` 的对齐语义（见
+ * 上方 §区域缩进）；旧的两空格调用传 `options.unit = "  "` 即可逐字节等价。
  *
  * @param {string} text
  * @param {number} from 起始字符偏移
  * @param {number} to 结束字符偏移（开区间；`from > to` 时自动交换）
  * @param {"indent"|"outdent"|1|-1} direction
+ * @param {{tabSize?: number, unit?: string}} [options]
  * @returns {{text: string, caret: {from: number, to: number}, lines: number}}
  */
-export function indentLines(text, from, to, direction) {
+export function indentLines(text, from, to, direction, options) {
   const src = String(text ?? "");
+  const { tabSize, unit } = indentOptions(options);
   const clamp = (value) => Math.max(0, Math.min(src.length, Math.trunc(Number(value) || 0)));
   const lo = Math.min(clamp(from), clamp(to));
   const hi = Math.max(clamp(from), clamp(to));
@@ -2577,27 +2687,10 @@ export function indentLines(text, from, to, direction) {
   let lines = 0;
   const out = src.slice(first, last).split("\n").map((line) => {
     lines += 1;
-    if (indent) return INDENT_UNIT + line;
-    return outdentOne(line);
+    if (indent) return indentOne(line, /^[ \t]*/.exec(line)?.[0] ?? "", tabSize, unit);
+    return outdentOne(line, tabSize, unit);
   });
   return { text: src.slice(0, first) + out.join("\n") + src.slice(last), caret: { from: lo, to: hi }, lines };
-}
-
-/**
- * 去掉开头**一级**（两个空格；行首 Tab 当一个制表位、够一级就整个吃掉）。
- * @param {string} line @returns {string}
- */
-function outdentOne(line) {
-  const head = /^[ \t]+/.exec(line)?.[0] ?? "";
-  if (!head) return line;
-  let used = 0;
-  let width = 0;
-  for (const ch of head) {
-    if (width >= INDENT_UNIT.length) break;
-    width += ch === "\t" ? 4 : 1;
-    used += 1;
-  }
-  return line.slice(used);
 }
 
 /**
@@ -2605,13 +2698,16 @@ function outdentOne(line) {
  * （幂等；`regionIndentPlan(plan.text).text === plan.text`）。规则见上方注释：
  * `[Decision]` 顶格、其 `[Predicate]` 缩进一级、线路体再缩进一级（两级）；
  * 线路体在下一条线路/合流 `[Predicate]`、`[End]`/`[endtip]` 或 EOF 处收束。
- * 只改**非空行**的行首空白；`@tag` 在缩进判定里去、写回时保留。
+ * 一级 = 1 个 Tab（`unit`，默认 `INDENT_UNIT`；`options.unit = "  "` 可回到
+ * 两空格版）。只改**非空行**的行首空白；`@tag` 在缩进判定里去、写回时保留。
  *
  * @param {string} text
+ * @param {{unit?: string}} [options]
  * @returns {{text: string, changed: number, lines: number}}
  */
-export function regionIndentPlan(text) {
+export function regionIndentPlan(text, options) {
   const src = String(text ?? "").replace(/\r\n?/g, "\n");
+  const { unit } = indentOptions(options);
   const rows = src.split("\n");
   let level = 0;      // 当前层级（Decision 区域内的线路层级）
   let inside = false;  // 是否在（未收束的）Decision 区域内
@@ -2634,7 +2730,7 @@ export function regionIndentPlan(text) {
       : command === "predicate" ? 1
         : inside ? level + 1
           : 0;
-    const target = INDENT_UNIT.repeat(want) + bare;
+    const target = unit.repeat(want) + bare;
     if (target !== line) changed += 1;
     return target;
   });
@@ -2659,12 +2755,35 @@ function regionHeadCommand(line) {
 }
 
 /**
+ * 行首缩进的 0x100C 提示：**Tab 缩进现在是惯例**（`tabSize = 8`，VSCode 默认），
+ * 所以只对"**Tab 后面还跟了空格**"（`\t  [` 这类**混排空格**）提示"缩进请只用
+ * Tab"——纯 Tab / 纯空格规整缩进都不报。span 指向 Tab 右边那一段多余空格。
+ *
+ * 语义说明：行首纯 Tab / 8 列整倍数空格都**不再**报 0x100C；空格（非 8 的
+ * 整倍数）由 `indentDiagnostics` 报 0x1019「不在制表位上」。
+ * `lead` 是**整行**的行首空白；span 相对整行，故在 `unshift` 之后调用。
+ *
+ * @param {string} lead
+ * @param {number} line
+ * @param {Diagnostic[]} out
+ */
+function indentLeadDiagnostics(lead, line, out) {
+  if (!lead || !lead.includes("\t")) return;
+  const pad = /\t( +)$/.exec(lead);
+  if (!pad) return;
+  const from = lead.length - pad[1].length;
+  out.push(diag("UseSpaceInsteadTab", line, from, lead.length,
+    "Tab 缩进后面又跟了空格（混排）：缩进请只用 Tab，一级 = 8 列",
+    "删掉 Tab 后面的空格（Tab 自己已对齐到 tab stop）", "warning"));
+}
+
+/**
  * 区域缩进的**单行**提示（0x1019，提示级）：逐行的 `parseLine` 看不到文档
  * 结构（Decision/Predicate 由 `regionIndentPlan` 整段重排），这里只提示"目测
- * 会歪"的写法 —— 行首空格宽度不是两格的整数倍（惯例：两空格一级）。
- * 行首 Tab 另由 `UseSpaceInsteadTab`（100C）提示。
+ * 会歪"的写法 —— **只对行首空格**提示"视觉宽度不是 `tabSize` 的整数倍"
+ * （惯例：1 个 Tab 一级 = 8 列；Tab 记 8 列，**纯 Tab 缩进永远合法**）。
  *
- * `lead` 是**整行**的行首空白；span 相对整行，故在 `unshift` 之后调用。
+ * `@param` 顺序与调用点一致（`lead` → `line` → `out`）。
  *
  * @param {string} lead
  * @param {number} line
@@ -2672,10 +2791,397 @@ function regionHeadCommand(line) {
  */
 function indentDiagnostics(lead, line, out) {
   if (!lead || lead.includes("\t")) return;
-  if (lead.length % INDENT_UNIT.length === 0) return;
+  const width = lead.length;
+  if (width % TAB_SIZE === 0) return;
+  const next = Math.max(TAB_SIZE, Math.ceil(width / TAB_SIZE) * TAB_SIZE);
   out.push(diag("BadIndentation", line, 0, lead.length,
-    `行首缩进 ${lead.length} 格，不是 ${INDENT_UNIT.length} 的整数倍（区域缩进惯例：两空格一级）`,
-    `改成 ${INDENT_UNIT.repeat(Math.max(1, Math.round(lead.length / INDENT_UNIT.length)))}（或顶格写）`));
+    `行首缩进 ${width} 空格 ≈ ${width} 列，不在 ${TAB_SIZE} 列的制表位上（区域缩进惯例：1 个 Tab = ${TAB_SIZE} 列一级）`,
+    `改成 ${" ".repeat(next)}（或一个 Tab），也可直接顶格写`));
+}
+
+// ── 语法着色（tokenizeLine：纯函数，UI 的 `.ed-hl` 逐像素层用） ───────────
+//
+// 契约（task-6；UI task-7 按此渲染）：
+//   · 返回 `{from, to, kind}[]`，**整行字符偏移**（`raw` 的下标，含行首空白），
+//     `to` 开区间；按 `from` 升序、**互不重叠**；并集 = 整行的每个非空区间
+//     （`kind = "bare"` 兜住所有空洞，空白只在**行首**归 `indent`）。
+//   · `kind ∈ HIGHLIGHT_KINDS`，与 `frontend/src/styles/browser.css` 的
+//     `.hl-<kind>` 一一对应；未知 kind 在 UI 侧归 `bare`。
+//   · **不得**依赖 `CONTROLLER_INDEX`（`parseControllerSpec` 的完整表）：
+//     未知控制器（`[DelayDemo(...)]`）、游戏内命名空间（`[Battle.Pause]`）也要有色。
+//     所以先用轻量正则切「骨架」，`parseLine` 的真实 `params[].{from,to}` 有则
+//     覆盖（键/值的边界最准），没有（表里查不到 / 形态残缺）就用骨架的边界。
+//   · 输入必须是**单行**（不含 `\n`）；给了多行就按整串处理（`\n` 归 `bare`）。
+
+/**
+ * 语法着色的 kind 全集（顺序 = 渲染/调试用的展示顺序）。
+ * UI（`.ed-hl`）与 harness 用它做「kind → 颜色」的完整性检查。
+ * @type {readonly string[]}
+ */
+export const HIGHLIGHT_KINDS = Object.freeze([
+  "indent", "bracket", "controller", "argKey", "string", "number", "bool",
+  "semicolon", "speaker", "text", "comment", "bare",
+]);
+
+/** @param {string} kind @returns {boolean} */
+function isHighlightKind(kind) {
+  return HIGHLIGHT_KINDS.includes(kind);
+}
+
+/**
+ * 值文本 → 着色 kind（字符串 / 数字 / 布尔 / 兜底 bare）。**不**查控制器规格：
+ * 表只影响诊断，颜色只看**源里的形态**。
+ * @param {string} raw 源里的值（含引号）
+ * @returns {"string"|"number"|"bool"|"bare"}
+ */
+function valueKindOf(raw) {
+  const text = String(raw ?? "");
+  if (/^["']/.test(text)) return "string";
+  if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) return "number";
+  if (/^(?:true|false)$/i.test(text)) return "bool";
+  return "bare";
+}
+
+/**
+ * 轻量骨架：`raw` 里**以 `[` 起、到 `]`** 的区间；没有则 `null`。
+ * 与 `storyPack.parseLine` 的 `lastIndexOf("]")` 截断一致
+ * （`[Delay(time=1)]x]y` → `close` 指到**最后**一个 `]`）。
+ * @param {string} raw
+ * @returns {{bracket: number, close: number}|null}
+ */
+function bracketSpanOf(raw) {
+  const text = String(raw);
+  if (!/^[ \t]*\[/.test(text)) return null;
+  const bracket = text.indexOf("[");
+  const close = text.lastIndexOf("]");
+  if (close < bracket) return null;
+  return { bracket, close };
+}
+
+/**
+ * 逐行的语法着色（**纯函数**、零依赖、不缓存）。
+ *
+ * 分层（task-6 契约，UI 与 harness 都按此对拍）：
+ *   0. `indent`：行首空白（空格 / Tab 混排，整段）。
+ *   1. `comment`：行首可选空白 + 两斜杠 → 到行尾；`text`：裸文本行 → 行首空白之后整段。
+ *   2. 括号骨架：`bracket` 覆盖 `[` / `]` / `(` / `)`；`controller` 是命令名
+ *      （**不查表** → 未知控制器 / 命名空间指令也有色）；`[name="X"]` 走
+ *      `speaker`（引号段）；`]` 之后一律 `text`。
+ *   3. 参数：`parseLine(...).params` 的真实 span 校正 `argKey` 的边界 + 给值定
+ *      形态；`=`/`,`/空白归 `bare`；值按形态 `string`/`number`/`bool`，字符串
+ *      里的 `;` 单独 `semicolon`；形态残缺（`\` 续行的物理行、古怪值）→
+ *      `scanArgSkeleton` 兜底。
+ *   4. `repairSpans`：排序 + 去重叠 + 补 `bare` 空洞 + 切 `semicolon` ⇒
+ *      **升序、不重叠、并集 = 整行的每个非空字符**（纯空白行 → 只 `indent`；
+ *      空串 → `[]`）。
+ *
+ * @param {string} raw 一行原文（不含 `\n`）
+ * @returns {Array<{from: number, to: number, kind: string}>} 按 `from` 升序、互不重叠
+ */
+export function tokenizeLine(raw) {
+  const line = String(raw ?? "");
+  const prefix = linePrefixSpans(line);
+  if (prefix.comment || prefix.bare) return prefix.spans;
+
+  const skeleton = continuationMarked(line, prefix.lead) ?? bracketSpanOf(line);
+  if (!skeleton) {
+    if (!line.length) return [];
+    // 行首是 `[` 但没有 `]`（`[Delay(time=1)`）：整段按 `bare` 收口
+    // ——`repairSpans` 保证「覆盖整行」的不变量。
+    return repairSpans(line, [...prefix.spans, { from: prefix.lead, to: line.length, kind: "bare" }]);
+  }
+  return repairSpans(line, colorStatement(line, skeleton, prefix.spans));
+}
+
+/**
+ * 续行（行尾 `\`）：**本行行首**的 `[` 是延续上一行的参数表；整行按
+ * 「参数区」着色（`]` 在后面的物理行，所以 `close` = 行尾，含 `\`）。
+ * 判据：`/\\\s*$/`、去行首空白后以 `[` 起、且本行**没有** `]`。
+ * @param {string} line
+ * @param {number} lead 行首空白长度
+ * @returns {{bracket: number, close: number}|null}
+ */
+function continuationMarked(line, lead) {
+  if (!/\\\s*$/.test(line)) return null;
+  const body = line.slice(lead);
+  if (body[0] !== "[" || body.includes("]")) return null;
+  const open = line.indexOf("[", lead);
+  return { bracket: open, close: line.length };
+}
+
+/**
+ * `[Cmd(k=v, …)]tail` 的着色（`prefix` = 行首空白那一段）。拆出来只为可读：
+ * `tokenizeLine` 仍是纯函数、零依赖。
+ * @param {string} line
+ * @param {{bracket: number, close: number}} skeleton 语句区间
+ *   （`close` = `]` 的下标；续行时 = 行尾 —— 那一行没有 `]`）
+ * @param {Array<{from: number, to: number, kind: string}>} prefix
+ * @returns {Array<{from: number, to: number, kind: string}>}
+ */
+function colorStatement(line, skeleton, prefix) {
+  const { bracket, close } = skeleton;
+  /** @type {Array<{from: number, to: number, kind: string}>} */
+  const spans = [...prefix];
+  /** 行合并：装饰器/`@slot` 之类别名放进 `controller`（同一种颜色）。 */
+  /** @param {number} from @param {number} to @param {string} kind */
+  const put = (from, to, kind) => {
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return;
+    spans.push({
+      from: Math.max(0, Math.min(line.length, from)),
+      to: Math.max(0, Math.min(line.length, to)),
+      kind: isHighlightKind(kind) ? kind : "bare",
+    });
+  };
+  const head = line.slice(bracket + 1, close);
+  const openParen = head.indexOf("(");
+  const nameEnd = openParen === -1 ? head.length : openParen;
+  const rawName = head.slice(0, nameEnd).trim();
+
+  // `[name="X"]` 简写对白：说话人（引号内文本）+ 括号 + 正文。`parseLine` 把它
+  // 判成 `dialogue`；着色按**源里的形态**认（`name=` 打头的头），与解析一致。
+  const dialogue = /^\[\s*name\s*=\s*("(?:\\.|[^"])*"|'(?:\\.|[^'])*')/.exec(line.slice(bracket));
+  if (dialogue) {
+    const quoteFrom = line.indexOf(dialogue[1], bracket);
+    put(bracket, quoteFrom, "bracket");
+    put(quoteFrom, quoteFrom + dialogue[1].length, "speaker");
+    put(quoteFrom + dialogue[1].length, close + 1, "bracket");
+    put(close + 1, line.length, "text");
+    return spans;
+  }
+  if (!rawName) {
+    // `[]` / 空头：括号 + 里面 `bare` + 尾部 `text`。
+    put(bracket, bracket + 1, "bracket");
+    put(bracket + 1, close, "bare");
+    put(close, close + 1, "bracket");
+    put(close + 1, line.length, "text");
+    return spans;
+  }
+
+  // `[` + 控制器名（名字区间来自正则骨架，**不查 CONTROLLER_INDEX**）。
+  put(bracket, bracket + 1, "bracket");
+  const controllerFrom = bracket + 1 + (head.length - head.trimStart().length);
+  put(controllerFrom, controllerFrom + rawName.length, "controller");
+
+  if (openParen === -1) {
+    put(controllerFrom + rawName.length, close, "bare");
+    put(close, close + 1, "bracket");
+    put(close + 1, line.length, "text");
+    return spans;
+  }
+
+  const parenTok = bracket + 1 + openParen;
+  // 行尾 `\`（续行）：参数表在本行没关；`)` 在后面的物理行。此时参数区
+  // 一路到**行尾**（含行尾的 `\`）—— 保证 span 覆盖整行。
+  const continued = !head.endsWith(")") && /\\$/.test(line.slice(0, close + 1)) && close === line.length - 1;
+  const closeParen = line.indexOf(")", parenTok + 1);
+  const argsEnd = closeParen === -1 ? (continued ? line.length : close) : closeParen;
+  // `Cmd` 与 `(` 之间（`[A (k=1)]` 的空格）→ bare；`(` → bracket。
+  put(controllerFrom + rawName.length, parenTok, "bare");
+  put(parenTok, parenTok + 1, "bracket");
+  // 参数：先用**真实** span（`parseLine(...).params`，未知控制器也有 key/value
+  // span），用不上（形态残缺）再退回轻量扫描。
+  for (const span of colorArgs(line, parenTok + 1, argsEnd)) spans.push(span);
+  put(argsEnd, Math.min(argsEnd + 1, line.length), "bracket");
+  put(close, close + 1, "bracket");
+  put(close + 1, line.length, "text");
+  return spans;
+}
+
+/**
+ * `ParseParam` 的 span（`raw` 的整行下标）：`{from, to}` 覆盖整个
+ * `key=value` 段（值里的引号算在内）。`parseLine` 的 `from/to` 就是整行坐标
+ * （`unshift` 已把行首空白加回），这里只做数字兜底。
+ * @param {ParseParam} param
+ * @returns {{from: number, to: number}}
+ */
+function tokenSpanOf(param) {
+  const from = Number.isFinite(param.from) ? Number(param.from) : 0;
+  const to = Number.isFinite(param.to) ? Number(param.to) : from;
+  return { from, to };
+}
+
+/**
+ * 参数区着色：先按**轻量扫描**（`scanArgSkeleton`）切出键/值/分隔（未知控制器、
+ * 表里查不到的键也有色），再用 `parseLine(...).params` 的**真实 span** 校正
+ * `argKey` 的边界、并按 `param.raw` 的字面文本给字符串/数字/布尔定界。
+ * 两端来源不同：`parseLine` 对**声明过的键**只给键区间（`to` 在 `=` 前），
+ * 对未声明的键给整段 `key=value` —— 所以值的形状一律靠扫描/字面文本。
+ * @param {string} line
+ * @param {number} from `(` 之后
+ * @param {number} to `)` 或行内最后一个 `]` 或行尾（续行）
+ * @returns {Array<{from: number, to: number, kind: string}>}
+ */
+function colorArgs(line, from, to) {
+  /** @type {Array<{from: number, to: number, kind: string}>} */
+  const spans = scanArgSkeleton(line, from, to);
+  const reals = (parseLine(line, 1).params ?? [])
+    .filter((param) => param.provided !== false)
+    .map((param) => ({
+      key: String(param.key ?? ""),
+      raw: String(param.raw ?? ""),
+      keyFrom: Number.isFinite(param.from) ? Number(param.from) : NaN,
+      segTo: Number.isFinite(param.to) ? Number(param.to) : NaN,
+    }))
+    .filter((entry) => Number.isFinite(entry.keyFrom) && entry.keyFrom >= from - 1)
+    .sort((a, b) => a.keyFrom - b.keyFrom);
+  if (!reals.length) return spans;
+
+  // 1) `argKey` 的边界以真实 span 为准（键在源里的写法/大小写、`@`、`.`）。
+  for (const span of spans) {
+    if (span.kind !== "argKey") continue;
+    const hit = reals.find((entry) => entry.key
+      && line.startsWith(entry.key, entry.keyFrom)
+      && span.from <= entry.keyFrom + 1
+      && span.to >= entry.keyFrom);
+    if (!hit) continue;
+    span.from = hit.keyFrom;
+    span.to = Math.min(to, hit.keyFrom + hit.key.length);
+  }
+  // 2) 真实 span 覆盖**整段**（未声明的键）时，值按 `param.raw` 的字面文本定界。
+  for (const entry of reals) {
+    if (!entry.raw || !(entry.segTo > entry.keyFrom + entry.key.length)) continue;
+    const at = line.indexOf(entry.raw, entry.keyFrom);
+    if (at === -1 || at >= to) continue;
+    const kind = valueKindOf(entry.raw);
+    if (kind === "bare") continue;
+    spans.push({ from: at, to: Math.min(to, at + entry.raw.length), kind });
+  }
+  return spans;
+}
+
+/**
+ * 行首前缀：「行首空白 = `indent`」「整行 `//…` = `comment`」「裸文本 = `text`」
+ * 三段（纯正则，不做解析）。
+ * @param {string} line
+ * @returns {{lead: number, spans: Array<{from: number, to: number, kind: string}>, comment: boolean, bare: boolean}}
+ */
+function linePrefixSpans(line) {
+  const lead = /^[ \t]*/.exec(line)?.[0] ?? "";
+  /** @type {Array<{from: number, to: number, kind: string}>} */
+  const spans = [];
+  if (lead.length) spans.push({ from: 0, to: lead.length, kind: "indent" });
+  const body = line.slice(lead.length);
+  if (!body.trim()) return { lead: lead.length, spans, comment: false, bare: false };
+  if (body.startsWith("//")) {
+    spans.push({ from: lead.length, to: line.length, kind: "comment" });
+    return { lead: lead.length, spans, comment: true, bare: false };
+  }
+  if (body[0] !== "[") {
+    spans.push({ from: lead.length, to: line.length, kind: "text" });
+    return { lead: lead.length, spans, comment: false, bare: true };
+  }
+  return { lead: lead.length, spans, comment: false, bare: false };
+}
+
+/**
+ * 参数区的兜底着色（真实 span 用不上时；与骨架同粒度）：`k` = argKey、
+ * `=`/`,`/空白 = bare、`"…"` = string、数字/布尔按形态。
+ * @param {string} line
+ * @param {number} from `(` 之后
+ * @param {number} to `)` 之前（或行内最后一个 `]`）
+ * @returns {Array<{from: number, to: number, kind: string}>}
+ */
+function scanArgSkeleton(line, from, to) {
+  /** @type {Array<{from: number, to: number, kind: string}>} */
+  const spans = [];
+  /** @param {number} a @param {number} b @param {string} kind */
+  const push = (a, b, kind) => { if (b > a) spans.push({ from: a, to: b, kind }); };
+  let index = from;
+  while (index < to) {
+    const gapFrom = index;
+    while (index < to && /[ \t]/.test(line[index])) index += 1;
+    push(gapFrom, index, "bare");
+    if (index >= to) break;
+    const key = /^[A-Za-z_]\w*/.exec(line.slice(index, to))?.[0] ?? "";
+    if (key) {
+      push(index, index + key.length, "argKey");
+      index += key.length;
+    }
+    const eqFrom = index;
+    while (index < to && /[ \t]/.test(line[index])) index += 1;
+    if (line[index] === "=") index += 1;
+    push(eqFrom, index, "bare");
+    const quote = line[index];
+    if (quote === '"' || quote === "'") {
+      const valueFrom = index;
+      index += 1;
+      while (index < to && line[index] !== quote) index += line[index] === "\\" ? 2 : 1;
+      index = Math.min(to, index + 1);
+      push(valueFrom, index, "string");
+    } else {
+      const valueFrom = index;
+      const literal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)|^(?:true|false)/.exec(line.slice(index, to));
+      if (literal) {
+        index += literal[0].length;
+        push(valueFrom, index, valueKindOf(literal[0]));
+      } else {
+        const bare = /^[^,\s)\]]*/.exec(line.slice(index, to))?.[0] ?? "";
+        index = Math.min(to, index + Math.max(1, bare.length));
+        push(valueFrom, index, "bare");
+      }
+    }
+    const sepFrom = index;
+    while (index < to && /[ \t]/.test(line[index])) index += 1;
+    if (line[index] === ",") index += 1;
+    push(sepFrom, index, "bare");
+  }
+  return spans;
+}
+
+/**
+ * 收口：按 `from` 排序 → 裁重叠（后到的从**前一个的 `to`** 起）→ 补 `bare`
+ * 空洞 → 把 `string` 里的 `;` 切成 `semicolon`。保证三条不变量：
+ * 「升序、互不重叠、并集 = 整行的每个非空字符」。
+ * @param {string} line
+ * @param {Array<{from: number, to: number, kind: string}>} spans
+ * @returns {Array<{from: number, to: number, kind: string}>}
+ */
+function repairSpans(line, spans) {
+  const sorted = spans
+    .filter((span) => Number.isFinite(span.from) && Number.isFinite(span.to) && span.to > span.from)
+    .sort((a, b) => (a.from - b.from) || (a.to - b.to));
+  /** @type {Array<{from: number, to: number, kind: string}>} */
+  const drained = [];
+  for (const span of sorted) {
+    const last = drained[drained.length - 1];
+    if (!last) { drained.push({ ...span }); continue; }
+    if (span.from >= last.to) { drained.push({ ...span }); continue; }
+    if (span.to <= last.to) continue;                    // 完全被前一个盖住
+    drained.push({ from: last.to, to: span.to, kind: span.kind });
+  }
+  /** @type {Array<{from: number, to: number, kind: string}>} */
+  const filled = [];
+  let cursor = 0;
+  for (const span of drained) {
+    if (span.from > cursor) filled.push({ from: cursor, to: span.from, kind: "bare" });
+    filled.push({ ...span });
+    cursor = span.to;
+  }
+  return splitSemicolons(line, filled);
+}
+
+/**
+ * `string` span 里的 `;`（`values="1;2"` / `options="A;B"`）单独切成
+ * `semicolon`（semilist 的分隔符高亮）；只动 `string`，其余 kind 原样。
+ * @param {string} line
+ * @param {Array<{from: number, to: number, kind: string}>} spans
+ * @returns {Array<{from: number, to: number, kind: string}>}
+ */
+function splitSemicolons(line, spans) {
+  /** @type {Array<{from: number, to: number, kind: string}>} */
+  const out = [];
+  for (const span of spans) {
+    if (span.kind !== "string") { out.push(span); continue; }
+    let cursor = span.from;
+    for (let index = span.from; index < span.to; index += 1) {
+      if (line[index] !== ";") continue;
+      if (index > cursor) out.push({ from: cursor, to: index, kind: "string" });
+      out.push({ from: index, to: index + 1, kind: "semicolon" });
+      cursor = index + 1;
+    }
+    if (span.to > cursor) out.push({ from: cursor, to: span.to, kind: "string" });
+  }
+  return out;
 }
 
 // ── 补全 ────────────────────────────────────────────────────────────────────

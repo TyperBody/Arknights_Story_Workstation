@@ -61,7 +61,7 @@ cd <repo>
 node build/harness/demo-check.mjs                      # 编辑器/舞台/分支图/拼接 端到端
 node build/harness/_stage-clip-check.mjs               # 舞台裁剪（16:9）+ 舞台/日志可调大小（51）
 node build/harness/_indent-ui-check.mjs                # 区域缩进 UI（11）
-node build/harness/_editor-tab-hl-check.mjs            # VSCode 键位（Tab/Enter/Backspace）+ 着色层逐像素对齐（28）
+node build/harness/_editor-tab-hl-check.mjs            # VSCode 键位（Tab/Enter/Backspace）+ 着色层逐像素对齐（31）
 node build/harness/_stage-visual-check.mjs             # 编辑器舞台 100%/150% 的 16:9 观感证据
 node build/harness/_i18n-check.mjs                    # i18n 运行时（7）
 node build/harness/player-chrome.mjs                  # 播放器底栏（默认纯隐藏，10）

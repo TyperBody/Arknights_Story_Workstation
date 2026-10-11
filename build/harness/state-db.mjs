@@ -88,9 +88,13 @@ async function launch(logName) {
   spawn("setsid", ["sh", "-c",
     `exec dbus-run-session -- env DISPLAY=${display} ${env.join(" ")} ${JSON.stringify(app)} > ${JSON.stringify(log)} 2>&1`],
   { stdio: "ignore", detached: true }).unref();
+  const read = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
   for (let i = 0; i < 40; i += 1) {
     await sleep(1000);
-    if (win()) return { log, win: win(), read: () => (existsSync(log) ? readFileSync(log, "utf8") : "") };
+    // 窗口出现 ≠ 启动完成：[state] 行是 setup 的最后一件事，等它（或超时）再返回。
+    if (win() && (/\[state\] sqlite ready/.test(read()) || i >= 20)) {
+      return { log, win: win(), read };
+    }
   }
   return { log, win: "", read: () => (existsSync(log) ? readFileSync(log, "utf8") : "") };
 }
@@ -126,30 +130,35 @@ for (const label of ["cold", "warm"]) {
     await sleep(400);
     const d2 = d1 === null ? null : await clickNav(464, 209, 4.0);   // 「编辑」按钮
     shot("state-cold-editor.png");
-    // 拖分隔条：gutter 在 toolpanel 右缘（≈32% × 1024 ≈ 328）；多点试 + 带步进的 mousemove。
+    // 触发一次**落盘**：工具栏的 Map 开关（`⌥ 分支图` / `预览面板`）必然改布局树
+    // → `onState` → `saveLayoutNamed`（+ 视图状态）。GTK 会让内容区下移 ~30px，
+    // 所以 y 取 49 与 79 两行、x 扫一段；每点一次查一次库，命中即停。
+    sh(`DISPLAY=${display} xdotool windowmove --sync ${run.win} 0 0 2>/dev/null`);
+    await sleep(3500);
     let wrote = false;
-    for (const x of [326, 338, 314, 350]) {
-      for (const dx of [80, 140]) {
-        sh(`DISPLAY=${display} xdotool mousemove ${x} 420 mousedown 1`);
-        for (let step = 1; step <= 6; step += 1) {
-          sh(`DISPLAY=${display} xdotool mousemove ${x + Math.round((dx * step) / 6)} 420`);
-          await sleep(60);
-        }
-        sh(`DISPLAY=${display} xdotool mouseup 1`);
-        await sleep(900);
-        const rows = sqlite("select scope||':'||key from kv")?.rows ?? [];
-        if (rows.length) { wrote = true; break; }
+    for (const y of [49, 79, 34]) {
+      for (let x = 380; x <= 600 && !wrote; x += 20) {
+        sh(`DISPLAY=${display} xdotool mousemove ${x} ${y} click 1`);
+        await sleep(1100);
+        wrote = (sqlite("select key from kv")?.rows ?? []).length > 0;
       }
       if (wrote) break;
     }
-    shot("state-cold-editor-dragged.png");
     const rows = sqlite("select scope||':'||key||'='||substr(value,1,36) from kv order by scope,key")?.rows ?? [];
-    check("cold: 前端把工作台排版写进了 state.db",
+    check("cold: 前端把工作台状态写进了 state.db",
       rows.some((r) => r.startsWith("workspace:prts-editor-wb:")),
       `dz=${d1}/${d2} rows=${JSON.stringify(rows).slice(0, 220)}`);
+    shot("state-cold-editor-dragged.png");
   } else {
     await sleep(4000);
     shot("state-warm-home.png");
+    // warm：上一次的键必须在库里（冷启动写 → 重启仍在），且**这次启动读到了**
+    // （`[state] snapshot scope=workspace n=N`，N>0 才算真读到）。
+    const persist = sqlite("select key||'='||value from kv where scope='workspace' and key like '%default'")?.rows ?? [];
+    check("warm: 布局仍在库里（重启不丢）", persist.length > 0, JSON.stringify(persist).slice(0, 160));
+    const readBack = (text.match(/\[state\] snapshot scope=workspace n=(\d+)/g) ?? []).join(",");
+    const n = Number(/n=(\d+)/.exec(readBack)?.[1] ?? 0);
+    check("warm: 启动时从 state.db 读到了这些键（hydrate 生效）", n > 0, readBack || "无 snapshot 日志");
   }
   if (hasSqlite3) {
     const r = sqlite("select scope||':'||key||'='||substr(value,1,40) from kv order by scope,key");
@@ -158,12 +167,6 @@ for (const label of ["cold", "warm"]) {
   }
   sh(`pkill -f ${JSON.stringify(`${app}$`)} || true`);
   await sleep(800);
-}
-
-// 迁移检查：预置一条旧 localStorage → 首次启动后用 DB 里出现同名键（无 sqlite3 时跳过）
-if (hasSqlite3) {
-  const rows = (logs[0]?.rows ?? []).concat(logs[1]?.rows ?? []);
-  check("DB 里有 workspace / player / app 之外的 scope 使用痕迹", rows.length >= 0, `${rows.length} 行`);
 }
 
 console.log(`\n${pass} pass / ${fail} fail`);

@@ -1420,7 +1420,7 @@
   --hl-number: #f78c6c;     /* 数字 */
   --hl-bool: #ffcb6b;       /* true / false */
   --hl-semicolon: #89ddff;  /* `;` 分隔（值列表） */
-  --hl-speaker: #ffcb6b;    /* `[name="X"]` 的说话人 */
+  --hl-speaker: #ff8fab;    /* `[name="X"]` 的说话人（与 bool/number 都要能分开） */
   --hl-text: #d7dae0;       /* 旁白 / 对白正文 */
   --hl-comment: #6a737d;    /* `// …` */
   --hl-bracket: #8792a2;    /* `[` `]` `(` `)` */
@@ -1436,7 +1436,10 @@
    的 `min-width` 决定，测量锚点 `.ed-anchor` 仍照常工作）。 */
 .ed-hl {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: 0;
   z-index: 0;
   margin: 0;
   padding: 0 10px 24px;
@@ -1451,10 +1454,16 @@
   line-height: 21px;
   tab-size: 8;
   -moz-tab-size: 8;
+  /* 高度 = 行数 × 21 + 24px 下 padding（与 textarea 的 `height: 100%` 同高）；
+     这里**不**用 `inset: 0`（`bottom: 0` 会按 `.ed-code-lines` 的高度拉伸，
+     与 `.ed-anchor` 量出来的行格错位）。 */
 }
 
+/* 只读演示（纯 Vite）也着色：**文字可见性由 `bare` 兜底 span 保证**
+   （每一列都有 kind，`from→to` 覆盖整行），textarea 的文字保持 transparent，
+   光标 `caret-color: var(--accent)` 照常可见。 */
 .ed-hl[data-hl-readonly="1"] {
-  display: none;
+  color: var(--text-primary);
 }
 
 .ed-hl-line {
@@ -1530,9 +1539,13 @@
   background: rgba(244, 196, 48, 0.28);
 }
 
-/* readonly（纯 Vite 只读演示）时不着色：颜色交回 textarea，保证**仍然可读**。 */
+/* readonly（纯 Vite 只读演示）也走着色层：文字颜色**只**由 `.ed-hl` 出，
+   textarea 保持 `transparent`（否则两层叠色会发糊）。着色层的
+   `.ed-hl[data-hl-readonly="1"] { color: var(--text-primary) }` 是兜底色 ——
+   每一列都有 span，所以正文在只读态**仍然可读**（截图 `editor-hl.png`）。 */
 .ed-textarea[readonly] {
-  color: var(--text-primary);
+  color: transparent;
+  caret-color: var(--accent);
 }
 
 /* 测量锚点：不可见，只用来算光标像素位置（用于补全弹窗 / 悬停帮助）。

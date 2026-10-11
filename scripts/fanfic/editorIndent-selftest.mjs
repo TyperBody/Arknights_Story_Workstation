@@ -6,15 +6,16 @@
 // 希望增加区域缩进」）：
 //   (a) 编辑器容忍行首空白：缩进版与顶格版 `parseScript` / `blocksOf` 给出
 //       **同一** kind（+controller）序列；`raw` 保留原样、`leading` 挂出；
-//       Tab 缩进有 `UseSpaceInsteadTab` 提示（提示级）。
+//       缩进惯例 = **1 个 Tab**（`tabSize = 8`）⇒ 纯 Tab 无 100C；
+//       "Tab 后跟空格"（混排）才有提示级 `UseSpaceInsteadTab`。
 //   (b) 缩进版 lint 无 `NarrationLine`；缩进版与顶格版诊断（码/行/消息）
-//       逐条一致 —— 行首 tab 的提示除外，只差整体 span 偏移。
+//       逐条一致（8 列制表位），只差整体 span 偏移。
 //   (c) 送引擎归一化：`storyPack.stripIndentForEngine` / `library.stripControls`
 //       把缩进版还原成与顶格版**逐字节相等**的引擎脚本文本（旁白行/续行原样）；
 //       demo runtime 的 `story.script` 缩进一版也对拍通过。
 //   (d) `buildHook` 的 `story.script` = 归一化文本；`revision` 与顶格版一致。
-//   (e) `indentLines` 区间缩进/反缩进：往返幂等、只动行首空白、顶格行原样、
-//       制表位反缩进不越界、正文/字符串字面量里的空白不被碰。
+//   (e) `indentLines` 区间缩进/反缩进：Tab 一级、缩进先对齐到 tab stop、
+//       反缩进回上一个 tab stop、往返幂等、只动行首空白、`options.unit` 兼容。
 //   (f) `regionIndentPlan` 幂等、`[Decision]`/`[Predicate]`/线路体层级正确，
 //       且作用后 `blocksOf` 结构（kind + controller）不变、lint 无 NarrationLine。
 //
@@ -177,24 +178,31 @@ group("(a) 解析容忍：缩进版 = 顶格版（kind/controller 序列一致�
   eq("editorModel.parseLine 缩进行 → command", [editorLine.kind, editorLine.controller], ["command", "delay"]);
   ok("editorModel.parseLine 缩进行无 error", !editorLine.diagnostics.some((d) => d.severity === "error"));
 
-  // Tab 缩进行也算命令；`UseSpaceInsteadTab` 保留，但降级到提示级（缩进用空格）。
+  // Tab 缩进行也算命令；Tab = **惯例**（`tabSize = 8`）→ 只在
+  // "Tab 后面又跟空格"（混排）时给提示级 `UseSpaceInsteadTab`。
   const tabLine = parseLine('\t[Delay(time=1)]', 9);
   eq("Tab 缩进行 → command", [tabLine.kind, tabLine.controller], ["command", "delay"]);
-  const tabDiag = tabLine.diagnostics.filter((d) => d.name === "UseSpaceInsteadTab");
-  eq("Tab 缩进给 UseSpaceInsteadTab（提示级）", tabDiag.map((d) => d.severity), ["warning"]);
-  eq("Tab 缩进诊断指向行首 Tab", [tabDiag[0].from, tabDiag[0].to], [0, 1]);
+  eq("纯 Tab 缩进无 UseSpaceInsteadTab（Tab 就是惯例）", tabLine.diagnostics.filter((d) => d.name === "UseSpaceInsteadTab").length, 0);
+  eq("纯 Tab 缩进无 BadIndentation", tabLine.diagnostics.filter((d) => d.name === "BadIndentation").length, 0);
   ok("Tab 缩进行没有 error", !tabLine.diagnostics.some((d) => d.severity === "error"));
+
+  const mixedLine = parseLine('\t  [Delay(time=1)]', 9);
+  const mixedDiag = mixedLine.diagnostics.filter((d) => d.name === "UseSpaceInsteadTab");
+  eq("Tab 后跟空格（混排）→ UseSpaceInsteadTab（提示级）", mixedDiag.map((d) => d.severity), ["warning"]);
+  eq("混排 span 指向 Tab 后的空格", [mixedDiag[0].from, mixedDiag[0].to], [1, 3]);
+  ok("混排行没有 error", !mixedLine.diagnostics.some((d) => d.severity === "error"));
 
   // 带 @tag 的缩进行：`label=@tag` 形态（控制位就是 `name` 参数的别名）。
   const tagged = parseLine('  [charslot(slot="m", name="char_002_amiya_1#1", duration=0.5)]', 3);
   eq("@tag 缩进行 → command charslot", [tagged.kind, tagged.controller], ["command", "charslot"]);
   ok("@tag 缩进行无 error", !tagged.diagnostics.some((d) => d.severity === "error"));
 
-  // 非两格整数倍的缩进：0x1019 提示级（缩进惯例 = 两空格一级）
+  // 行首空格不在 8 列制表位上：0x1019 提示级（惯例 = 1 个 Tab = 8 列一级）
   const odd = parseLine("   [Delay(time=1)]", 4);
   eq("三格缩进 → BadIndentation（提示级）", odd.diagnostics.filter((d) => d.name === "BadIndentation").map((d) => [d.severity, d.from, d.to]), [["warning", 0, 3]]);
   eq("BadIndentation 码 = 0x1019", DIAGNOSTIC_CODES.BadIndentation, 0x1019);
-  eq("两格缩进无 BadIndentation", parseLine("  [Delay(time=1)]", 4).diagnostics.some((d) => d.name === "BadIndentation"), false);
+  eq("两格缩进 → BadIndentation（不是 8 的整倍数）", parseLine("  [Delay(time=1)]", 4).diagnostics.some((d) => d.name === "BadIndentation"), true);
+  eq("8 格缩进无 BadIndentation", parseLine("        [Delay(time=1)]", 4).diagnostics.some((d) => d.name === "BadIndentation"), false);
   eq("Tab 缩进走 100C 不走 1019", parseLine('\t[Delay(time=1)]', 4).diagnostics.some((d) => d.name === "BadIndentation"), false);
 }
 
@@ -210,16 +218,17 @@ group("(b) 诊断：缩进版 lint 无 NarrationLine");
   eq("缩进版 stats.lines = 顶格版", indentedLint.stats.lines, flatLint.stats.lines);
   eq("缩进版 decisions/combos = 顶格版", [indentedLint.stats.decisions, indentedLint.stats.combos], [flatLint.stats.decisions, flatLint.stats.combos]);
   eq("缩进版 controllers = 顶格版", indentedLint.stats.controllers, flatLint.stats.controllers);
-  // 行首 Tab 的行多一条提示级 `UseSpaceInsteadTab` —— 去掉它后应逐条一致。
-  const strip = (list) => list.filter((d) => !(d.name === "UseSpaceInsteadTab" && d.message.includes("行首缩进")));
-  eq("缩进版诊断（去掉行首 Tab 提示）= 顶格版", diagSig(strip(indentedLint.diagnostics)), diagSig(strip(flatLint.diagnostics)));
-  eq("行首 Tab 提示是提示级（不是 error）", indentedLint.diagnostics.filter((d) => d.name === "UseSpaceInsteadTab").every((d) => d.severity === "warning"), true);
+  // Tab 是惯例：整篇诊断**逐条一致**（`UseSpaceInsteadTab` 只给「Tab 后跟空格」的混排）。
+  eq("缩进版诊断 = 顶格版（Tab 缩进不再多提示）", diagSig(indentedLint.diagnostics), diagSig(flatLint.diagnostics));
+  eq("缩进版没有 UseSpaceInsteadTab（纯 Tab 缩进）", indentedLint.diagnostics.filter((d) => d.name === "UseSpaceInsteadTab").length, 0);
 
-  // span：缩进版 = 顶格版 + shift（同一行只差整体偏移）
+  // span：缩进版 = 顶格版 + shift（同一行只差整体偏移；`BadIndentation` 只在
+  // 「空格不在 8 列制表位」时出现，所以这里用 8 格缩进对齐）。
   const flatPixel = parseLine('[Delay(time=1)]bogus(x=1)', 5).diagnostics.map((d) => [d.name, d.from, d.to]);
-  const indPixel = parseLine('  [Delay(time=1)]bogus(x=1)', 5).diagnostics.map((d) => [d.name, d.from, d.to]);
-  ok("缩进行诊断 span = 顶格行 + shift", JSON.stringify(indPixel.map(([n, f, t]) => [n, f - 2, t - 2])) === JSON.stringify(flatPixel));
-  ok("诊断 span 落在行内", indPixel.every(([, f, t]) => f >= 0 && f < t && t <= '  [Delay(time=1)]bogus(x=1)'.length));
+  const indPixel = parseLine('        [Delay(time=1)]bogus(x=1)', 5).diagnostics.map((d) => [d.name, d.from, d.to]);
+  ok("缩进行诊断 span = 顶格行 + shift（8 格 = 1 个 tab stop）", JSON.stringify(indPixel.map(([n, f, t]) => [n, f - 8, t - 8])) === JSON.stringify(flatPixel));
+  ok("诊断 span 落在行内", indPixel.every(([, f, t]) => f >= 0 && f < t && t <= '        [Delay(time=1)]bogus(x=1)'.length));
+  eq("8 格缩进行没有 BadIndentation", parseLine('        [Delay(time=1)]bogus(x=1)', 5).diagnostics.filter((d) => d.name === "BadIndentation").length, 0);
 
   const contLint = lintDocument(CONTINUATION_INDENTED);
   const contFlat = lintDocument(CONTINUATION_FLAT);
@@ -227,7 +236,13 @@ group("(b) 诊断：缩进版 lint 无 NarrationLine");
   const contOnly = (text) => text.split("\n").slice(0, 3).join("\n");
   eq("续行缩进版：指令部分无 NarrationLine", lintDocument(contOnly(CONTINUATION_INDENTED)).diagnostics.filter((d) => d.name === "NarrationLine").length, 0);
   eq("续行缩进版：真旁白行保留 NarrationLine（1 条）", contLint.diagnostics.filter((d) => d.name === "NarrationLine").length, 1);
-  eq("续行缩进版诊断 = 顶格版", diagSig(contLint.diagnostics), diagSig(contFlat.diagnostics));
+  // 续行物理行**带行首缩进**（`\t[Tutorial(…, \` 的下一行）时，`parseLine` 看不到
+  // 上一行 → 会在这一行报 `UseTabInsteadSpace`（参数表内的 Tab，提示级）。
+  // 这不是"缩进"的锅：拼行后由引擎的 `commandRegex` 照播（`stripIndentForEngine`
+  // 只去**行首**空白）。所以只对拍"去掉该提示"的签名（与 task-2 口径一致）。
+  const stripTab = (list) => list.filter((d) => !(d.name === "UseTabInsteadSpace" && d.message.includes("参数表内用了 Tab")));
+  eq("续行缩进版诊断（去 100B）= 顶格版", diagSig(stripTab(contLint.diagnostics)), diagSig(stripTab(contFlat.diagnostics)));
+  eq("顶格续行版没有 100B", contFlat.diagnostics.filter((d) => d.name === "UseTabInsteadSpace").length, 0);
 
   // 旁白行被缩进 = 仍是旁白（NarrationLine 保留：它就是展示文本）
   ok("缩进旁白行仍报 NarrationLine", parseLine("    裸旁白", 2).diagnostics.some((d) => d.name === "NarrationLine"));
@@ -299,44 +314,52 @@ group("(d) buildHook：story.script 归一化、revision 与顶格版一致");
 
 // ── (e) indentLines ────────────────────────────────────────────
 
-group("(e) indentLines：区间缩进/反缩进、往返幂等");
+group("(e) indentLines：Tab 一级 + tab-stop 对齐（往返幂等）");
 
 {
   const text = "a\nb\nc\nd";
   const one = indentLines(text, 2, 3, "indent");
-  eq("缩进第 2 行", one.text, "a\n  b\nc\nd");
+  eq("缩进第 2 行（一级 = 1 个 Tab）", one.text, "a\n\tb\nc\nd");
   eq("caret 原样返回选区", one.caret, { from: 2, to: 3 });
   eq("缩进行数", one.lines, 1);
   eq("反缩进回到原文（往返幂等）", indentLines(one.text, 2, 3, "outdent").text, text);
 
   const two = indentLines(text, 2, 5, "indent");
-  eq("跨行选区：两行都缩进（按全部缩进）", two.text, "a\n  b\n  c\nd");
+  eq("跨行选区：两行都缩进（按全部缩进）", two.text, "a\n\tb\n\tc\nd");
   eq("direction=-1 等价 outdent", indentLines(two.text, 2, 7, -1).text, text);
-  eq("direction=+1 等价 indent", indentLines("a\nb", 2, 3, 1).text, "a\n  b");
+  eq("direction=+1 等价 indent", indentLines("a\nb", 2, 3, 1).text, "a\n\tb");
 
-  const back1 = indentLines("a\n  b\n  c\nd", 2, 7, "outdent");
+  const back1 = indentLines("a\n\tb\n\tc\nd", 2, 7, "outdent");
   eq("多行选择时两行都反缩进", back1.text, text);
-  eq("反缩进 = 每行各去一级（第二行有 4 格 → 去 2）", indentLines("a\n  b\n    c\nd", 2, 9, "outdent").text, "a\nb\n  c\nd");
+  eq("反缩进 = 每行回上一个 tab stop（`\\t\\t` → `\\t`）", indentLines("a\n\tb\n\t\tc\nd", 2, 9, "outdent").text, "a\nb\n\tc\nd");
 
-  eq("from/to 反序自动交换", indentLines("a\nb\nc", 4, 2, "indent").text, "a\n  b\nc");
-  eq("选区贴到行尾也含整行", indentLines("a\nb\nc", 2, 2, "indent").text, "a\n  b\nc");
-  eq("选区从行首开始只算该行", indentLines("a\nb\nc", 0, 0, "indent").text, "  a\nb\nc");
-  eq("选区到下一行行首不含下一行", indentLines("a\nb\nc", 0, 2, "indent").text, "  a\nb\nc");
+  eq("from/to 反序自动交换", indentLines("a\nb\nc", 4, 2, "indent").text, "a\n\tb\nc");
+  eq("选区贴到行尾也含整行", indentLines("a\nb\nc", 2, 2, "indent").text, "a\n\tb\nc");
+  eq("选区从行首开始只算该行", indentLines("a\nb\nc", 0, 0, "indent").text, "\ta\nb\nc");
+  eq("选区到下一行行首不含下一行", indentLines("a\nb\nc", 0, 2, "indent").text, "\ta\nb\nc");
 
   eq("顶格行反缩进 = 原样", indentLines("a\nb", 2, 3, "outdent").text, "a\nb");
-  eq("Tab 缩进行反缩进（一个制表位 = 一级）", indentLines("a\n\tb", 2, 4, "outdent").text, "a\nb");
-  eq("四个空格反缩进只吃一级", indentLines("a\n    b", 2, 7, "outdent").text, "a\n  b");
-  eq("单个空格反缩进吃一格", indentLines("a\n b", 2, 4, "outdent").text, "a\nb");
-  eq("缩进不改行尾空白", indentLines("a\nb  ", 2, 3, "indent").text, "a\n  b  ");
-  eq("选区含空行：空行也缩进", indentLines("a\n\nb", 0, 4, "indent").text, "  a\n  \n  b");
-  eq("空行缩进后可原样还原", indentLines("  a\n  \n  b", 0, 8, "outdent").text, "a\n\nb");
+  eq("Tab 缩进行反缩进（一级 = 1 个 Tab）", indentLines("a\n\tb", 2, 4, "outdent").text, "a\nb");
+  eq("纯空格缩进（1…8 格）反缩进回顶格", indentLines("a\n    b", 2, 7, "outdent").text, "a\nb");
+  eq("Tab+2 空格（10 列）反缩进回 tab stop（8 列）", indentLines("a\n\t  b", 2, 6, "outdent").text, "a\n\tb");
+
+  // 缩进：行首缩进不在 tab stop 上 → 先补空格对齐、再插 Tab
+  eq("6 列缩进后按 tab stop 对齐（补 2 空格再 Tab）", indentLines("a\n      b", 2, 9, "indent").text, "a\n        \tb");
+  eq("缩进不改行尾空白", indentLines("a\nb  ", 2, 3, "indent").text, "a\n\tb  ");
+  eq("选区含空行：空行也缩进", indentLines("a\n\nb", 0, 4, "indent").text, "\ta\n\t\n\tb");
+  eq("空行缩进后可原样还原", indentLines("\ta\n\t\n\tb", 0, 8, "outdent").text, "a\n\nb");
 
   const literal = 'a\n[name="x"]  两个空格正文\nb';
   const literalOne = indentLines(literal, 2, literal.length, "indent").text;
-  eq("缩进不改正文里的空格数", literalOne.split("\n")[1], '  [name="x"]  两个空格正文');
+  eq("缩进不改正文里的空格数", literalOne.split("\n")[1], '\t[name="x"]  两个空格正文');
   eq("往返幂等", indentLines(literalOne, 2, literalOne.length, "outdent").text, literal);
   const quoted = '[Delay(time=1)]  a  b   c';
-  eq("字符串/正文内部的连续空格原样", indentLines(quoted, 0, quoted.length, "indent").text, `  ${quoted}`);
+  eq("字符串/正文内部的连续空格原样", indentLines(quoted, 0, quoted.length, "indent").text, `\t${quoted}`);
+
+  // options：`tabSize` / `unit` 覆盖（旧的两空格调用逐字节可用）
+  eq("options.tabSize=4 决定对齐网格", indentLines("a\n  b", 2, 5, "indent", { tabSize: 4 }).text, "a\n    \tb");
+  eq("options.unit=\"  \" 兼容两空格（缩进）", indentLines("a\nb", 2, 3, "indent", { unit: "  " }).text, "a\n  b");
+  eq("options.unit=\"  \" 兼容两空格（反缩进）", indentLines("a\n    b", 2, 7, "outdent", { unit: "  " }).text, "a\n  b");
 }
 
 // ── (f) regionIndentPlan ─────────────────────────────────────────

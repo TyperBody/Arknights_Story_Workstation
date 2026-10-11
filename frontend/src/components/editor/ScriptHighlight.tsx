@@ -209,7 +209,8 @@ function normalizeSpan(raw: { from: number; to: number; kind: string }, length: 
   return { from, to, kind };
 }
 
-/** 逐行取 span：tokenizer 优先（模型就绪），失败/空 → 降级；再补齐空洞。 */
+/** 逐行取 span：tokenizer 优先（模型就绪），失败/空 → 降级；再排序、去重叠、
+ * 补空洞 —— 保证**每一列都有 kind**、且「span 文本拼起来 = 行原文」。 */
 function buildRows(
   text: string,
   tokenizer: ScriptHighlightProps["tokenizer"]
@@ -226,7 +227,7 @@ function buildRows(
           spans = [];
         }
       }
-      if (!spans.length) return { raw, spans: fallbackTokenizeLine(raw) };
+      if (!spans.length) spans = fallbackTokenizeLine(raw);
       const sorted: HlSpan[] = [];
       for (const span of spans) {
         const normalized = normalizeSpan(span, raw.length);
