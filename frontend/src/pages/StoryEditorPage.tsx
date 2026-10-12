@@ -2126,6 +2126,21 @@ export default function StoryEditorPage() {
     }
   }, [buildPreviewRuntime, closePreview, id, runProbe, tr]);
 
+  /**
+   * **分离/回停靠时把正在跑的预览 iframe「搬」过去**（而不是重建）。
+   *
+   * 预览是**命令式**起的（`hostRef` 里 `appendChild(iframe)`）；面板换个窗口壳
+   * （树里的块 ↔ 浮动层）时 React 会重建 `.ed-preview-frame` 宿主 → 老代码会
+   * 连带丢掉 iframe（演出中断、状态条却还写着"预览运行中"）。iframe 直接换父节点
+   * 不会重载文档，所以这里在每次渲染后把它 re-parent 回新的宿主。
+   */
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    const frame = previewFrame.current;
+    if (!host || !frame || frame.parentElement === host) return;
+    host.replaceChildren(frame);
+  });
+
   useEffect(() => () => closePreview(), [closePreview]);
 
   /**

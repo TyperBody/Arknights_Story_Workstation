@@ -431,6 +431,60 @@ try {
   }));
   check("⑩ 重开 → 仍在浮动层（记住「分离」这件事）", reopened.inLayer && !reopened.docked, JSON.stringify(reopened));
 
+  // ── 契约 11：预览（**命令式** iframe）在「分离」时不丢 ──────────────────
+  // 预览 iframe 是 `hostRef` 里 appendChild 出来的：面板换壳（树 ↔ 浮动层）时
+  // React 会重建宿主 → 若不做 re-parent，演出就断了（状态条却还写"预览运行中"）。
+  // 判据 = **元素同一性**：分离前记下那个 iframe，分离后它必须还在（且在层里）。
+  if (!(await page.locator('[data-wb-panel="preview"]').count())) {
+    await page.evaluate(() => {
+      [...document.querySelectorAll(".ed-viewtabs .ed-btn")].find((el) => el.textContent.trim() === "预览")?.click();
+    });
+    await page.waitForTimeout(800);
+  }
+  // 起一次真预览（`/editor/demo` 里引擎可能报"接口未初始化"，但 iframe 一定会建）。
+  await page.evaluate(() => {
+    const btn = [...document.querySelectorAll('.ed-preview-bar button, .ed-preview-bar .ed-btn')]
+      .find((el) => /预览|载入/.test(el.textContent ?? ""));
+    btn?.click();
+  });
+  await page.waitForTimeout(1500);
+  const marked = await page.evaluate(() => {
+    const frame = document.querySelector('[data-wb-panel="preview"] .ed-preview-frame iframe')
+      ?? document.querySelector('.ed-preview-frame iframe');
+    if (!frame) return false;
+    window.__keepFrame = frame;
+    window.__keepTitle = frame.getAttribute("title") ?? "";
+    return true;
+  });
+  if (marked) {
+    await page.evaluate(() => document.querySelector('[data-wb-panel="preview"] [data-win-action="float"]')?.click());
+    await page.waitForTimeout(600);
+    const kept = await page.evaluate(() => {
+      const alive = window.__keepFrame;
+      const now = document.querySelector('.ed-preview-frame iframe');
+      const w = document.querySelector('[data-wb-float-layer] [data-win="预览"]');
+      return {
+        sameNode: Boolean(alive) && now === alive,
+        title: now?.getAttribute("title") ?? null,
+        inLayer: Boolean(alive && w && w.contains(alive)),
+        inTree: Boolean(alive?.closest?.("[data-wb-panel]")),
+        frames: document.querySelectorAll("iframe").length,
+      };
+    });
+    check("⑪ 分离预览：同一个 iframe 被搬到浮动层（不重建、不丢）",
+      kept.sameNode && kept.inLayer && !kept.inTree, JSON.stringify(kept));
+    await page.evaluate(() => document.querySelector('[data-wb-float-layer] [data-win="预览"] [data-win-action="float"]')?.click());
+    await page.waitForTimeout(500);
+    const back = await page.evaluate(() => {
+      const alive = window.__keepFrame;
+      const now = document.querySelector('.ed-preview-frame iframe');
+      return { sameNode: Boolean(alive) && now === alive, inTree: Boolean(alive?.closest?.('[data-wb-panel="preview"]')) };
+    });
+    check("⑪ 收回停靠：同一个 iframe 又回到树里（双向 re-parent）", back.sameNode && back.inTree, JSON.stringify(back));
+  } else {
+    check("⑪ 预览 iframe 建起来了（契约 11 的前置）", false, "找不到 .ed-preview-frame iframe");
+  }
+
   await page.screenshot({ path: "build/harness/shots/float-window.png" }).catch(() => {});
   // **自清理**：别把"浮动/开关"留给下一个 harness（都在同一份 localStorage 上跑）。
   await page.evaluate(() => {

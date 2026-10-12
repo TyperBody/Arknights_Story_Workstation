@@ -181,9 +181,15 @@ Android「清除数据」都会丢；而**排版 / 面板开关 / 语言 / 播�
 （`offsetParent` 是 `[data-wb-panel]`），首次分离时页面要补 `slot → page` 偏移
 （`panelRect.left - pageRect.left`），否则窗会跳到 `(0,0)` 压住页头。
 
-回归：`build/harness/float-window.mjs`（18，7 契约：细分隔条/全面板可分离/浮动层+closest/
-占位/不被裁剪/双击回树/刷新记忆）；契约变更同步进 `demo-check`（22）、`window-chrome`（5）、
-`p4-shell-probe`（11）。`npm run test:harness` = **31 个 harness**（workbench 9 / shell 8）。
+⚠️ **命令式 DOM 要 re-parent**：预览 iframe 是 `hostRef.appendChild(iframe)` 建的，面板换壳
+（树 ↔ 浮动层）时 React 会重建 `.ed-preview-frame` 宿主 —— 老代码会把正在演的 iframe 一起丢掉。
+`StoryEditorPage` 里有个 `useLayoutEffect` 把 `previewFrame.current` **搬**回当前宿主
+（iframe 换父节点不会重载文档）；harness 契约 ⑪ 用**元素同一性**（`window.__keepFrame`）钉住它。
+
+回归：`build/harness/float-window.mjs`（26，11 契约：细分隔条/全面板可分离/浮动层+closest/
+占位/不被裁剪/**拖出即分离**/可缩放/双击回树/✕ 后重开仍浮动/刷新记忆/预览 iframe 不丢）；
+契约变更同步进 `demo-check`（22）、`window-chrome`（5）、`p4-shell-probe`（11）。
+`npm run test:harness` = **31 个 harness**（workbench 9 / shell 8）。
 
 ### 落点提示（overlay）
 
