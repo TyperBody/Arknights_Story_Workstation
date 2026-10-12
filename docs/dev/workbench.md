@@ -184,3 +184,9 @@ Android「清除数据」都会丢；而**排版 / 面板开关 / 语言 / 播�
 回归：`build/harness/float-window.mjs`（18，7 契约：细分隔条/全面板可分离/浮动层+closest/
 占位/不被裁剪/双击回树/刷新记忆）；契约变更同步进 `demo-check`（22）、`window-chrome`（5）、
 `p4-shell-probe`（11）。`npm run test:harness` = **31 个 harness**（workbench 9 / shell 8）。
+
+### 落点提示（overlay）
+
+`.wb-overlay` 从"半个面板的色块"改成**贴边细条**（`--wb-ov`，默认 28px）：
+`--left/--right/--top/--bottom` 只亮"会插在哪条边" + 一条 2px 插入线，`--center` 才是
+换位（整块淡色 + 2px 环）。原因：原来边缘落点会盖住半个面板，看不清"插到哪儿"。
