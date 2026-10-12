@@ -125,8 +125,13 @@ try {
   for (const id of ["toolpanel", "stage"]) {
     const n = await page.locator(`[data-wb-panel="${id}"]`).count();
     if (!n) { t(`② 常驻面板 ${id}`, false, "缺失"); continue; }
-    const btns = await page.locator(`[data-wb-panel="${id}"] .ed-win-btn`).count();
-    t(`② ${id} 常驻：无 ⧉/✕`, btns === 0, `ed-win-btn=${btns}`);
+    // 2026-10-13 契约变更：常驻面板也有 `⧉`（「分离成独立窗口」），但**没有** ✕。
+    // 「⧉」= `data-win-action="float"`；✕ = `"close"`。`ed-win-btn` 也带在折叠按钮上，
+    // 所以**按 action 计数**，不按 class 计数。
+    const floatBtn = await page.locator(`[data-wb-panel="${id}"] [data-win-action="float"]`).count();
+    const foldBtn = await page.locator(`[data-wb-panel="${id}"] [data-win-action="fold"]`).count();
+    const close = await page.locator(`[data-wb-panel="${id}"] [data-win-action="close"]`).count();
+    t(`② ${id} 常驻：有 ⧉（分离）+ ▾（折叠）无 ✕`, floatBtn === 1 && foldBtn === 1 && close === 0, `float=${floatBtn} fold=${foldBtn} close=${close}`);
   }
   // 分隔条拖动 → 持久化
   if (gutters) {

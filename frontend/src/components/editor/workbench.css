@@ -51,10 +51,14 @@
 
 /* ── 分隔条 ─────────────────────────────────────────────────── */
 
+/* 视觉 4px、命中 14px（`WB_GUTTER_SIZE` / `WB_GUTTER_HIT`）：细线好看，但
+   抓起来仍是 14px 宽的一条（`::after` 向两侧外扩 5px）。 */
 .wb-gutter {
-  flex: 0 0 6px;
+  flex: 0 0 var(--wb-gutter-size, 4px);
   position: relative;
-  z-index: 2;
+  /* ⚠️ 必须**高于**正文的行号槽（`.ed-gutter` 是 `z-index:3` 的 sticky）：
+     否则命中区右半边被它盖住，指针贴着分隔条右侧就抓不到（实测 dx=+2…+9）。 */
+  z-index: 6;
   background: var(--border, #2c2c2c);
   touch-action: none;
   transition: background 120ms ease;
@@ -69,20 +73,20 @@
 }
 
 .wb-gutter::after {
-  /* 加宽的命中区（视觉 6px、命中 10px），800px 的编辑器里也好抓。 */
+  /* 加宽的命中区：视觉 4px、命中 14px（向两侧各外扩 5px）。 */
   content: "";
   position: absolute;
   inset: 0;
 }
 
 .wb-split--row > .wb-gutter::after {
-  left: -2px;
-  right: -2px;
+  left: calc(-1 * var(--wb-gutter-pad, 5px));
+  right: calc(-1 * var(--wb-gutter-pad, 5px));
 }
 
 .wb-split--col > .wb-gutter::after {
-  top: -2px;
-  bottom: -2px;
+  top: calc(-1 * var(--wb-gutter-pad, 5px));
+  bottom: calc(-1 * var(--wb-gutter-pad, 5px));
 }
 
 .wb-gutter:hover,
@@ -132,36 +136,48 @@
 
 /* ── 落点提示（拖动中悬停到边缘/中心） ─────────────────────── */
 
+/* 落点提示：**细条**（不再是半个面板）——只标"会插在哪条边" + 一条插入线。
+   `--wb-ov` 控制条宽（面板窄时按比例缩）。 */
 .wb-overlay {
+  --wb-ov: 28px;
   position: absolute;
   z-index: 5;
   pointer-events: none;
-  background: color-mix(in srgb, var(--accent, #4c8dff) 26%, transparent);
-  border: 2px solid var(--accent, #4c8dff);
+  background: color-mix(in srgb, var(--accent, #4c8dff) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #4c8dff) 70%, transparent);
   box-sizing: border-box;
   transition: all 90ms ease;
 }
 
 .wb-overlay--left {
-  inset: 0 50% 0 0;
+  inset: 0 auto 0 0;
+  width: var(--wb-ov);
+  border-right: 2px solid var(--accent, #4c8dff);
 }
 
 .wb-overlay--right {
-  inset: 0 0 0 50%;
+  inset: 0 0 0 auto;
+  width: var(--wb-ov);
+  border-left: 2px solid var(--accent, #4c8dff);
 }
 
 .wb-overlay--top {
-  inset: 0 0 50% 0;
+  inset: 0 0 auto 0;
+  height: var(--wb-ov);
+  border-bottom: 2px solid var(--accent, #4c8dff);
 }
 
 .wb-overlay--bottom {
-  inset: 50% 0 0 0;
+  inset: auto 0 0 0;
+  height: var(--wb-ov);
+  border-top: 2px solid var(--accent, #4c8dff);
 }
 
 .wb-overlay--center {
-  inset: 12% 12%;
+  inset: 10% 10%;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--accent, #4c8dff) 18%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c8dff) 14%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent, #4c8dff) 60%, transparent);
 }
 
 /* 拖动中的整页观感：正文不可选，光标提示"在拖"。 */
@@ -226,6 +242,72 @@
   }
   .wb-gutter[data-wb-dir="row"] {
     cursor: row-resize;
-    flex-basis: 6px;
+    flex-basis: var(--wb-gutter-size, 4px);
   }
+}
+
+
+/* ── 浮动层（"分离成独立窗口"） ───────────────────────────────
+   层挂在 `.editor-page` 里（absolute;inset:0，坐标 = 页面根），
+   **不是**工作台的子层 → 不会被 `.wb-slot` / `.wb-stage` 的 overflow 裁掉。
+   层自己 `pointer-events:none`（不挡工作台），窗子打开指针。 */
+.wb-float-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.wb-float-item {
+  pointer-events: auto;
+  /* 浮动窗自己就是 absolute 定位（`.ed-win--float` + 内联 left/top/w/h）。 */
+  display: contents;
+}
+
+.wb-float-item > .ed-win--float {
+  position: absolute;
+}
+
+/* 树里的占位（`data-wb-float-hole`）：虚线框 + 面板名，提示"这块在别处"。 */
+.wb-float-hole {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  margin: 4px;
+  border: 1px dashed color-mix(in srgb, var(--accent, #4c8dff) 55%, var(--border, #333));
+  border-radius: 6px;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--accent, #4c8dff) 6%, transparent) 6px 12px
+  );
+  color: var(--text-secondary, #aaa);
+  font-size: 11px;
+}
+
+.wb-panel--detached {
+  background: transparent;
+}
+
+/* 拖到工作台**外**时的整页提示（松手即分离）。 */
+.wb-root--detaching {
+  cursor: grabbing;
+}
+
+.wb-root--detaching::after {
+  content: attr(data-detach-hint);
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #4c8dff) 25%, #111);
+  color: #fff;
+  font-size: 11px;
+  pointer-events: none;
 }

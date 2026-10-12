@@ -51,8 +51,14 @@ export const WINDOW_SPECS: Record<PanelId, WindowSpec> = {
 
 /** 触碰阈值：拖动超过这么多像素才算「拖起来了」（低于它 = 点击/双击）。 */
 export const WB_DRAG_THRESHOLD = 4;
-/** 分隔条厚度（px）；`workbench.css` 的 `.wb-gutter` 与之一致。 */
-export const WB_GUTTER_SIZE = 6;
+/**
+ * 分隔条**视觉**厚度（px）；`workbench.css` 的 `.wb-gutter` 与之一致。
+ * 视觉上要细（用户："划区边太宽了"），但**命中区**靠 `::after` 外扩到
+ * `WB_GUTTER_HIT`（抓起来不费劲）。
+ */
+export const WB_GUTTER_SIZE = 4;
+/** 分隔条命中区总宽（px）：`padding` 之外再外扩 `(HIT-SIZE)/2`，保证好抓。 */
+export const WB_GUTTER_HIT = 18;
 /** 面板块的缺省最小尺寸（树里第一个面板推不出来时兜底）。 */
 export const WB_FALLBACK_MIN = { minW: 160, minH: 120 };
 

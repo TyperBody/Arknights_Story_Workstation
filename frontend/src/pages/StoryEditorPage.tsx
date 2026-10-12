@@ -15,6 +15,7 @@ import { t, useT } from "../i18n/index.ts";
 import InspectorWindow, { type WindowState } from "../components/editor/InspectorWindow";
 import { registerWindowSpecs, type PanelChromeProps } from "../components/editor/inspectorWindow";
 import Workbench from "../components/editor/Workbench";
+import FloatLayer from "../components/editor/FloatLayer";
 import {
   defaultState,
   has,
@@ -1165,6 +1166,8 @@ export default function StoryEditorPage() {
   visibleRef.current = visible;
   /** 浮动窗 / 折叠 / 活跃布局名的只读镜像（`setState` 回调里要读最新值，且不进依赖）。 */
   const floatsRef = useRef<Partial<Record<PanelId, FloatRect>>>({});
+  /** 浮动层里当前活跃的窗（用于置顶）；点击即切换。 */
+  const floatFocusRef = useRef<PanelId | null>(null);
   const foldedRef = useRef<PanelId[]>([]);
   const activeLayoutRef = useRef<string>(DEFAULT_LAYOUT_NAME);
   /** 收起（`▾`）的面板：只切**显示**、不卸载、不进 `minimized`（§2.2）。 */
@@ -3056,11 +3059,21 @@ export default function StoryEditorPage() {
           const usable = boundsRef.current;
           const loose = (value: number, min: number, max: number) =>
             Math.min(Math.max(Number.isFinite(value) ? value : min, min), Math.max(min, max));
+          // ⚠️ 坐标系换算：`rectForFloat()` 量的是**槽位坐标系**（壳的 `offsetParent`
+          // 是 `[data-wb-panel]`）。浮动层用的是**页面根坐标系** —— 首次分离时要把
+          // 该槽位相对页面的偏移补上，否则窗会跳到 (0,0)（压住页头）。
+          const docked = prev[id] == null;
+          const pageRect = rootRef.current?.getBoundingClientRect();
+          const panelRect = docked
+            ? (rootRef.current?.querySelector(`[data-wb-panel="${id}"]`) as HTMLElement | null)?.getBoundingClientRect()
+            : null;
+          const dx = docked && pageRect && panelRect ? panelRect.left - pageRect.left : 0;
+          const dy = docked && pageRect && panelRect ? panelRect.top - pageRect.top : 0;
           const rect = {
             w: Math.max(spec.minW, Math.round(next.rect.w)),
             h: Math.max(Math.max(spec.minH, 300), Math.round(next.rect.h)),
-            x: loose(next.rect.x, -(Math.max(spec.minW, next.rect.w) - 80), Math.max(0, usable.w - 80)),
-            y: loose(next.rect.y, -40, Math.max(0, usable.h - 40)),
+            x: loose(next.rect.x + dx, -(Math.max(spec.minW, next.rect.w) - 80), Math.max(0, usable.w - 80)),
+            y: loose(next.rect.y + dy, -40, Math.max(0, usable.h - 40)),
           };
           const nextFloats = { ...prev, [id]: rect };
           persistView(visibleRef.current, nextFloats, foldedRef.current);
@@ -3076,41 +3089,90 @@ export default function StoryEditorPage() {
   );
 
   /**
+   * **分离**：拖标题条到工作台**外**松手（或点 `⧉` / 双击标题条）。
+   * `pointer` 给了就按"指针位置"放窗（拖出去的感觉），否则放在页面右侧中部。
+   */
+  const onDetachRequested = useCallback(
+    (id: PanelId, pointer?: { x: number; y: number }) => {
+      const spec = specOf(id);
+      const usable = boundsRef.current;
+      const anchorRect = rootRef.current?.getBoundingClientRect();
+      const ax = anchorRect?.left ?? 0;
+      const ay = anchorRect?.top ?? 0;
+      setFloats((prev) => {
+        if (prev[id]) return prev;
+        const vw = usable.w || window.innerWidth;
+        const vh = usable.h || window.innerHeight;
+        const w = Math.max(spec.minW, Math.min(520, Math.round(vw * 0.36)));
+        const h = Math.max(Math.max(spec.minH, 300), Math.min(560, Math.round(vh * 0.5)));
+        const fallback = { x: Math.round(vw * 0.46), y: Math.round(vh * 0.18) };
+        const x = pointer ? Math.round(pointer.x - ax - w / 2) : fallback.x;
+        const y = pointer ? Math.round(pointer.y - ay - 16) : fallback.y;
+        const rect = {
+          w,
+          h,
+          // 只做"别丢出屏幕"的宽松夹取（允许贴边/压到工具栏上方）。
+          x: Math.max(-(w - 80), Math.min(x, Math.max(0, vw - 80))),
+          y: Math.max(-60, Math.min(y, Math.max(0, vh - 60))),
+        };
+        const nextFloats = { ...prev, [id]: rect };
+        floatFocusRef.current = id;
+        persistView(visibleRef.current, nextFloats, foldedRef.current);
+        return nextFloats;
+      });
+    },
+    []
+  );
+
+  /**
    * 面板内容分发（`Workbench.renderPanel`）：窗口壳（dock / map / float）包一层
    * `wb-shell`。浮动时标题条由**壳自己**拖动（指针像素），所以把 pointerdown 拦住，
    * 别让 `Workbench` 的 `[data-drag-handle]` 会话再接管（那会把浮动窗当成树里的块）。
    */
+  /** 面板内容（与窗口壳分离：浮动时壳要挂到 `[data-wb-float-layer]`）。 */
+  const panelBodyFor = (id: PanelId) =>
+    id === "toolpanel" ? renderToolpanel() : id === "stage" ? renderStagePane() : id === "preview" ? renderPreviewPane() : renderBranchPane();
+
+  /**
+   * 窗口壳（**由页面**渲染 —— 浮动窗在层里、块在树里，都是同一个 `InspectorWindow`）。
+   * `floating` 时 rect 是**浮动层坐标系**（= 页面根），所以 `absoluteRect` 仍然成立。
+   */
+  const renderShellFor = (id: PanelId, opts: { detached: boolean }) => (
+    <InspectorWindow
+      title={tr(`editor.panel.title.${id}`, undefined, specOf(id).title)}
+      state={winStateFor(id)}
+      onChange={(next) => onWinChange(id, next)}
+      shellKind={isMapPanel(id) ? "map" : "dock"}
+      bounds={bounds}
+      minW={specOf(id).minW}
+      minH={specOf(id).minH}
+      chrome={chromeFor(id)}
+      absoluteRect
+      onClose={isMapPanel(id) ? () => mapToggle(id) : undefined}
+      active={selected === id}
+      onSelect={() => setSelected((prev) => (prev === id ? null : id))}
+      data-wb-detached={opts.detached ? "1" : undefined}
+    >
+      {panelBodyFor(id)}
+    </InspectorWindow>
+  );
+
+  /**
+   * `Workbench.renderPanel`：树里的**块**（含占位）。
+   * 浮动的面板由 `FloatPortal` 渲染——`Workbench` 只在树里留 `[data-wb-float-hole]`。
+   */
   const renderPanelFor = (id: PanelId) => {
-    const body =
-      id === "toolpanel" ? renderToolpanel() : id === "stage" ? renderStagePane() : id === "preview" ? renderPreviewPane() : renderBranchPane();
+    if (floats[id]) return null; // 占位由 Workbench 自己画
     return (
-      <div
-        className="wb-shell"
-        onPointerDown={(event) => {
-          if (floats[id]) event.stopPropagation();
-        }}
-      >
-      <InspectorWindow
-        title={tr(`editor.panel.title.${id}`, undefined, specOf(id).title)}
-        state={winStateFor(id)}
-        onChange={(next) => onWinChange(id, next)}
-        shellKind={isMapPanel(id) ? "map" : "dock"}
-        bounds={bounds}
-        minW={specOf(id).minW}
-        minH={specOf(id).minH}
-        chrome={chromeFor(id)}
-        // 浮动窗用「像素 rect」：`percentRect` 的分母是 `bounds`（整页），
-        // 而工作台里 `[data-wb-panel]` 是定位父 → 百分比会走样，改绝对像素。
-        absoluteRect
-        onClose={isMapPanel(id) ? () => mapToggle(id) : undefined}
-      >
-        {body}
-      </InspectorWindow>
-    </div>
+      <div className="wb-shell">
+        {renderShellFor(id, { detached: false })}
+      </div>
     );
   };
 
   const title = meta.title || id || tr("editor.info.unnamed", undefined, "（未命名剧本）");
+  /** 浮动层里置顶的那个（点击/分离时更新；读 ref 即可，无需重渲染）。 */
+  const floatLayerActive = floatFocusRef.current;
 
   return (
     <div className={`editor-page${readOnly ? " readonly" : ""}`} ref={rootRef}>
@@ -3288,10 +3350,31 @@ export default function StoryEditorPage() {
           onState={onWorkbenchState}
           layoutName={DEFAULT_LAYOUT_NAME}
           onHide={(panel: PanelId) => mapToggle(panel)}
+          floats={floats}
+          onDetachRequested={onDetachRequested}
           renderHolder={() => renderEditorPane()}
           renderPanel={(panel: PanelId) => renderPanelFor(panel)}
         />
       </div>
+
+      {/*
+        浮动层：分离出来的窗口挂在**这里**（`.editor-page` 的绝对定位子层），
+        坐标 = 页面根 —— 不再被 `.wb-slot` / `.wb-stage` 的 overflow 裁住。
+      */}
+      <FloatLayer activeId={floatLayerActive}>
+        {(Object.keys(floats) as PanelId[])
+          .filter((id) => visible.includes(id))
+          .map((id) => (
+            <div
+              key={id}
+              className="wb-float-item"
+              // 层是 `pointer-events:none` 的：只有窗自己接收指针。
+              onPointerDown={() => floatFocusRef.current = id}
+            >
+              {renderShellFor(id, { detached: true })}
+            </div>
+          ))}
+      </FloatLayer>
 
 
       {/* 插入向导（task-9 交付）：分类 → 指令 → 参数 → 预览 → 插入到光标。 */}

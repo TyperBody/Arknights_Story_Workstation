@@ -433,7 +433,7 @@ export default {
     saveAs: "另存为…",
     saveAsPrompt: "布局另存为（名字）：",
     saveAsTitle: "把当前布局另存为一个新名字",
-    reset: "重置",
+    reset: "重置布局",
     resetTitle: "把当前布局恢复成默认（工具面板左 / 编辑区上 / 舞台下）",
     delete: "删除",
     deleteTitle: "删除布局「{{name}}」",

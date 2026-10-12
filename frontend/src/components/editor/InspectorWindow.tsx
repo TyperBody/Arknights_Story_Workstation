@@ -80,6 +80,8 @@ export interface InspectorWindowProps {
   absoluteRect?: boolean;
   /** 合并进壳的 inline style（页面定位用；优先级最高）。 */
   style?: CSSProperties;
+  /** `true` = 该壳正渲染在浮动层里（页面用；只影响标记，不影响行为）。 */
+  detached?: boolean;
 }
 
 const MIN_DRAG = 4;
@@ -146,6 +148,7 @@ export default function InspectorWindow({
   onResizePx,
   absoluteRect = false,
   style,
+  detached = false,
 }: InspectorWindowProps) {
   const tr = useT();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -166,8 +169,12 @@ export default function InspectorWindow({
   /** 面板语义：常驻 dock / 地图面板；浮动状态按"地图"处理（否则回不去）。 */
   const shell: "dock" | "map" = shellKind ?? (state.kind === "map" ? "map" : "dock");
   const floating = state.kind === "float";
-  const showFloatButton = shell === "map" || floating;
-  const showClose = showFloatButton && Boolean(onClose);
+  /**
+   * **每块都能分离**（用户：「还不能分离窗口 分离了还只能在区里」）：常驻面板与 Map
+   * 一样有 `⧉`；`✕`（= 从工作台移除）仍然只有 Map 才有意义。
+   */
+  const showFloatButton = true;
+  const showClose = shell === "map" && Boolean(onClose);
   const foldHandler = chrome?.onToggle;
   const folded = collapsed ?? chrome?.visible === false;
 
@@ -415,6 +422,7 @@ export default function InspectorWindow({
       data-win={title}
       data-win-state={state.kind}
       data-shell={shell}
+      data-wb-detached={detached ? "1" : undefined}
       style={rootStyle}
       onPointerEnter={() => {
         hoverRef.current = true;
@@ -431,7 +439,8 @@ export default function InspectorWindow({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onDoubleClick={shell === "map" ? toggle : undefined}
+        // 双击标题条 = 分离 ↔ 回停靠（常驻面板也适用：用户要的"分离/收回"）。
+        onDoubleClick={toggle}
         title={
           floating
             ? tr("editor.window.barFloat", undefined, "拖动移动 · 双击回停靠")
@@ -444,23 +453,10 @@ export default function InspectorWindow({
         <span className="ed-win-title">{title}</span>
         {folded && <span className="ed-win-fold-hint">{tr("editor.window.folded", undefined, "已收起")}</span>}
         <span className="ed-win-grow" />
-        {foldHandler && shell === "dock" && !showFloatButton ? (
+        {foldHandler ? (
           <button
             type="button"
-            className="ed-win-collapse"
-            data-win-action="fold"
-            onClick={foldHandler}
-            title={folded ? tr("editor.toolbar.foldShow", undefined, "展开") : tr("editor.toolbar.foldHide", undefined, "收起")}
-            aria-label={folded ? tr("editor.window.expandPanel", undefined, "展开面板") : tr("editor.window.collapsePanel", undefined, "收起面板")}
-            aria-expanded={!folded}
-          >
-            {folded ? "▸" : "▾"}
-          </button>
-        ) : null}
-        {foldHandler && showFloatButton ? (
-          <button
-            type="button"
-            className="ed-win-btn ed-win-fold"
+            className="ed-win-btn ed-win-fold ed-win-collapse"
             data-win-action="fold"
             onClick={foldHandler}
             title={folded ? tr("editor.toolbar.foldShow", undefined, "展开") : tr("editor.toolbar.foldHide", undefined, "收起")}

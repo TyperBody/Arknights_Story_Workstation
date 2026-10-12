@@ -48,8 +48,10 @@ try {
   for (const id of ["toolpanel", "stage"]) {
     const n = await count(panelSel(id));
     if (!n) { check(`常驻面板 ${id} 存在`, false, "（P3/P5 落地后应出现）"); continue; }
-    const btns = await page.locator(`${panelSel(id)} .ed-win-btn`).count();
-    check(`常驻面板 ${id} 无 ⧉/✕（.ed-win-btn = 0）`, btns === 0, `count=${btns}`);
+    // 2026-10-13：常驻面板也有 `⧉`（分离），`✕` 仍然没有。按 **action** 计数。
+    const floatBtn = await page.locator(`${panelSel(id)} [data-win-action="float"]`).count();
+    const close = await page.locator(`${panelSel(id)} [data-win-action="close"]`).count();
+    check(`常驻面板 ${id} 有 ⧉ 无 ✕`, floatBtn === 1 && close === 0, `float=${floatBtn} close=${close}`);
   }
   // 分支图 = Map：默认不在，点工具栏后出现、再点消失
   const before = await count(panelSel("branch"));

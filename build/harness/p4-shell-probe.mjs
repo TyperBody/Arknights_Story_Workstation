@@ -24,9 +24,11 @@ try {
   await page.waitForTimeout(1200);
 
   for (const id of ["toolpanel", "stage"]) {
-    const btns = await page.locator(`[data-wb-panel="${id}"] .ed-win-btn`).count();
+    // 2026-10-13 契约变更：常驻面板也有 `⧉`（分离为独立窗口），`✕` 仍然没有。
+    const floatBtn = await page.locator(`[data-wb-panel="${id}"] [data-win-action="float"]`).count();
+    const closeBtn = await page.locator(`[data-wb-panel="${id}"] [data-win-action="close"]`).count();
     const fold = await page.locator(`[data-wb-panel="${id}"] .ed-win-collapse`).count();
-    ok(`${id} 常驻：无 ⧉/✕（.ed-win-btn=0）且折叠 ▾ 存在`, btns === 0 && fold === 1, `btn=${btns} fold=${fold}`);
+    ok(`${id} 常驻：有 ⧉、无 ✕，折叠 ▾ 存在`, floatBtn === 1 && closeBtn === 0 && fold === 1, `float=${floatBtn} close=${closeBtn} fold=${fold}`);
     ok(`${id} data-win-state=dock`, (await page.locator(`[data-wb-panel="${id}"] [data-win]`).getAttribute("data-win-state")) === "dock");
   }
 

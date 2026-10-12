@@ -34,6 +34,7 @@ import {
 import "./workbench.css";
 import {
   WB_DRAG_THRESHOLD,
+  WB_GUTTER_HIT,
   WB_GUTTER_SIZE,
   saveLayoutNamed,
   specOf,
@@ -56,8 +57,12 @@ import { useT } from "../../i18n/index.ts";
 
 /** 拖动多少像素才算「拖起来了」：`workbenchLayout.WB_DRAG_THRESHOLD`。 */
 const DRAG_THRESHOLD = WB_DRAG_THRESHOLD;
-/** 分隔条厚度（px）：`workbenchLayout.WB_GUTTER_SIZE`。 */
+/** 分隔条视觉厚度（px）：`workbenchLayout.WB_GUTTER_SIZE`。 */
 const GUTTER_SIZE = WB_GUTTER_SIZE;
+/** 分隔条命中区总宽（px）：`workbenchLayout.WB_GUTTER_HIT`。 */
+const GUTTER_HIT = WB_GUTTER_HIT;
+/** 命中区外扩量（两侧各 `(HIT - SIZE) / 2`）。 */
+const GUTTER_PAD = Math.max(0, (GUTTER_HIT - GUTTER_SIZE) / 2);
 
 /** `renderPanel` 的第二个参数：面板可以用它把标题条认成拖动把手。
  *  事件已由容器**委托**（`data-drag-handle` / `.ed-win-bar` 都能抓），P5 直接
@@ -81,6 +86,10 @@ export interface WorkbenchProps {
   layoutName?: string | null;
   /** 关掉某个 Map 面板时回调（页面据此同步工具栏开关；也可省）。 */
   onHide?: (id: PanelId) => void;
+  /** 已分离（浮动）的面板（页面持有；本组件只负责"树里留洞 + 别把拖拽会话接过去"）。 */
+  floats?: Partial<Record<PanelId, unknown>>;
+  /** 拖标题条到工作台**外**松手 → 请求分离该面板（页面把它变成浮动窗）。 */
+  onDetachRequested?: (id: PanelId, pointer: { x: number; y: number }) => void;
 }
 
 /** 一次拖拽会话。 */
@@ -127,6 +136,8 @@ export default function Workbench({
   dragLayer,
   layoutName = "default",
   onHide,
+  floats,
+  onDetachRequested,
 }: WorkbenchProps) {
   const tr = useT();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -136,6 +147,8 @@ export default function Workbench({
   const [drop, setDrop] = useState<DropTarget | null>(null);
   const [dragging, setDragging] = useState<PanelId | null>(null);
   const [gutterActive, setGutterActive] = useState(false);
+  /** 拖拽中指针在工作台**外**（松手 = 分离）。 */
+  const [outside, setOutside] = useState(false);
 
   /** 渲染用的规范化树：`visible` 之外的面板不渲染（Map 关掉即从工作台移除）。 */
   const tree = useMemo(() => normalize(state, visible), [state, visible]);
@@ -148,6 +161,15 @@ export default function Workbench({
     setDrop(null);
     setDragging(null);
     setGutterActive(false);
+    setOutside(false);
+  }, []);
+
+  /** 指针是否在工作台里（不在 = 用户想"拖出去" → 分离）。 */
+  const inWorkbench = useCallback((x: number, y: number): boolean => {
+    const root = rootRef.current;
+    if (!root) return true;
+    const rect = root.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
   }, []);
 
   /** 命中测试：指针位置下的面板块 + zone（`[data-wb-panel]` 是唯一锚点）。 */
@@ -215,8 +237,10 @@ export default function Workbench({
         }
         if (!session.active) return;
         event.preventDefault();
-        const hit = hitTest(event.clientX, event.clientY);
+        const inside = inWorkbench(event.clientX, event.clientY);
+        const hit = inside ? hitTest(event.clientX, event.clientY) : null;
         hoverRef.current = hit;
+        setOutside(!inside);
         setDrop(hit && hit.panel === session.from && hit.zone === "center" ? null : hit);
         return;
       }
@@ -243,7 +267,7 @@ export default function Workbench({
         return;
       }
     },
-    [hitTest, onDragStart, onState, state]
+    [hitTest, inWorkbench, onDragStart, onState, state]
   );
 
   const onPointerUp = useCallback(
@@ -251,13 +275,16 @@ export default function Workbench({
       const session = dragRef.current;
       const gutter = gutterRef.current;
       if (session?.active) {
-        const hit = hoverRef.current ?? hitTest(event.clientX, event.clientY);
+        const hit = hoverRef.current ?? (inWorkbench(event.clientX, event.clientY) ? hitTest(event.clientX, event.clientY) : null);
         if (hit) {
           const next = move(state, session.from, hit.panel, hit.zone);
           if (next !== state) {
             onState(next);
             if (layoutName) saveLayoutNamed(layoutName, stringify(next));
           }
+        } else if (!inWorkbench(event.clientX, event.clientY) && onDetachRequested) {
+          // 拖到工作台外 → 分离成独立窗口（坐标给页面，它自己算 rect）。
+          onDetachRequested(session.from, { x: event.clientX, y: event.clientY });
         }
       }
       if (session || gutter) {
@@ -265,7 +292,7 @@ export default function Workbench({
       }
       endSession();
     },
-    [endSession, hitTest, layoutName, onState, state]
+    [endSession, hitTest, inWorkbench, layoutName, onDetachRequested, onState, state]
   );
 
   // 指针离开窗口 / 取消：结束会话，别把 overlay 留在屏幕上。
@@ -350,6 +377,22 @@ export default function Workbench({
     const spec = specOf(id);
     const nodePath = pathTo(tree, id) ?? path;
     void dir;
+    // 已分离（浮动）的面板：树里留**洞**（占位），内容渲染在 `[data-wb-float-layer]`。
+    if (floats?.[id]) {
+      return (
+        <div
+          className="wb-panel wb-panel--detached"
+          data-wb-panel={id}
+          data-wb-order={spec.order}
+          style={{ minWidth: spec.minW, minHeight: spec.minH, position: "relative" }}
+        >
+          <div className="wb-float-hole" data-wb-float-hole={id} aria-hidden="true">
+            <span className="wb-float-hole-label">{titleOf(id)}</span>
+          </div>
+          <span className="wb-panel-path" data-wb-path={nodePath.join(",")} hidden />
+        </div>
+      );
+    }
     return (
       <div
         className={`wb-panel wb-panel--${spec.kind}${snapshot.dragging === id ? " wb-panel--dragging" : ""}`}
@@ -377,8 +420,15 @@ export default function Workbench({
   const minimized = tree.minimized;
   return (
     <div
-      className={`wb-root${dragging ? " wb-root--dragging" : ""}${gutterActive ? " wb-root--resizing" : ""}`}
+      className={`wb-root${dragging ? " wb-root--dragging" : ""}${gutterActive ? " wb-root--resizing" : ""}${outside ? " wb-root--detaching" : ""}`}
       data-workbench="1"
+      data-detach-hint={tr("editor.workbench.detachHint", undefined, "松手 = 分离为独立窗口")}
+      style={
+        {
+          "--wb-gutter-size": `${GUTTER_SIZE}px`,
+          "--wb-gutter-pad": `${GUTTER_PAD}px`,
+        } as CSSProperties
+      }
       ref={rootRef}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

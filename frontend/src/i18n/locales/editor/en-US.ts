@@ -435,7 +435,7 @@ export default {
     saveAs: "Save as…",
     saveAsPrompt: "Save layout as (name):",
     saveAsTitle: "Save the current layout under a new name",
-    reset: "Reset",
+    reset: "Reset layout",
     resetTitle: "Restore the current layout to the default (tool panel left / editor on top / stage below)",
     delete: "Delete",
     deleteTitle: "Delete the layout “{{name}}”",
