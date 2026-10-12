@@ -46,7 +46,7 @@ const GROUPS = {
     ["live-download.mjs", "⑦ 设置页换源 → 落盘 + 预览 URL"],
   ],
   shell: [
-    ["float-window.mjs", "⓪ 划区/浮动窗 7 契约（分隔条命中区/分离/浮动层+占位/不被裁剪/双击回树/刷新记忆）"],
+    ["float-window.mjs", "⓪ 划区/浮动窗 11 契约（细分隔条/全面板可分离/浮动层+占位/拖出即分离/可缩放/双击回树/刷新记忆/预览 iframe 不丢）"],
     ["p4-shell-unit.mjs", "窗口壳纯逻辑（兜底表/注册表/resolveChrome）"],
     ["p4-shell-probe.mjs", "窗口壳交互（折叠/⧉/拖动/缩放/✕）"],
     ["preview-bar-oneline.mjs", "② 预览条恒单行（拖窄 + 多行报错都不撑高）"],
