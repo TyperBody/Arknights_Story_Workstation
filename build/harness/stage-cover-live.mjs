@@ -3,7 +3,17 @@
 // `installStageFit` + 同一份注入 CSS，等于把“预览扭曲”钉在回归里。
 //   node build/harness/stage-cover-live.mjs     # 需要 dev server:5174
 import { chromium } from "playwright-core";
+import { readFileSync } from "node:fs";
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
+
+/** 从生产源码里抽**真正注入**的那条舞台规则（不手抄，防止两边漂移）。 */
+function stageRuleFromSource() {
+  const src = readFileSync("frontend/src/lib/storyPlayerBoot.ts", "utf8");
+  const line = src.split("\n").find((l) => l.includes(".story-player>section canvas"));
+  if (!line) throw new Error("源码里找不到舞台规则（storyPlayerBoot.ts 的 layout CSS）");
+  return line.trim();
+}
+const STAGE_RULE = stageRuleFromSource();
 let pass = 0, fail = 0;
 const t = (l, ok, d = "") => { if (ok) { pass += 1; console.log(`ok   ${l}${d ? ` — ${d}` : ""}`); } else { fail += 1; console.log(`FAIL ${l}${d ? ` — ${d}` : ""}`); } };
 
@@ -14,6 +24,7 @@ try {
   await p.waitForTimeout(800);
 
   /** 复刻引擎 DOM（`index.vue` 的 render）：section > div.bg-black > div[hostRef] > canvas。 */
+  await p.evaluate((rule) => { window.__stageRule = rule; }, STAGE_RULE);
   const measure = (w, h) => p.evaluate(async ([w, h]) => {
     const { installStageFit } = await import("/src/lib/storyPlayerBoot.ts");
     document.querySelector("#cover-fx")?.remove();
@@ -33,14 +44,15 @@ try {
     canvas.style.width = "100%"; canvas.style.height = "100%"; // 引擎 mount() 的内联样式
     section.querySelector(".h-full.w-full").appendChild(canvas);
     installStageFit(window, document);
-    // 注入**同一份** CSS（与生产 layout 里的那条一致）
+    // 注入**生产源码里那条** CSS（由 Node 侧抽出来传进来，逐字节一致）
     const style = document.createElement("style");
-    style.textContent = ".story-player>section canvas,.story-player>section video{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:var(--ark-stage-w,100%)!important;height:var(--ark-stage-h,100%)!important;display:block}";
+    style.textContent = window.__stageRule;
     document.head.appendChild(style);
     const r = canvas.getBoundingClientRect(); const s = section.getBoundingClientRect();
     return { cw: Math.round(r.width), ch: Math.round(r.height), sw: Math.round(s.width), sh: Math.round(s.height) };
   }, [w, h]);
 
+  console.log(`（注入的舞台规则取自源码：${STAGE_RULE.slice(0, 78)}…）`);
   for (const [w, h, label] of [[745, 300, "编辑器预览槽 2.48:1"], [520, 620, "竖排浮动窗"], [960, 540, "正好 16:9"]]) {
     const m = await measure(w, h);
     t(`${label}：画面恒 16:9`, Math.abs(m.cw / m.ch - 16 / 9) < 0.02, `${m.cw}×${m.ch} = ${(m.cw / m.ch).toFixed(3)}`);

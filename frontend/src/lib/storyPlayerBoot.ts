@@ -629,9 +629,10 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
       //    引擎 `mount()` 固定 `renderer.resize(1280,720,dpr)` 并把 canvas 设成
       //    `width:100%;height:100%` —— 画面比例完全由**父元素**决定。原先把
       //    `section` 写成 `flex:1;aspect-ratio:auto`（任意宽高比）→ 21:9 的槽位里
-      //    16:9 的画面被横向拉长（"预览的舞台会扭曲"）。现在由 `.ark-stage-fit`
-      //    包装层给出 16:9 盒子：`cover` 时按容器**取大**一维铺满（多余裁掉），
-      //    `contain` 时取小（留黑边）。
+      //    16:9 的画面被横向拉长（"预览的舞台会扭曲"）。
+      //    ⚠️ canvas 在 `section > div.bg-black > div[hostRef]` 里，**不是** section 的
+      //    直接子节点 → 必须用后代选择器 + 把盒模型内联 `!important` 写上去（见
+      //    `installStageFit`）；`cover` = 按容器取大铺满（多余裁掉）。
       layout.textContent = `html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
         .story-player{height:100dvh!important;padding:0!important;gap:0!important}
         .story-player>section{flex:1;min-height:0;max-width:none!important;aspect-ratio:auto!important;position:relative;overflow:hidden}
