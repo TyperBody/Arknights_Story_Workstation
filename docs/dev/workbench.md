@@ -156,3 +156,31 @@ Android「清除数据」都会丢；而**排版 / 面板开关 / 语言 / 播�
 回归：`build/harness/state-db-frontend.mjs`（7，假 Tauri 桥 + 真 chromium）、
 `build/harness/state-db.mjs`（原生：真 Tauri 启动 + 重启仍在；`--unit` 纯断言）、
 `cargo test --release --lib state_db`（2：UPSERT/scope 隔离、坏库重建）。
+
+## 划区与"分离窗口"（2026-10-13 重构）
+
+用户三条反馈：「划区边太宽了」「不能分离窗口」「分离了还只能在区里 不能独立窗口」。
+
+**① 分隔条**：`.wb-gutter` **视觉 4px**（`workbenchLayout.WB_GUTTER_SIZE`），
+命中区靠 `::after` 外扩到 **18px**（`WB_GUTTER_HIT`，`Workbench` 把两者写进 CSS 变量
+`--wb-gutter-size` / `--wb-gutter-pad`）。⚠️ `z-index` 必须是 **6**：正文行号槽
+`.ed-gutter` 是 `z-index:3` 的 sticky，压在 2 上时命中区右半边抓不到（实测 dx=+2…+9 全落在行号槽）。
+
+**② 分离**：**所有**面板标题条都有 `⧉`（`[data-win-action="float"]`）——`toolpanel` /
+`stage` 也一样；`✕`（`"close"` = 从树里移除）仍只有 Map（`preview` / `branch`）。
+双击标题条 = 分离 ↔ 回停靠；**拖标题条到工作台外松手**也会分离
+（`Workbench.onDetachRequested(id, pointer)`，拖拽中根节点带 `wb-root--detaching` + 气泡提示）。
+
+**③ 浮动层**（`FloatLayer.tsx`）：分离出来的窗挂到 `[data-wb-float-layer="1"]`
+（`.editor-page` 内的 `absolute;inset:0`，坐标 = **页面根**，层 `pointer-events:none`、
+子项 `auto`）。它**不再是** `.wb-shell` 的子节点 → 不受 `.wb-slot` / `.wb-stage` 的
+`overflow:hidden` 裁剪，可以拖到工具栏/页头任何位置。树里保留
+`[data-wb-panel="<id>"]` + 其中 `[data-wb-float-hole="<id>"]` 占位（分隔条照旧可拖）。
+
+⚠️ **坐标换算**：`InspectorWindow.rectForFloat()` 量的是**槽位坐标系**
+（`offsetParent` 是 `[data-wb-panel]`），首次分离时页面要补 `slot → page` 偏移
+（`panelRect.left - pageRect.left`），否则窗会跳到 `(0,0)` 压住页头。
+
+回归：`build/harness/float-window.mjs`（18，7 契约：细分隔条/全面板可分离/浮动层+closest/
+占位/不被裁剪/双击回树/刷新记忆）；契约变更同步进 `demo-check`（22）、`window-chrome`（5）、
+`p4-shell-probe`（11）。`npm run test:harness` = **31 个 harness**（workbench 9 / shell 8）。

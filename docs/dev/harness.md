@@ -17,9 +17,10 @@
 | 全 | 8 条需求合流（编辑页/舞台/工作台/分支图/横幅/快照/设置） | `demo-check.mjs`（22） | workbench |
 | — | 布局「记得住」 | `persist-check.mjs`（3） | workbench |
 | ① | 舞台缩放连续（几何 px 不变、滚轮锚点 <0.5px） | `stage-zoom.mjs`（38） | workbench |
-| ② | toolpanel/stage 无 ⧉✕；preview/branch = Map | `window-chrome.mjs`（5） | workbench |
+| ② | toolpanel/stage **有 ⧉（分离）无 ✕**；preview/branch = Map（✕ = 移除） | `window-chrome.mjs`（5） | workbench |
 | ③ | 拼接/换位/调尺寸 + 落盘 | `workbench-drag.mjs`（3）、`wb-selftest.mjs`（62） | workbench |
-| ③ | **命名布局**（另存为 / 切换 / 重置 / 删除 / 刷新保持） | `layout-named.mjs`（9） | workbench |
+| ③ | **命名布局**（重置 + 刷新保持） | `layout-named.mjs`（10） | workbench |
+| ⑩ | **划区/浮动窗**：分隔条视觉 4px（命中 18px）、全面板可分离、浮动层不被裁剪 + 占位、双击回树、刷新记忆 | `float-window.mjs`（18） | shell |
 | ③ | **排版落 SQLite**（hydrate 先于首帧 → 拖 → 刷新仍在；旧 localStorage 一次性迁移） | `state-db-frontend.mjs`（7） | workbench |
 | ④ | dify 风 DAG（零重叠/分层/适配）+ 截图 | `branch-shot.mjs`（59）、`t6-visual-check.mjs` | branch |
 | ⑤ | 单条横幅（URL+HTTP 状态）+ 不白屏 | `engine-failure.mjs`（2）、`engine-failure-min.mjs`（4） | engine |
