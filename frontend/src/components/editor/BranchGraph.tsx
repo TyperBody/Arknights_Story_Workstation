@@ -288,7 +288,7 @@ export default function BranchGraph({
   }, [zoomAtPoint]);
 
   /** 热键：`0` = 适配、`+`/`=` 放大、`-` 缩小（不在输入框里按才生效，别抢正文键）。 */
-  keyRef.current = (event: KeyboardEvent) => {
+  const handleKey = useCallback((event: KeyboardEvent) => {
     const tag = (event.target as HTMLElement | null)?.tagName ?? "";
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     if (event.metaKey || event.ctrlKey) return; // 让浏览器/页面的缩放与搜索
@@ -298,7 +298,9 @@ export default function BranchGraph({
     if (key === "0") fit();
     else if (key === "-" || key === "_") zoomBy(-1);
     else zoomBy(1);
-  };
+  }, [fit, zoomBy]);
+  // 最新 handler 进 ref（render 期只**读**它 → 不触发 `react-hooks/refs` 的写入规则）。
+  useEffect(() => { keyRef.current = handleKey; });
 
   /**
    * 滚轮 = 以指针为锚缩放（`LAYOUT_ZOOM_MIN..MAX`）。
