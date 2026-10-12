@@ -23,15 +23,18 @@ try {
       #fixture{position:fixed;left:0;top:0;z-index:9}
       #fixture .story-player{height:${h}px;width:${w}px;display:flex;flex-direction:column}
       #fixture .story-player>section{position:relative;overflow:hidden;flex:1;min-height:0}
-      #fixture canvas{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:var(--ark-stage-w,100%)!important;height:var(--ark-stage-h,100%)!important;display:block}
-    </style><div class="story-player"><section></section></div>`;
+      #fixture .story-player>section canvas,#fixture .story-player>section video{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:var(--ark-stage-w,100%)!important;height:var(--ark-stage-h,100%)!important;display:block}
+    </style><div class="story-player"><section>
+      <div class="bg-black absolute inset-0"><div class="h-full w-full"><!-- canvas 在这里 --></div></div>
+    </section></div>`;
     document.body.appendChild(root);
     const section = root.querySelector("section");
     const canvas = document.createElement("canvas");
-    // 引擎 mount() 的内联样式（要被 CSS 变量压过）
+    // 引擎 mount()：canvas 挂进 `hostRef` div（**不是** section 直接子节点），
+    // 并且带 `width:100%;height:100%` 内联样式（必须被压过）。
     canvas.width = 1280; canvas.height = 720;
     canvas.style.width = "100%"; canvas.style.height = "100%";
-    section.appendChild(canvas);
+    section.querySelector(".h-full.w-full").appendChild(canvas);
     installStageFit(window, document);
     const cr = canvas.getBoundingClientRect();
     const sr = section.getBoundingClientRect();
@@ -50,6 +53,18 @@ try {
   await p.waitForTimeout(300);
   const after = await p.evaluate(() => { const c = document.querySelector("#fixture canvas").getBoundingClientRect(); return { cw: Math.round(c.width), ch: Math.round(c.height) }; });
   t("容器变化后重新 cover", after.ch !== before.ch && Math.abs(after.cw / after.ch - 16 / 9) < 0.02, `${before.cw}×${before.ch} → ${after.cw}×${after.ch}`);
+
+  // 引擎在 dpr 变化时会**自己**重写 canvas 内联尺寸 → 我们必须在 DOM 变动后再压一次。
+  const afterRewrite = await p.evaluate(async () => {
+    const canvas = document.querySelector("#fixture canvas");
+    canvas.style.width = "100%"; canvas.style.height = "100%";
+    await new Promise((r) => setTimeout(r, 120));
+    const r = canvas.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) };
+  });
+  t("引擎重写 canvas 内联尺寸后仍保持 16:9 cover",
+    Math.abs(afterRewrite.w / afterRewrite.h - 16 / 9) < 0.02 && afterRewrite.w > 100,
+    `${afterRewrite.w}×${afterRewrite.h}`);
 } finally {
   await b.close();
 }

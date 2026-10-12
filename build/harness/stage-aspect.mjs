@@ -17,6 +17,14 @@ t("基准分辨率 = 引擎的 1280×720",
   /const STAGE_W = 1280;/.test(boot) && /const STAGE_H = 720;/.test(boot));
 t("canvas 尺寸由 --ark-stage-w/h 驱动（!important 压过引擎内联 100%）",
   /--ark-stage-w,100%\)!important/.test(flat) && /--ark-stage-h,100%\)!important/.test(flat));
+t("选择器是**后代**（canvas 在 hostRef div 里，不是 section 直接子节点）",
+  /story-player>sectioncanvas,/.test(flat) && !/>section>canvas\{/.test(flat),
+  "曾经写成 >section>canvas → 永不命中（就是「预览还是扭曲」的根因）");
+t("盒模型内联 + !important（引擎自己写 canvas.style.width=100%，还会在 dpr 变化时重写）",
+  /setProperty\("width",\s*`\$\{cw\}px`,\s*"important"\)/.test(boot.replace(/\s+/g, " ")) || /setProperty\("width", `\$\{cw\}px`, "important"\)/.test(boot),
+  (boot.match(/style\.setProperty\("width"[^\n]*/) ?? ["-"])[0].slice(0, 70));
+t("MutationObserver 连属性一起看（style 改动后重新压一遍）",
+  /attributeFilter:\s*\["style",\s*"class"\]/.test(boot));
 t("canvas 居中 + 裁切（overflow:hidden 在 section）",
   /left:50%!important/.test(flat) && /translate\(-50%,-50%\)!important/.test(flat) && /story-player>section\{[^}]*overflow:hidden/.test(flat));
 t("跟随尺寸变化（ResizeObserver + window.resize + MutationObserver 兜异步挂载）",

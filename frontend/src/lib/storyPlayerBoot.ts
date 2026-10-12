@@ -123,6 +123,18 @@ const STAGE_H = 720;
 export function installStageFit(win: StoryPlayerWindow, doc: Document): void {
   try {
     const sectionOf = (): HTMLElement | null => doc.querySelector<HTMLElement>(".story-player > section");
+    /**
+     * ⚠️ canvas/video **不是** `section` 的直接子节点。引擎的 DOM 是
+     * ```
+     * .story-player > section > div.bg-black(absolute inset-0) > div[hostRef].h-full.w-full > canvas
+     * ```
+     * （`mount(host)` 把 canvas `append` 进 `hostRef`）。所以必须用**后代**选择器
+     * （`section canvas`），并且把盒模型**内联 + `!important`** 写到元素上：引擎自己会写
+     * `canvas.style.width='100%'`，`syncDisplayResolution()` 在 dpr 变化时还会再写一次，
+     * 只靠 stylesheet 的优先级不够稳。
+     */
+    const targetsOf = (): HTMLElement[] =>
+      Array.from(doc.querySelectorAll<HTMLElement>(".story-player > section canvas, .story-player > section video"));
     const apply = (): void => {
       try {
         const section = sectionOf();
@@ -130,9 +142,22 @@ export function installStageFit(win: StoryPlayerWindow, doc: Document): void {
         const w = section.clientWidth;
         const h = section.clientHeight;
         if (!w || !h) return;
-        const scale = Math.max(w / STAGE_W, h / STAGE_H); // cover：取大 → 铺满
-        section.style.setProperty("--ark-stage-w", `${Math.round(STAGE_W * scale)}px`);
-        section.style.setProperty("--ark-stage-h", `${Math.round(STAGE_H * scale)}px`);
+        // cover：取大 → 铺满（多余裁掉；若要留黑边则改成 min = contain）
+        const scale = Math.max(w / STAGE_W, h / STAGE_H);
+        const cw = Math.round(STAGE_W * scale);
+        const ch = Math.round(STAGE_H * scale);
+        section.style.setProperty("--ark-stage-w", `${cw}px`);
+        section.style.setProperty("--ark-stage-h", `${ch}px`);
+        for (const node of targetsOf()) {
+          const style = node.style;
+          style.setProperty("position", "absolute", "important");
+          style.setProperty("left", "50%", "important");
+          style.setProperty("top", "50%", "important");
+          style.setProperty("transform", "translate(-50%, -50%)", "important");
+          style.setProperty("width", `${cw}px`, "important");
+          style.setProperty("height", `${ch}px`, "important");
+          style.setProperty("display", "block", "important");
+        }
       } catch {
         // 量不到就保持 100%（旧行为），不影响播放
       }
@@ -153,9 +178,15 @@ export function installStageFit(win: StoryPlayerWindow, doc: Document): void {
       apply();
     };
     tick();
+    // 引擎异步挂载、全屏切换、dpr 变化都会改 DOM/内联样式 → 每次变动后重新压一遍。
     if (realm.MutationObserver) {
       const mo = new realm.MutationObserver(() => tick());
-      mo.observe(doc.documentElement, { childList: true, subtree: true });
+      mo.observe(doc.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["style", "class"],
+      });
     }
     (doc.defaultView ?? win).addEventListener("resize", apply);
     (doc.defaultView ?? win).addEventListener("orientationchange", apply);
@@ -605,8 +636,9 @@ async function bootOnce(opts: FrameBootOptions, snapshot: StoryPlayerSnapshot): 
         .story-player{height:100dvh!important;padding:0!important;gap:0!important}
         .story-player>section{flex:1;min-height:0;max-width:none!important;aspect-ratio:auto!important;position:relative;overflow:hidden}
         /* 画面盒：CSS 变量 --ark-stage-w/h 由 installStageFit 按 cover 算出（1280:720）；
+           用**后代**选择器（canvas 在 hostRef div 里，不是 section 的直接子节点）。
            !important 用来压过引擎内联的 canvas.style.width=100%。 */
-        .story-player>section>canvas,.story-player>section>video{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:var(--ark-stage-w,100%)!important;height:var(--ark-stage-h,100%)!important;display:block}
+        .story-player>section canvas,.story-player>section video{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:var(--ark-stage-w,100%)!important;height:var(--ark-stage-h,100%)!important;display:block}
         .story-player>.n-card{flex:none;max-width:none!important;border-radius:0}
         .story-player .n-card__content{padding:6px 10px!important}
         /* 播放器底栏：显示 / 自动隐藏（默认，纯隐藏：指针移上去才显示）/ 隐藏

@@ -51,6 +51,7 @@ const GROUPS = {
     ["preview-fill-probe.mjs", "② 预览填满壳；放大=整页覆盖层，还原可退"],
     ["stage-aspect.mjs", "⑨ 舞台比例：cover 注入 + 悬停开关（纯静态）"],
     ["stage-fit.mjs", "⑨ 舞台比例：任意容器仍是 16:9 且覆盖（真 chromium）"],
+    ["stage-cover-live.mjs", "⑨ 舞台比例：**引擎真实 DOM 层级**下仍 cover（防「>section>canvas」回归）"],
   ],
   player: [
     ["player-chrome.mjs", "播放器底栏三档（auto=默认纯隐藏/指针几何命中/hide）"],
