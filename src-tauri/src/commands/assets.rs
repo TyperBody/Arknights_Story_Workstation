@@ -267,7 +267,11 @@ mod tests {
         let (files, bytes, groups) = starter_summary();
         assert!(files >= 200, "起步素材集条目太少：{files}");
         assert!(bytes > 8 * 1024 * 1024, "起步素材集太小：{bytes}");
-        assert!(bytes <= 25 * 1024 * 1024, "起步素材集超预算：{bytes}");
+        // 预算以**清单自己声明**的 `budgetBytes` 为准（策展脚本 `--budget` 写进来）：
+        // 起步集从 25 MB 的「尝鲜」档扩到过「几百 MB」的全量档，硬编码就会过期。
+        let budget = starter_budget_bytes();
+        assert!(budget > 0, "清单缺 budgetBytes（策展脚本应写入）");
+        assert!(bytes <= budget, "起步素材集超预算：{bytes} > {budget}");
         assert_eq!(
             groups.get("core").copied().unwrap_or(0)
                 + groups.get("background").copied().unwrap_or(0)
@@ -720,6 +724,14 @@ pub struct StarterSetInfo {
     pub present: bool,
     /// 资源目录位置（便于用户排查「为什么没有随包素材」）。
     pub dir: String,
+}
+
+/// 清单里声明的**预算**（`budgetBytes`，策展脚本写进来的；缺 → 0）。
+fn starter_budget_bytes() -> u64 {
+    serde_json::from_str::<serde_json::Value>(STARTER_CURATED)
+        .ok()
+        .and_then(|v| v.get("budgetBytes").and_then(|b| b.as_u64()))
+        .unwrap_or(0)
 }
 
 /// 读清单（内置的那份）：`(条目数, 字节, 每组条目数)`。坏清单 → 全 0（不抛）。
