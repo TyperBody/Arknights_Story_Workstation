@@ -351,6 +351,86 @@ try {
   info("⑦ 记忆键", `prts-editor-wb:view=${String(beforeReload.view).slice(0, 110)}`);
   info("⑦ 刷新后记忆键", String(afterReload.view).slice(0, 110));
 
+  // ── 契约 8：**拖出去**也能分离（"可拖到任意位置"的入口之一）──────────
+  // 先把 toolpanel 收回树（⑦ 之后它可能还浮着），再拖 branch 的标题条到工作台**外**。
+  await page.evaluate(() => {
+    document.querySelector('[data-wb-float-layer] [data-win="工具面板"] [data-win-action="float"]')?.click();
+  });
+  await page.waitForTimeout(400);
+  if (!(await page.locator('[data-wb-panel="branch"]').count())) {
+    await page.evaluate(() => {
+      [...document.querySelectorAll(".ed-viewtabs .ed-btn")].find((el) => el.textContent.includes("分支图"))?.click();
+    });
+    await page.waitForTimeout(800);
+  }
+  const barBox = await page.locator('[data-wb-panel="branch"] .ed-win-bar').first().boundingBox();
+  let dragOut = null;
+  if (barBox) {
+    const wbTop = await page.evaluate(() => Math.round(document.querySelector("[data-workbench]").getBoundingClientRect().top));
+    await page.mouse.move(barBox.x + 60, barBox.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(barBox.x + 60, barBox.y + 12, { steps: 2 });   // 过 4px 阈值
+    await page.mouse.move(320, 12, { steps: 14 });                       // 拖到页头（工作台之外）
+    await page.waitForTimeout(200);
+    const hint = await page.evaluate(() => ({
+      cls: Boolean(document.querySelector(".wb-root--detaching")),
+      text: document.querySelector(".wb-root--detaching")?.getAttribute("data-detach-hint") ?? null,
+    }));
+    check("⑧ 拖到工作台外：出现「松手 = 分离」提示", hint.cls || Boolean(hint.text), `cls=${hint.cls} text=${hint.text}`);
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    dragOut = await page.evaluate(() => {
+      const f = document.querySelector('[data-wb-float-layer] [data-win="分支图"]');
+      const r = f?.getBoundingClientRect();
+      return {
+        detached: Boolean(f),
+        closest: f ? Boolean(f.closest("[data-wb-panel]")) : null,
+        top: r ? Math.round(r.top) : null,
+        wbTop: Math.round(document.querySelector("[data-workbench]").getBoundingClientRect().top),
+      };
+    });
+    check("⑧ 松手 → 变成浮动层里的独立窗口（closest 为 null）",
+      Boolean(dragOut?.detached) && dragOut?.closest === false, JSON.stringify(dragOut));
+    check("⑧ 拖出去的窗落在工作台**之上**（任意位置）",
+      typeof dragOut?.top === "number" && dragOut.top < dragOut.wbTop, `top=${dragOut?.top} < wbTop=${dragOut?.wbTop}`);
+  } else {
+    check("⑧ 找到 branch 标题条（拖出去用）", false, "boundingBox=null");
+  }
+
+  // ── 契约 9：分离窗的右下角手柄仍可缩放（"独立窗口"要有尺寸自由）────────
+  const handle = await page.locator('[data-win-state="float"] .ed-win-resize').first().boundingBox().catch(() => null);
+  if (handle) {
+    const before = await page.locator('[data-win-state="float"]').first().boundingBox();
+    await page.mouse.move(handle.x + 5, handle.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + 105, handle.y + 65, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const after = await page.locator('[data-win-state="float"]').first().boundingBox();
+    check("⑨ 浮动窗右下角手柄可改尺寸", after.width - before.width > 60 && after.height - before.height > 30,
+      `Δ=${Math.round(after.width - before.width)}x${Math.round(after.height - before.height)}`);
+  } else {
+    check("⑨ 浮动窗有缩放手柄", false, "找不到 .ed-win-resize");
+  }
+
+  // ── 契约 10：分离的 Map 面板点 ✕ → 从工作台移除；再开会话仍是**浮动** ──
+  await page.evaluate(() => document.querySelector('[data-wb-float-layer] [data-win="分支图"] [data-win-action="close"]')?.click());
+  await page.waitForTimeout(600);
+  const closed = await page.evaluate(() => ({
+    panel: Boolean(document.querySelector('[data-wb-panel="branch"]')),
+    inLayer: Boolean(document.querySelector('[data-wb-float-layer] [data-win="分支图"]')),
+  }));
+  check("⑩ ✕ = 从工作台移除（树与浮动层都没了）", !closed.panel && !closed.inLayer, JSON.stringify(closed));
+  await page.evaluate(() => {
+    [...document.querySelectorAll(".ed-viewtabs .ed-btn")].find((el) => el.textContent.includes("分支图"))?.click();
+  });
+  await page.waitForTimeout(800);
+  const reopened = await page.evaluate(() => ({
+    inLayer: Boolean(document.querySelector('[data-wb-float-layer] [data-win="分支图"]')),
+    docked: Boolean(document.querySelector('[data-wb-panel="branch"] .ed-win')),
+  }));
+  check("⑩ 重开 → 仍在浮动层（记住「分离」这件事）", reopened.inLayer && !reopened.docked, JSON.stringify(reopened));
+
   await page.screenshot({ path: "build/harness/shots/float-window.png" }).catch(() => {});
   // **自清理**：别把"浮动/开关"留给下一个 harness（都在同一份 localStorage 上跑）。
   await page.evaluate(() => {

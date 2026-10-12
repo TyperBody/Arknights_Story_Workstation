@@ -20,7 +20,7 @@
 | ② | toolpanel/stage **有 ⧉（分离）无 ✕**；preview/branch = Map（✕ = 移除） | `window-chrome.mjs`（5） | workbench |
 | ③ | 拼接/换位/调尺寸 + 落盘 | `workbench-drag.mjs`（3）、`wb-selftest.mjs`（62） | workbench |
 | ③ | **命名布局**（重置 + 刷新保持） | `layout-named.mjs`（10） | workbench |
-| ⑩ | **划区/浮动窗**：分隔条视觉 4px（命中 18px）、全面板可分离、浮动层不被裁剪 + 占位、双击回树、刷新记忆 | `float-window.mjs`（18） | shell |
+| ⑩ | **划区/浮动窗**（10 契约）：分隔条视觉 4px（命中 18px）、全面板可分离、浮动层不被裁剪 + 占位、**拖出工作台即分离**、浮动窗可缩放、双击回树、✕ 移除后重开仍浮动、刷新记忆 | `float-window.mjs`（24） | shell |
 | ③ | **排版落 SQLite**（hydrate 先于首帧 → 拖 → 刷新仍在；旧 localStorage 一次性迁移） | `state-db-frontend.mjs`（7） | workbench |
 | ④ | dify 风 DAG（零重叠/分层/适配）+ 截图 | `branch-shot.mjs`（59）、`t6-visual-check.mjs` | branch |
 | ⑤ | 单条横幅（URL+HTTP 状态）+ 不白屏 | `engine-failure.mjs`（2）、`engine-failure-min.mjs`（4） | engine |
