@@ -21,6 +21,8 @@
  * `.bookshelf-sync-warning` / `.dl-bar`、ok/FAIL 逐条打印、任一 FAIL → 退出码 1。
  * **只读断言**：harness 只点 UI（标题条按钮 / 拖拽），不改任何源码。
  */
+import { spawn } from "node:child_process";
+import { openSync } from "node:fs";
 import { chromium } from "playwright-core";
 
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
@@ -58,7 +60,16 @@ async function devServerUp() {
 }
 
 if (!(await devServerUp())) {
-  console.log(`FAIL dev server 未就绪：${DEV}（先 \`npm run dev\`）`);
+  console.log(`dev server 不在 ${DEV} → 自己拉一个（nohup npm run dev）…`);
+  spawn("npm", ["run", "dev"], {
+    cwd: process.cwd(),
+    detached: true,
+    stdio: ["ignore", openSync("/tmp/arkstage-vite.log", "a"), openSync("/tmp/arkstage-vite.log", "a")],
+  }).unref();
+  for (let i = 0; i < 40 && !(await devServerUp()); i += 1) await new Promise((done) => setTimeout(done, 1000));
+}
+if (!(await devServerUp())) {
+  console.log(`FAIL dev server 起不来：${DEV}（看 /tmp/arkstage-vite.log）`);
   process.exit(1);
 }
 
@@ -294,7 +305,7 @@ try {
   };
   const memoryHit = memoryHasFloat(beforeReload.view, "toolpanel") || memoryHasFloat(beforeReload.legacy, "toolpanel");
   check(
-    "⑦ 刷新前 ≥「分离」按钮不再是常态」or「记忆里有它的浮动」",
+    "⑦ 分离后（刷新前）：浮动层/占位锚点/记忆键 至少一处记着 toolpanel 的浮动",
     Boolean(reclick) && (beforeReload.floatingLayerCount >= 1 || beforeReload.holes.includes("toolpanel") || beforeReload.markers.includes("toolpanel") || memoryHit),
     `layerFloat=${beforeReload.floatingLayerCount} holes=${JSON.stringify(beforeReload.holes)} markers=${JSON.stringify(beforeReload.markers)} memory=${memoryHit}`
   );
