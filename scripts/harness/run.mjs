@@ -29,8 +29,9 @@ const GROUPS = {
     ["window-chrome.mjs", "② toolpanel/stage 无 ⧉✕；preview/branch = Map"],
     ["workbench-drag.mjs", "③ 拼接/换位/调尺寸 + 落盘"],
     ["wb-selftest.mjs", "③ 布局模型纯函数（62 断言 + fuzz）"],
-    ["layout-named.mjs", "③ 命名布局：另存为/切换/重置/删除 + 刷新保持"],
+    ["layout-named.mjs", "③ 布局自动记忆：拖→落库→刷新复用 + 只剩「重置」"],
     ["state-db-frontend.mjs", "③ 排版/开关落 **SQLite**（hydrate→首帧→拖→刷新仍在）"],
+    ["inspector-resize.mjs", "③ 检视器高度可拖 + 落库（旧的写死 190 → 默认 240）"],
   ],
   branch: [
     ["branch-shot.mjs", "④ dify 风 DAG（零重叠 + 分层 + 截图）"],
@@ -45,6 +46,7 @@ const GROUPS = {
     ["live-download.mjs", "⑦ 设置页换源 → 落盘 + 预览 URL"],
   ],
   shell: [
+    ["float-window.mjs", "⓪ 划区/浮动窗 7 契约（分隔条命中区/分离/浮动层+占位/不被裁剪/双击回树/刷新记忆）"],
     ["p4-shell-unit.mjs", "窗口壳纯逻辑（兜底表/注册表/resolveChrome）"],
     ["p4-shell-probe.mjs", "窗口壳交互（折叠/⧉/拖动/缩放/✕）"],
     ["preview-bar-oneline.mjs", "② 预览条恒单行（拖窄 + 多行报错都不撑高）"],
