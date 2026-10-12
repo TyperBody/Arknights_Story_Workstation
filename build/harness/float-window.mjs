@@ -252,15 +252,34 @@ try {
   // ── 契约 6：双击标题条 → 回树 ─────────────────────────────────────────
   // （浮动窗既可能在 `[data-wb-float-layer]` 里，也可能是"留在 `[data-wb-panel]` 内的
   //   浮动块"——两种实现都接受；判据统一：**双击后它必须回到树里**。）
-  const dblHandle = await page.evaluateHandle(() => {
+  // ⚠️ 用 `page.mouse.dblclick(坐标)` 而不是 elementHandle.dblclick：拖动会触发重渲染，
+  // 旧的 handle 可能已 detach（`{force:true}` 会把事件派发给 detached 节点 → 静默无效）。
+  // ⚠️ ⑤ 把浮动窗拖到了工作台上方（top < wbTop），那里可能被 `.ed-header` 等高层元素盖住
+  // → 中心点 `elementFromPoint` 命中的不一定是标题条。这里**扫一遍窗口矩形**，
+  // 找一个"命中解析回同一个浮动窗、且落在 `.ed-win-bar` 上"的点来双击。
+  const dblScan = await page.evaluate(() => {
     const layer = document.querySelector("[data-wb-float-layer]");
-    const floating = layer?.querySelector('[data-win-state="float"]') ?? document.querySelector('[data-win-state="float"]');
-    return floating?.closest(".ed-win")?.querySelector(".ed-win-bar") ?? null;
+    const win = layer?.querySelector('[data-win-state="float"]') ?? document.querySelector('[data-win-state="float"]');
+    if (!win) return null;
+    const r = win.getBoundingClientRect();
+    const hits = [];
+    for (let gy = r.top + 4; gy < r.bottom - 2; gy += 6) {
+      for (let gx = r.left + 6; gx < r.right - 6; gx += 12) {
+        const el = document.elementFromPoint(gx, gy);
+        if (el?.closest?.('[data-win-state="float"]') === win) hits.push({ x: Math.round(gx), y: Math.round(gy), bar: Boolean(el.closest(".ed-win-bar")) });
+      }
+    }
+    const barHit = hits.find((item) => item.bar);
+    return { rect: { l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }, total: hits.length, bar: hits.filter((i) => i.bar).length, pick: barHit ?? hits[0] ?? null };
   });
-  const dblEl = dblHandle.asElement();
-  if (dblEl) await dblEl.dblclick({ force: true });
-  else await page.evaluate(() => document.querySelector('[data-wb-panel="toolpanel"] [data-win-action="float"]')?.click());
-  await page.waitForTimeout(600);
+  info("⑥ 浮动窗可命中区", JSON.stringify(dblScan));
+  const dblBox = dblScan?.pick ?? null;
+  if (dblBox) {
+    await page.mouse.dblclick(dblBox.x, dblBox.y);
+  } else {
+    await page.evaluate(() => document.querySelector('[data-wb-panel="toolpanel"] [data-win-action="float"]')?.click());
+  }
+  await page.waitForTimeout(700);
   const back = await page.evaluate(() => {
     const layer = document.querySelector("[data-wb-float-layer]");
     return {
@@ -333,6 +352,12 @@ try {
   info("⑦ 刷新后记忆键", String(afterReload.view).slice(0, 110));
 
   await page.screenshot({ path: "build/harness/shots/float-window.png" }).catch(() => {});
+  // **自清理**：别把"浮动/开关"留给下一个 harness（都在同一份 localStorage 上跑）。
+  await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("prts-editor-wb:") || key.startsWith("prts-editor-windows:")) localStorage.removeItem(key);
+    }
+  }).catch(() => {});
 } catch (error) {
   check("harness 未抛异常", false, String(error?.message ?? error).split("\n")[0]);
 } finally {
