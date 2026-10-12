@@ -259,18 +259,46 @@ export default function BranchGraph({
     applyView({ ...fitView(layout, size.w || 320, size.h || 200), key: boxKey });
   }, [applyView, boxKey, layout, size.h, size.w]);
 
-  /** 热键 `0` = 适配（不在输入框里按才生效，别抢 textarea 的数字键）。 */
+  /** 热键的**最新**处理函数（`zoomBy` 在下方定义；挂载只做一次，读 ref）。 */
+  const keyRef = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "0" || event.metaKey || event.ctrlKey || event.altKey) return;
-      const tag = (event.target as HTMLElement | null)?.tagName ?? "";
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      event.preventDefault();
-      fit();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fit]);
+    const handler = (event: KeyboardEvent) => keyRef.current(event);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  /**
+   * 以**指针（或容器中心）**为锚缩放。`+` / `−` 按钮、快捷键、双击都走这里，
+   * 滚轮复用同一段数学：锚点下的世界坐标在缩放前后停在同一屏幕像素。
+   */
+  const zoomAtPoint = useCallback((factor: number, anchor?: { x: number; y: number }) => {
+    const host = panRef.current;
+    const zoom = clamp(current.zoom * factor, LAYOUT_ZOOM_MIN, LAYOUT_ZOOM_MAX);
+    if (zoom === current.zoom) return;
+    const px = anchor?.x ?? (size.w || host?.clientWidth || 320) / 2;
+    const py = anchor?.y ?? (size.h || host?.clientHeight || 200) / 2;
+    const wx = (px - current.x) / current.zoom;
+    const wy = (py - current.y) / current.zoom;
+    applyView({ key: boxKey, zoom: r(zoom), x: r(px - wx * zoom), y: r(py - wy * zoom) });
+  }, [applyView, boxKey, current.x, current.y, current.zoom, size.h, size.w]);
+
+  /** `+` / `−`：以容器中心为锚，一格 = `ZOOM_STEP`。 */
+  const zoomBy = useCallback((direction: 1 | -1) => {
+    zoomAtPoint(direction > 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+  }, [zoomAtPoint]);
+
+  /** 热键：`0` = 适配、`+`/`=` 放大、`-` 缩小（不在输入框里按才生效，别抢正文键）。 */
+  keyRef.current = (event: KeyboardEvent) => {
+    const tag = (event.target as HTMLElement | null)?.tagName ?? "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (event.metaKey || event.ctrlKey) return; // 让浏览器/页面的缩放与搜索
+    const key = event.key;
+    if (key !== "0" && key !== "+" && key !== "=" && key !== "-" && key !== "_") return;
+    event.preventDefault();
+    if (key === "0") fit();
+    else if (key === "-" || key === "_") zoomBy(-1);
+    else zoomBy(1);
+  };
 
   /**
    * 滚轮 = 以指针为锚缩放（`LAYOUT_ZOOM_MIN..MAX`）。
@@ -280,6 +308,9 @@ export default function BranchGraph({
    * 报 `Unable to preventDefault inside passive event listener invocation.` 而**不生效**
    * —— 滚轮于是同时滚动了外层面板/页面，"缩放很难用"（StagePane 早先踩过同一个坑）。
    * 用 ref 存最新 handler，避免每次 `view` 变化都重挂监听。
+   *
+   * **Shift+滚轮** = 一把缩放更狠（×2.4 一格）；**Shift 之外的横向滚轮**
+   * （触控板/带 tilt 的鼠标）当平移，符合"看 DAG 时想挪一下"的直觉。
    */
   const wheelRef = useRef<(event: WheelEvent) => void>(() => {});
   const handleWheel = (event: WheelEvent) => {
@@ -291,14 +322,17 @@ export default function BranchGraph({
     const rect = host.getBoundingClientRect();
     const px = event.clientX - rect.left;
     const py = event.clientY - rect.top;
+    // 横向滚轮（deltaY≈0、deltaX 明显）= 平移一格；纵向 = 缩放。
+    if (event.deltaY === 0 || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      applyView({ key: boxKey, zoom: current.zoom, x: r(current.x - event.deltaX), y: r(current.y - event.deltaY) });
+      return;
+    }
     // 触控板/高分辨率滚轮给的是小数 delta → 按比例缩放，一格 ≈ ZOOM_STEP。
-    const steps = clamp(Math.abs(event.deltaY) / 100, 0.4, 3);
+    // 下限 0.6（旧 0.4 太肉："放大缩小太难用"）；Shift = 粗档。
+    const scale = event.shiftKey ? 2.4 : 1;
+    const steps = clamp(Math.abs(event.deltaY) / 100, 0.6, 4) * scale;
     const factor = Math.pow(event.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP, steps);
-    const zoom = clamp(current.zoom * factor, LAYOUT_ZOOM_MIN, LAYOUT_ZOOM_MAX);
-    if (zoom === current.zoom) return;
-    const wx = (px - current.x) / current.zoom;
-    const wy = (py - current.y) / current.zoom;
-    applyView({ key: boxKey, zoom: r(zoom), x: r(px - wx * zoom), y: r(py - wy * zoom) });
+    zoomAtPoint(factor, { x: px, y: py });
   };
   // 最新 handler 存进 ref（**在 effect 里**赋值：render 期写 ref 会被 lint 拦）；
   // 挂载只做一次，handler 永远读最新闭包。
@@ -428,7 +462,40 @@ export default function BranchGraph({
           {layout.lanes.length > 6 ? <span className="ed-graph-legend-more">{`+${layout.lanes.length - 6}`}</span> : null}
         </span>
         <span className="bg-chrome-grow" />
-        <span className="bg-zoom" data-branch-zoom-label="1">{`${Math.round(current.zoom * 100)}%`}</span>
+        {/* 缩放控件：`−` / 百分比（点按 = 适配） / `+` / 适配 —— 拖拽之外的第二条路。 */}
+        <span className="bg-zoombar" data-branch-zoom-bar="1">
+          <button
+            type="button"
+            className="bg-zoombtn"
+            data-branch-action="zoom-out"
+            title={tr("editor.branch.zoomOutTitle", undefined, "缩小（快捷键 −）")}
+            aria-label={tr("editor.branch.zoomOut", undefined, "缩小")}
+            disabled={current.zoom <= LAYOUT_ZOOM_MIN + 1e-6}
+            onClick={() => zoomBy(-1)}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="bg-zoom bg-zoom-reset"
+            data-branch-zoom-label="1"
+            title={tr("editor.branch.zoomResetTitle", undefined, "点按 = 适配窗口（快捷键 0）")}
+            onClick={fit}
+          >
+            {`${Math.round(current.zoom * 100)}%`}
+          </button>
+          <button
+            type="button"
+            className="bg-zoombtn"
+            data-branch-action="zoom-in"
+            title={tr("editor.branch.zoomInTitle", undefined, "放大（快捷键 +）")}
+            aria-label={tr("editor.branch.zoomIn", undefined, "放大")}
+            disabled={current.zoom >= LAYOUT_ZOOM_MAX - 1e-6}
+            onClick={() => zoomBy(1)}
+          >
+            +
+          </button>
+        </span>
         <button
           type="button"
           className="bg-fit"

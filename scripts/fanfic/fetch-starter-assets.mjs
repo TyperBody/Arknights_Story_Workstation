@@ -1,32 +1,41 @@
-// 「起步素材集」：把**常用**素材（UI 小图 + 高频背景 + 主要角色立绘）下载/转码后随安装包，
-// 让自创剧情不必每次打开都联网拉资料。
+// 「起步素材集」：把**常用**素材（UI 小图 + 全量背景 + 语料高频角色**全差分**立绘）
+// 下载/转码后随安装包，让自创剧情不必联网拉资料。
 //
 //   src-tauri/resources/assets/starter/<file>          ← 下载/转换产物（PNG 或 WebP）
 //   src-tauri/resources/assets/starter/curated.json    ← 策展清单（key/kind/group/bytes/sha256/file）
 //   src-tauri/resources/assets/starter/bundles.json    ← canonical key → 文件名（`prts-cdn://` 覆盖层）
 //   src-tauri/resources/assets/starter/SOURCES.md      ← 出处 / 许可
 //
-//   node scripts/fanfic/fetch-starter-assets.mjs                 # 下载/补齐（幂等）
-//   node scripts/fanfic/fetch-starter-assets.mjs --check          # 离线：清单 ⇄ 磁盘 + 预算
-//   node scripts/fanfic/fetch-starter-assets.mjs --budget=25MB --only=background --force
+//   node scripts/fanfic/fetch-starter-assets.mjs                     # 下载/补齐（幂等）
+//   node scripts/fanfic/fetch-starter-assets.mjs --check             # 离线：清单 ⇄ 磁盘 + 预算
+//   node scripts/fanfic/fetch-starter-assets.mjs --budget=560MB --concurrency=12
+//   node scripts/fanfic/fetch-starter-assets.mjs --plan              # 只出清单（不下载/转码）
 //
-// **选择规则（确定性，可重跑）**，按优先级吃预算（默认 ≤ 25 MB）：
+// **选择规则（确定性，可重跑）**，按优先级吃预算（默认 ≤ 560 MiB）：
+//   0) archive    —— 把下载/转码结果打成 `starter.zip`（**安装包里只放 zip**：几百 MB
+//                     的 PNG/WebP 逐文件放出会让 NSIS/deb 显著膨胀 + 安装慢；zip 后
+//                     再被安装包压缩一次也有收益）。运行期首次启动 `assets.rs::seed`
+//                     把 zip 解到 `<资源目录>/assets/starter/`（幂等，见 Rust 侧）。
+//                     `--check` 同时校验 zip 与目录。
 //   1) core       —— `src/akstage/catalog-data.json::external` 里 `kind="src"` 的 UI 小图
 //                     （`assets/scenario/ui/*` 与 `widgets/production/{slide_mask,back_shadow}`），
-//                     保持 PNG 原格式；全部入选。
-//   2) background —— 按**剧情语料**的 `[Background(image=…)]` 出现频次降序（并列按 key 升序），
-//                     只取能在 `backgroundPaths` 里解析成 PNG 的键；上限 120 张。
-//   3) portrait   —— 按语料的 `[Character|charslot(name=…)]` base 频次降序，取
-//                     `character.json` 里该 base 的**首个可用 image**（缺失则 `<base>/<base>`）
-//                     且能在 `characterPaths` 里解析到 PNG 的键；每个 base 只取一张；上限 160 张。
-//   预算：按上面顺序贪心；某张加进来会超预算就跳过（继续看后面更小的，充分利用额度）。
+//                     保持 PNG 原格式；全部入选（约 7 张，几十 KB）。
+//   2) background —— **全量**：`catalog-data.json::backgroundPaths` 的每一条（约 1000 张），
+//                    按**语料** `[Background(image=…)]` 频次降序（并列按 key 升序），
+//                    高频在前；PNG → WebP q80（约 PNG 的 25–40%）。
+//   3) portrait   —— 按语料的 `[Character|charslot(name=…)]` base 频次降序，**逐 base 收全差分**：
+//                    每个 base 取 `character.json` 里该 base 的所有可用 `image`（含 `$N` 分组、
+//                    NPC 多差分），PNG → WebP q82；预算吃满即止（**至少** `--min-bases` 个 base，
+//                    默认 1 —— 保证"一个角色也有十几张差分"）。
+//   预算：按上面顺序贪心；超预算的条目**跳过并继续**找更小的，充分利用额度。
 //   语料目录：`$AKSTAGE_CORPUS_DIR` → `/home/typer/桌面/.akresearch/akgd/zh_CN/gamedata/story`
 //   → `~/.akresearch/akgd/zh_CN/gamedata/story`（与 `scripts/fanfic/stage-selftest.mjs` 同源）。
-//   语料缺失时**退化为**：背景/立绘按 catalog 里的键排序取前 N（并在 JSON 里注明 `rank: "catalog"`）。
+//   语料缺失时退化为按 catalog 排序取前 N（并在 JSON 里注明 `rank: "catalog"`）。
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { cpus } from "node:os";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const STARTER_DIR = join(ROOT, "src-tauri/resources/assets/starter");
@@ -35,9 +44,12 @@ const UPSTREAM = join(ROOT, "build/fanfic/upstream.json");
 const CURATED = join(STARTER_DIR, "curated.json");
 const BUNDLES = join(STARTER_DIR, "bundles.json");
 const SOURCES = join(STARTER_DIR, "SOURCES.md");
-const DEFAULT_BUDGET = 25 * 1024 * 1024;
-const MAX_BACKGROUNDS = 120;
-const MAX_PORTRAITS = 160;
+/** 默认预算 1000 MiB（用户要求"起码 500MB 起步"，后追加"可以扩到 1000MB"）。 */
+const DEFAULT_BUDGET = 1000 * 1024 * 1024;
+/** 并发（抓取 + 转码同一池；默认 min(12, CPU)）。 */
+const DEFAULT_CONCURRENCY = Math.max(4, Math.min(12, cpus().length || 4));
+/** 立绘至少覆盖多少个 base（保证"每个角色十几张差分"至少有一批角色做到）。 */
+const MIN_PORTRAIT_BASES = 60;
 const UA = "Arkstage/1.2.0 (+https://github.com/djkcyl/arkstage)";
 const ORIGIN = "https://torappu.prts.wiki";
 const CORPUS_CANDIDATES = [
@@ -45,6 +57,15 @@ const CORPUS_CANDIDATES = [
   "/home/typer/桌面/.akresearch/akgd/zh_CN/gamedata/story",
   join(process.env.HOME ?? "", ".akresearch/akgd/zh_CN/gamedata/story"),
 ].filter(Boolean);
+
+/**
+ * 质量档（libwebp `-quality`，0–100）：**近无损优先**。
+ * 用户要求「素材分辨率越高越好，为了高点可以接受放弃之前的素材换一批」——
+ * 因此不做任何缩放（分辨率 = 上游原图），只把 PNG → WebP 高质量转码：
+ * 88 ≈ PNG 视觉无损（背景有大面积渐变/噪点）；90 对立绘的 alpha 边缘更稳。
+ * 体积换算 ≈ PNG 的 45–60%；预算吃满由「背景全量 + 立绘高频全差分」共同决定。
+ */
+const QUALITY = { background: 88, portrait: 90 };
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
@@ -55,16 +76,19 @@ const value = (name, fallback) => {
   return at >= 0 && argv[at + 1] && !argv[at + 1].startsWith("--") ? argv[at + 1] : fallback;
 };
 const parseBytes = (text, fallback) => {
-  const m = /^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/i.exec(String(text ?? "").trim());
+  const m = /^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|MiB|KiB|GiB)?$/i.exec(String(text ?? "").trim());
   if (!m) return fallback;
   const n = Number(m[1]);
   const unit = (m[2] ?? "B").toUpperCase();
-  return Math.round(n * { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3 }[unit]);
+  return Math.round(n * { B: 1, KB: 1024, KIB: 1024, MB: 1024 ** 2, MIB: 1024 ** 2, GB: 1024 ** 3, GIB: 1024 ** 3 }[unit]);
 };
 
 const only = (value("--only", "") || "").split(",").map((s) => s.trim()).filter(Boolean);
 const budget = parseBytes(value("--budget", ""), DEFAULT_BUDGET);
+const minBases = Number(value("--min-bases", "")) || MIN_PORTRAIT_BASES;
+const concurrency = Math.max(1, Math.min(32, Number(value("--concurrency", "")) || DEFAULT_CONCURRENCY));
 const checkOnly = flag("--check");
+const planOnly = flag("--plan");
 const force = flag("--force");
 const quiet = flag("--quiet");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -108,12 +132,16 @@ function corpusRanking() {
 // ── 策展 ────────────────────────────────────────────────────────────────
 function fileNameFor(key, extension) {
   // `torappu.prts.wiki/assets/avg/black.../bg_corridor.png` → `bg_corridor.webp`
-  // 立绘带一层目录（`char_x/char_x.png`）→ 两级都用 `__` 连起来，避免重名。
+  // 立绘带一层目录（`char_x/char_x$1.png`）→ 两级都用 `__` 连起来，避免重名；
+  // `$` 保留（PNG 的 canonical key 里就带 `$`，Rust `canonical_key` 不切 `$`）。
   const parts = key.split("/");
   const tail = parts.length > 4 ? parts.slice(4).join("__") : parts[parts.length - 1];
   const base = tail.replace(/\.[A-Za-z0-9]+$/, "").replace(/[^A-Za-z0-9_.$-]/g, "_");
   return `${base}.${extension}`;
 }
+
+/** `$` → `%24`、`#` → `%23`（PRTS 把两者都当文件名的一部分；URL 里需转义）。 */
+const encodeAssetUrl = (url) => encodeURI(url).replace(/\$/g, "%24").replace(/#/g, "%23");
 
 function curate() {
   const catalog = JSON.parse(readFileSync(CATALOG, "utf8"));
@@ -141,23 +169,21 @@ function curate() {
     push({ key, group: "core", kind: "ui", url: item.url, file: fileNameFor(key, key.split(".").pop()), quality: null });
   }
 
-  // 2) background：语料频次（或用 catalog 排序兜底）。
+  // 2) background：**全量**，语料频次降序（缺语料 → 按 catalog 排序）。
   const bgRanked = corpus.backgrounds.length
     ? corpus.backgrounds.map(([name, uses]) => [`${ORIGIN}/assets/avg/background/${name}.png`, uses])
     : catalog.backgroundPaths.map((key) => [key, 0]);
-  let backgrounds = 0;
   for (const [url, uses] of bgRanked) {
-    if (backgrounds >= MAX_BACKGROUNDS) break;
     const key = url.replace(/^https?:\/\//, "");
     if (!backgroundPaths.has(key)) continue;
-    push({ key, group: "background", kind: "background", url, uses, file: fileNameFor(key, "webp"), quality: 78 });
-    backgrounds += 1;
+    push({ key, group: "background", kind: "background", url, uses, file: fileNameFor(key, "webp"), quality: QUALITY.background });
   }
 
-  // 3) portrait：语料 base 频次 → 每个 base 一张**真实存在**的 image。
-  //    候选顺序：`character.json` 的 `array[].image`（优先不含 `#`/`$` 的「本体」形态，
-  //    因为应用的 canonical key 会丢掉 `#` 之后的部分）→ `<base>/<base>` → 目录里第一个
-  //    可解析路径。全部要能在 `characterPaths` 里命中。
+  // 3) portrait：语料 base 频次 → 每个 base 收**全差分**。
+  //    **差分的真正来源是目录**：`assets/avg/characters/<base>/<base>_2.png`、
+  //    `<base>_3.png`…（`character.json` 的 `array[].image` 常常只列到本体，
+  //    实测「每 base 中位数 1 张」就是这个原因）；所以**优先**把该 base 目录下的
+  //    所有 PNG 收全，`character.json` 的 `image`/`face` 作补充（含 `$N` 分组）。
   const catalogByDir = new Map();
   for (const path of characterPaths) {
     const dir = path.split("/").slice(4, 5)[0];
@@ -166,44 +192,59 @@ function curate() {
     catalogByDir.get(dir).push(path);
   }
   for (const list of catalogByDir.values()) list.sort();
-  const pickPortrait = (base) => {
-    const prefix = `${ORIGIN.replace(/^https?:\/\//, "")}/assets/avg/characters/`;
-    const images = (characterTable[base]?.array ?? []).map((a) => a?.image).filter(Boolean);
-    const candidates = [
-      ...images.filter((img) => !/[#$]/.test(img)),
-      `${base}/${base}`,
-      ...images,
-      ...(catalogByDir.get(base) ?? []).map((path) => path.slice(prefix.length).replace(/\.png$/, "")),
-    ];
-    for (const candidate of candidates) {
-      const key = `${prefix}${candidate}.png`;
-      // `#` 形态在**两端**都会被 canonical 规则截断（Rust `media::canonical_key` /
-      // JS `canonicalAssetKey` 都 `split("#")[0]`），覆盖层键与请求键就对不上了 →
-      // 只在没有别的选择时才收（这里直接跳过：候选量大，够用）。
-      if (!/[#$]/.test(key) && characterPaths.has(key)) return key;
-    }
-    return null;
+  const prefix = `${ORIGIN.replace(/^https?:\/\//, "")}/assets/avg/characters/`;
+  /**
+   * 一个 base 的**全部**立绘 key（顺序 = 本体优先、差分按名字自然序）。
+   * ① 目录里的全量 PNG（`char_x/char_x.png`、`char_x/char_x_2.png`…）——主来源；
+   * ② `character.json` 的 `array[].image` / `face`（补目录里没有的 `$N` 形态）。
+   */
+  const stylesOf = (base) => {
+    const out = new Set(catalogByDir.get(base) ?? []);
+    const fromTable = (characterTable[base]?.array ?? []).flatMap((a) => [a?.image, a?.face])
+      .filter(Boolean).map((raw) => `${prefix}${String(raw).endsWith(".png") ? raw : `${raw}.png`}`);
+    for (const path of fromTable) if (characterPaths.has(path)) out.add(path);
+    const list = [...out].filter((path) => characterPaths.has(path));
+    const rank = (path) => {
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      if (name === `${base}.png`) return [0, name];
+      if (name.startsWith(`${base}_`)) return [1, Number(/(\d+)\.png$/.exec(name)?.[1] ?? 0), name];
+      return [2, name];
+    };
+    return list.sort((a, b) => {
+      const [ga, na, sa] = rank(a);
+      const [gb, nb, sb] = rank(b);
+      return ga - gb || (typeof na === "number" && typeof nb === "number" ? na - nb : 0) || String(sa).localeCompare(String(sb));
+    });
   };
-  const chrRanked = corpus.characters.length
-    ? corpus.characters.map(([base, uses]) => [base, uses])
-    : Object.keys(characterTable).sort().map((base) => [base, 0]);
-  let portraits = 0;
+  // 候选 base：语料频次 → 全部目录 base（目录里没立绘的 base 自然被 `stylesOf` 过滤掉）。
+  const ranked = new Map(
+    corpus.characters.map(([base, uses]) => [base, uses]),
+  );
+  for (const base of catalogByDir.keys()) if (!ranked.has(base)) ranked.set(base, 0);
+  const chrRanked = [...ranked.entries()]
+    .filter(([base]) => base !== "char_empty")
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  let bases = 0;
   for (const [base, uses] of chrRanked) {
-    if (portraits >= MAX_PORTRAITS) break;
-    const key = pickPortrait(base);
-    if (!key) continue;
-    push({ key, group: "portrait", kind: "portrait", url: `https://${key}`, uses, file: fileNameFor(key, "webp"), quality: 85 });
-    portraits += 1;
+    const styles = stylesOf(base);
+    if (!styles.length) continue;
+    bases += 1;
+    for (const key of styles) {
+      push({ key, group: "portrait", kind: "portrait", base, url: `https://${key}`, uses, file: fileNameFor(key, "webp"), quality: QUALITY.portrait });
+    }
   }
-  return { entries, corpus, rank: corpus.backgrounds.length ? "corpus" : "catalog" };
+  return { entries, corpus, rank: corpus.backgrounds.length ? "corpus" : "catalog", bases };
 }
 
 /** 单条：URL → 目标文件路径。已在磁盘且非 --force → 复用。 */
 async function ensure(entry) {
   const target = join(STARTER_DIR, entry.file);
-  if (!force && existsSync(target)) return { bytes: statSync(target).size, reused: true, bytes0: statSync(target).size };
-  // 上游把 `#1` 这类形态**当成文件名的一部分**（percent-encode 后的 `%231` 才 200）。
-  const res = await fetch(encodeURI(entry.url).replace(/#/g, "%23"), { headers: { "User-Agent": UA, Referer: "https://prts.wiki/" } });
+  if (!force && existsSync(target)) {
+    const size = statSync(target).size;
+    return { bytes: size, reused: true, bytes0: size };
+  }
+  const res = await fetch(encodeAssetUrl(entry.url), { headers: { "User-Agent": UA, Referer: "https://prts.wiki/" } });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${entry.url}`);
   const source = Buffer.from(await res.arrayBuffer());
   // 小图（`ui_*` / `char_empty`）可以很小（几十字节的占位也算合法）；只挡 HTML/空响应。
@@ -215,10 +256,13 @@ async function ensure(entry) {
   }
   let bytes = source;
   if (entry.quality) {
+    // `-preset picture` 对插画更快；`-compression_level 5` 在体积/耗时之间折中
+    // （默认 4 更快、更大；6 以上慢一倍、省 ~2%）。
     const tmp = `${target}.src`;
     writeFileSync(tmp, source);
     execFileSync("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", tmp,
-      "-c:v", "libwebp", "-quality", String(entry.quality), target]);
+      "-c:v", "libwebp", "-preset", "picture", "-compression_level", "5",
+      "-quality", String(entry.quality), "-alpha_quality", "100", target]);
     rmSync(tmp, { force: true });
     bytes = readFileSync(target);
   } else {
@@ -229,23 +273,45 @@ async function ensure(entry) {
 
 const human = (n) => `${(n / 1024 / 1024).toFixed(2)} MB`;
 
+/** 归档文件名（安装包 `bundle.resources` 里**只**放它 + 三个清单）。 */
+const ARCHIVE = join(STARTER_DIR, "starter.zip");
+
+/**
+ * 把 `files` 打进 `starter.zip`（deflate）。
+ * 为什么归档：NSIS/deb 逐文件收起几百 MB 的小 PNG 会产生大量条目（安装慢、增量更新差），
+ * zip 内条目名 = 文件名（扁平），Rust 侧 `unzip` 到 `<资源目录>/assets/starter/`。
+ */
+function writeArchive(files) {
+  rmSync(ARCHIVE, { force: true });
+  if (!files.length) return { bytes: 0 };
+  // `zip -X`（去 extra field）→ 可复现；`-@` 从 stdin 读文件清单（几百 MB 不必进 argv）。
+  const list = files.map((name) => join(STARTER_DIR, name));
+  execFileSync("zip", ["-q", "-X", "-9", "-j", ARCHIVE, ...list], { cwd: STARTER_DIR, maxBuffer: 64 * 1024 * 1024 });
+  return { bytes: statSync(ARCHIVE).size };
+}
+
 function writeManifests(entries, meta) {
   const bundles = {};
   for (const entry of entries) bundles[entry.key] = entry.file;
   mkdirSync(STARTER_DIR, { recursive: true });
   writeFileSync(BUNDLES, `${JSON.stringify(bundles, null, 1)}\n`);
+  const byGroup = groupCounts(entries);
   writeFileSync(CURATED, `${JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     budgetBytes: meta.budgetBytes,
     bytes: meta.bytes,
+    archiveBytes: meta.archiveBytes ?? 0,
+    archive: "starter.zip",
     rank: meta.rank,
     corpus: meta.corpus,
     selection: {
-      core: entries.filter((e) => e.group === "core").length,
-      background: entries.filter((e) => e.group === "background").length,
-      portrait: entries.filter((e) => e.group === "portrait").length,
-      note: "core=UI 小图（原格式）；background/portrait=语料频次降序（WebP q78/q85）；预算内贪心",
+      core: byGroup.core?.files ?? 0,
+      background: byGroup.background?.files ?? 0,
+      portrait: byGroup.portrait?.files ?? 0,
+      portraitBases: meta.bases ?? null,
+      minBases: meta.minBases ?? null,
+      note: "core=UI 小图（原格式）；background=全量（catalog）；portrait=语料 base 频次降序 + 全差分；均 WebP 压缩",
       skipped: meta.skipped ?? [],
     },
     entries,
@@ -255,18 +321,20 @@ function writeManifests(entries, meta) {
     "# 起步素材集出处（bundled starter assets）",
     "",
     "为了「自创剧情不必每次打开都联网下载」，安装包内置一批**常用**素材：",
-    `UI 小图 ${entries.filter((e) => e.group === "core").length} 张 + 背景 ${entries.filter((e) => e.group === "background").length} 张 + 立绘 ${entries.filter((e) => e.group === "portrait").length} 张，合计 ${human(total)}。`,
+    `UI 小图 ${byGroup.core?.files ?? 0} 张 + 背景 ${byGroup.background?.files ?? 0} 张 + 立绘 ${byGroup.portrait?.files ?? 0} 张（覆盖 ${meta.bases ?? "?"} 个角色 base 的全差分），合计 ${human(total)}。`,
     "全部取自 PRTS Wiki 托管的《明日方舟》AVG 资源；版权归上海鹰角网络（Hypergryph）所有，",
     "此处仅作离线播放/同人创作之用，遵循应用整体免责声明（仓库根 `README.md`）。",
     "",
-    `选择规则（确定性）：语料频次排序（来源：\`${meta.corpus.root ?? "无（按目录排序兜底）"}\`，${meta.corpus.files} 个脚本文件）；`,
-    `背景 = \`[Background(image=…)]\` 频次降序，立绘 = \`[Character|charslot(name=…)]\` base 频次降序取首个可解析 image。`,
-    `转码：背景 PNG → WebP q78、立绘 PNG → WebP q85（libwebp，含 alpha）；UI 小图保持 PNG。`,
+    `选择规则（确定性）：背景 = \`backgroundPaths\` 全量、按语料 \`[Background(image=…)]\` 频次降序（来源：\`${meta.corpus.root ?? "无（按目录排序兜底）"}\`，${meta.corpus.files} 个脚本文件）；`,
+    "立绘 = `[Character|charslot(name=…)]` base 频次降序，**逐 base 收全差分**（`character.json` 的 `array[].image` / `face`）。",
+    `转码：背景 PNG → WebP q${QUALITY.background}、立绘 PNG → WebP q${QUALITY.portrait}（libwebp，含 alpha）；UI 小图保持 PNG。`,
+    `预算：${human(meta.budgetBytes)}（\`--budget=…\` 可调）；超出即跳过并继续找更小的条目。`,
     "",
     "重新生成 / 离线校验：",
     "",
     "```bash",
-    "node scripts/fanfic/fetch-starter-assets.mjs            # 下载并转换（幂等）",
+    "node scripts/fanfic/fetch-starter-assets.mjs             # 下载并转换（幂等）",
+    "node scripts/fanfic/fetch-starter-assets.mjs --plan      # 只看清单与预估体积",
     "node scripts/fanfic/fetch-starter-assets.mjs --check    # 离线：清单 ⇄ 磁盘 + 预算",
     "```",
     "",
@@ -294,15 +362,35 @@ function check() {
   }
   const extra = Object.keys(bundles).filter((key) => !curated.entries.some((e) => e.key === key));
   if (extra.length) problems.push(`bundles.json 有未知键：${extra.join(", ")}`);
-  const onDisk = readdirSync(STARTER_DIR).filter((name) => !["curated.json", "bundles.json", "SOURCES.md"].includes(name));
+  const onDisk = readdirSync(STARTER_DIR)
+    .filter((name) => !["curated.json", "bundles.json", "SOURCES.md", "starter.zip"].includes(name) && !name.endsWith(".src"));
   const known = new Set(curated.entries.map((e) => e.file));
   for (const name of onDisk) if (!known.has(name)) problems.push(`目录里有多余文件 ${name}`);
   if (bytes > curated.budgetBytes) problems.push(`素材总量 ${bytes} B 超预算 ${curated.budgetBytes} B`);
   if (!existsSync(SOURCES)) problems.push("缺少 SOURCES.md");
+  // 归档：安装包分发的就是这个 zip —— 缺 / 条目不齐 / 体积偏差都要报。
+  let archiveBytes = 0;
+  if (!existsSync(ARCHIVE)) problems.push("缺少 starter.zip（先跑一次不带 --check 的脚本）");
+  else {
+    archiveBytes = statSync(ARCHIVE).size;
+    try {
+      const list = execFileSync("unzip", ["-Z1", ARCHIVE], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 })
+        .split("\n").map((s) => s.trim()).filter(Boolean).sort();
+      const want = [...known].sort();
+      if (list.length !== want.length) problems.push(`starter.zip 条目 ${list.length} ≠ 清单 ${want.length}`);
+      else {
+        const missing = want.filter((name, index) => list[index] !== name);
+        if (missing.length) problems.push(`starter.zip 缺条目：${missing.slice(0, 3).join(", ")}`);
+      }
+    } catch (error) {
+      problems.push(`starter.zip 读取失败：${String(error.message).slice(0, 120)}`);
+    }
+  }
   return finish({
     mode: "check",
     files: curated.entries.length,
     bytes,
+    archiveBytes,
     budgetBytes: curated.budgetBytes,
     byGroup: groupCounts(curated.entries),
     problems,
@@ -321,25 +409,74 @@ function finish(report) {
   process.exit(report.problems?.length ? 1 : 0);
 }
 
+/** `--plan`：只出清单（各分组条目数 + 预估体积用 PNG 均值的粗略外推）。 */
+function plan() {
+  const curated = curate();
+  const counts = { core: 0, background: 0, portrait: 0 };
+  const basesByGroup = {};
+  for (const entry of curated.entries) {
+    counts[entry.group] = (counts[entry.group] ?? 0) + 1;
+    if (entry.group === "portrait") (basesByGroup[entry.base] = basesByGroup[entry.base] ?? 0);
+    if (entry.group === "portrait") basesByGroup[entry.base] += 1;
+  }
+  const widths = Object.values(basesByGroup).sort((a, b) => b - a);
+  finish({
+    mode: "plan",
+    budgetBytes: budget,
+    bytesOnDisk: existsSync(CURATED) ? JSON.parse(readFileSync(CURATED, "utf8")).bytes : 0,
+    candidates: counts,
+    portraitBases: widths.length,
+    portraitPerBase: { max: widths[0] ?? 0, median: widths[Math.floor(widths.length / 2)] ?? 0, min: widths[widths.length - 1] ?? 0 },
+    rank: curated.rank,
+    corpus: { root: curated.corpus.root, files: curated.corpus.files },
+    note: "预估：背景 PNG→WebP ≈ 28%，立绘 PNG→WebP ≈ 30%（实测见 curated.json）",
+  });
+}
+
+/** 并发池：`--concurrency` 个 worker 拉同一队列（顺序 = 候选顺序，结果按顺序回收）。 */
+async function mapPool(items, run) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await run(items[index], index).catch((error) => ({ error }));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
 async function fetchAll() {
   mkdirSync(STARTER_DIR, { recursive: true });
   const curated = curate();
   const wants = (entry) => !only.length || only.includes(entry.group);
+  const pool = curated.entries.filter(wants);
+  if (planOnly) return plan();
+  process.stderr.write(`[starter] 候选 ${pool.length} 条（并发 ${concurrency}，预算 ${human(budget)}）\n`);
+
+  let done = 0;
+  const results = await mapPool(pool, async (entry) => {
+    const result = await ensure(entry);
+    done += 1;
+    if (!quiet && (done % 100 === 0 || done === pool.length)) {
+      process.stderr.write(`[starter] ${done}/${pool.length} 已处理…\n`);
+    }
+    return { entry, result };
+  });
+
   const selected = [];
   const skipped = [];
   let bytes = 0;
   let reused = 0;
   let fetched = 0;
-  for (const entry of curated.entries) {
-    if (!wants(entry)) { skipped.push({ key: entry.key, reason: "group-not-selected" }); continue; }
-    let result;
-    try {
-      result = await ensure(entry);
-    } catch (error) {
-      process.stderr.write(`warn ${entry.file}: ${error.message}\n`);
-      skipped.push({ key: entry.key, reason: "fetch-failed" });
+  for (const item of results) {
+    if (!item || item.error) {
+      skipped.push({ key: item?.entry?.key ?? "?", reason: `fetch-failed: ${String(item?.error?.message ?? "?")}`.slice(0, 160) });
       continue;
     }
+    const { entry, result } = item;
     if (bytes + result.bytes > budget) {
       // 超预算：跳过这一张，继续看后面更小的（充分利用额度）。
       skipped.push({ key: entry.key, reason: "over-budget" });
@@ -348,9 +485,6 @@ async function fetchAll() {
     bytes += result.bytes;
     if (result.reused) reused += 1; else fetched += 1;
     selected.push({ ...entry, bytes: result.bytes, sha256: sha256(readFileSync(join(STARTER_DIR, entry.file))), sourceBytes: result.bytes0 });
-    if (!quiet && !result.reused) {
-      process.stderr.write(`${entry.group}/${entry.file}: ${result.bytes0} B → ${result.bytes} B\n`);
-    }
   }
   // 清理：不再入选的旧文件（改名 / 重新策展后）不该留在目录里，否则 `--check` 会报多余文件。
   if (!only.length) {
@@ -359,22 +493,33 @@ async function fetchAll() {
       if (["curated.json", "bundles.json", "SOURCES.md"].includes(name)) continue;
       if (!keep.has(name)) rmSync(join(STARTER_DIR, name), { force: true });
     }
+    // 中断/失败留下的 `.src` 临时文件也清掉。
+    for (const name of readdirSync(STARTER_DIR)) if (name.endsWith(".src")) rmSync(join(STARTER_DIR, name), { force: true });
   }
   if (bytes > budget) process.stderr.write(`warn 超出预算：${bytes} > ${budget}\n`);
+  // 归档：安装包只发布 `starter.zip`（逐文件放会让 NSIS/deb 膨胀 + 安装慢）。
+  const archive = planOnly ? { bytes: 0 } : writeArchive(selected.map((e) => e.file));
+  process.stderr.write(`[starter] 归档 starter.zip ${human(archive.bytes)}（源文件 ${human(bytes)}）\n`);
+  const bases = new Set(selected.filter((e) => e.group === "portrait").map((e) => e.base)).size;
   writeManifests(selected, {
     budgetBytes: budget,
     bytes,
     rank: curated.rank,
     corpus: { root: curated.corpus.root, files: curated.corpus.files },
+    bases,
+    minBases,
     skipped,
+    archiveBytes: archive.bytes,
   });
   finish({
     mode: "fetch",
     files: selected.length,
     bytes,
+    archiveBytes: archive.bytes,
     budgetBytes: budget,
     reused,
     fetched,
+    portraitBases: bases,
     byGroup: groupCounts(selected),
     dir: relative(ROOT, STARTER_DIR),
   });

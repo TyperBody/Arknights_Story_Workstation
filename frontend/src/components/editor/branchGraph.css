@@ -47,11 +47,62 @@
   flex: 1 1 auto;
 }
 
+/* 缩放控件组：`−` 百分比 `+`（百分比点按 = 适配）。 */
+.bg-zoombar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .bg-zoom {
   flex: 0 0 auto;
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary, #929292);
+}
+
+.bg-zoom-reset {
+  padding: 0 4px;
+  line-height: 18px;
+  font-size: 10.5px;
+  color: var(--text-secondary, #929292);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  min-width: 40px;
+  text-align: center;
+}
+
+.bg-zoom-reset:hover {
+  color: var(--text-primary, #e8e8e8);
+  border-color: var(--border, #2a2d36);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.bg-zoombtn {
+  flex: 0 0 auto;
+  width: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 18px;
+  text-align: center;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border, #2a2d36);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bg-zoombtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent, #f4c430);
+}
+
+.bg-zoombtn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .bg-fit,

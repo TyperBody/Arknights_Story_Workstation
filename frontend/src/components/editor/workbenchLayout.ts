@@ -234,6 +234,15 @@ export function deleteLayout(name: string): void {
 /** 视图状态键。 */
 export const WB_KEY_VIEW = "prts-editor-wb:view";
 
+/**
+ * 控制器检视器（`Toolpanel` 顶部那块）的尺寸记忆。
+ * 用户原话「检视器大小固定了 太难用」→ 拖拽条 + 落盘；**不是**布局树的一部分
+ * （它不参与分屏，只是面板内一块可调高的区域），所以挂在视图状态里。
+ */
+export const INSPECTOR_MIN_H = 140;
+export const INSPECTOR_MAX_H = 900;
+export const INSPECTOR_DEFAULT_H = 240;
+
 /** 面板视图状态（持久化形状；坏数据逐字段回落）。 */
 export interface WorkbenchView {
   /** 树里（可见）的面板。 */
@@ -242,6 +251,8 @@ export interface WorkbenchView {
   floats: Record<string, { x: number; y: number; w: number; h: number }>;
   /** 收起（`▾`）的面板。 */
   folded: string[];
+  /** 控制器检视器：高度（px）+ 显示。旧数据缺省 → 默认高度、显示。 */
+  inspector?: { height: number; visible: boolean };
 }
 
 /** 读视图状态；没存过 / 坏 JSON → `null`（调用方用默认）。 */
@@ -265,22 +276,34 @@ export function readView(): WorkbenchView | null {
         if (r) floats[id] = r;
       }
     }
+    const inspectorRaw = parsed.inspector as { height?: unknown; visible?: unknown } | undefined;
+    const inspector = (() => {
+      if (!inspectorRaw || typeof inspectorRaw !== "object") return undefined;
+      const height = typeof inspectorRaw.height === "number" && Number.isFinite(inspectorRaw.height)
+        ? Math.round(inspectorRaw.height)
+        : null;
+      if (height === null) return undefined;
+      return { height, visible: inspectorRaw.visible !== false };
+    })();
     return {
       visible: Array.isArray(parsed.visible) ? parsed.visible.filter((id): id is string => typeof id === "string") : [],
       floats,
       folded: Array.isArray(parsed.folded) ? parsed.folded.filter((id): id is string => typeof id === "string") : [],
+      inspector,
     };
   } catch {
     return null;
   }
 }
 
-/** 写视图状态。 */
+/** 写视图状态（旧数据里没有 `inspector` → 保留默认，不写死）。 */
 export function saveView(view: Partial<WorkbenchView>): void {
+  const previous = readView();
   const next: WorkbenchView = {
     visible: Array.isArray(view.visible) ? view.visible : [],
     floats: view.floats ?? {},
     folded: Array.isArray(view.folded) ? view.folded : [],
+    inspector: view.inspector ?? previous?.inspector,
   };
   try {
     writeRaw(WB_KEY_VIEW, JSON.stringify(next));

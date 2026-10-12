@@ -29,15 +29,16 @@ import {
 import { type FloatRect } from "../components/editor/windowState";
 import {
   DEFAULT_LAYOUT_NAME,
+  INSPECTOR_DEFAULT_H,
+  INSPECTOR_MAX_H,
+  INSPECTOR_MIN_H,
   PANELS,
   WINDOW_SPECS,
   activeLayout,
   consumeLegacy,
-  deleteLayout,
   isDockPanel,
   isMapPanel,
   isPanelId,
-  listLayouts,
   loadLayout,
   migrateLegacy,
   readLayout,
@@ -604,13 +605,24 @@ function workbenchBoot(): WorkbenchBoot {
   return bootCache;
 }
 
-/** 视图状态（面板开关 / 浮动窗 / 折叠）落盘：**每次变化都写**。 */
-function persistView(visible: PanelId[], floats: Partial<Record<PanelId, FloatRect>>, folded: PanelId[]): void {
+/** 视图状态（面板开关 / 浮动窗 / 折叠 / 检视器）落盘：**每次变化都写**。 */
+function persistView(
+  visible: PanelId[],
+  floats: Partial<Record<PanelId, FloatRect>>,
+  folded: PanelId[],
+  extra?: { inspector?: { height: number; visible: boolean } },
+): void {
   try {
-    saveView({ visible, floats, folded });
+    saveView({ visible, floats, folded, inspector: extra?.inspector });
   } catch {
     // 落库失败只是"这次没记住"
   }
+}
+
+/** 检视器高度 clamp（拖拽条与恢复都走这里，避免两处各写一套边界）。 */
+function clampInspectorHeight(value: number): number {
+  const n = Number.isFinite(value) ? value : INSPECTOR_DEFAULT_H;
+  return Math.min(INSPECTOR_MAX_H, Math.max(INSPECTOR_MIN_H, n));
 }
 
 /**
@@ -1177,9 +1189,46 @@ export default function StoryEditorPage() {
   const scrubLine = previewUpto > 0 ? previewUpto : caret.line;
   /** 「区域缩进」的结果提示（`role="status"`，2.4s 后自动消失）。 */
   const [indentHint, setIndentHint] = useState("");
-  /** 舞台：拖动/选中哪个槽位；工具面板是否展开检视器。 */
+  /** 舞台：拖动/选中哪个槽位。 */
   const [stageSelected, setStageSelected] = useState<string | null>(null);
-  const [showInspector, setShowInspector] = useState(true);
+  /**
+   * 检视器（工具面板顶部）：高度**可拖**、显示状态一起进 `view`。
+   * 用户原话「检视器大小固定了 太难用」→ 默认 240（旧 190），拖拽条 clamp
+   * 到 `INSPECTOR_MIN_H..INSPECTOR_MAX_H`，与面板开关同一处落盘。
+   */
+  const [inspector, setInspector] = useState<{ height: number; visible: boolean }>(() => {
+    const saved = readView()?.inspector;
+    return saved ?? { height: INSPECTOR_DEFAULT_H, visible: true };
+  });
+  const inspectorRef = useRef(inspector);
+  inspectorRef.current = inspector;
+  const showInspector = inspector.visible;
+  /** 显示 / 收起检视器（与高度一起落盘）。 */
+  const toggleInspector = useCallback((visible?: boolean) => {
+    setInspector((prev) => {
+      const next = { height: prev.height, visible: visible ?? !prev.visible };
+      persistView(visibleRef.current, floatsRef.current, foldedRef.current, { inspector: next });
+      return next;
+    });
+  }, []);
+  /** 检视器拖拽条（上下拖改高度；`pointerup` 只落盘一次）。 */
+  const onInspectorResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startH = inspectorRef.current.height;
+    const move = (e: PointerEvent) => {
+      const next = { height: Math.round(clampInspectorHeight(startH + (e.clientY - startY))), visible: true };
+      setInspector(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const final = inspectorRef.current;
+      persistView(visibleRef.current, floatsRef.current, foldedRef.current, { inspector: final });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, []);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [stageMoves, setStageMoves] = useState<Array<{ slot: Slot; x: number; y: number }>>([]);
 
@@ -2444,16 +2493,17 @@ export default function StoryEditorPage() {
   }, []);
 
   /**
-   * **命名布局**（BRIEF §2.4 的用户可见面）：`prts-editor-wb:default` 是「当前」，
-   * 其余名字是快照。这里只做三件事：列出 / 另存为 / 切换（+ 删除），
-   * 布局文本的解析仍走 `workbenchStack`（`parse` / `normalize`）。
+   * **布局 = 自动记忆**（`prts-editor-wb:default`，改动即落库）。
+   *
+   * 用户原话「不需要保存布局…直接复用上一次修改的布局」→ UI 上只保留「重置布局」。
+   * 命名布局的**数据层**仍在（`workbenchLayout` 的 `listLayouts` / `readLayout` /
+   * `saveLayoutNamed`），启动时 `workbenchBoot()` 也仍按 `active` 名回放；这里
+   * 只把"当前活跃名"固定为 `default`，不再切换/另存/删除。
    */
-  const [layoutNames, setLayoutNames] = useState<string[]>(() => listLayouts());
-  const [activeLayoutName, setActiveLayoutName] = useState<string>(() => activeLayout());
+  const [activeLayoutName] = useState<string>(() => activeLayout());
   activeLayoutRef.current = activeLayoutName;
-  const [layoutPick, setLayoutPick] = useState<string>(DEFAULT_LAYOUT_NAME);
 
-  /** 切换（或另存为）布局：文本 → `normalize` → 工作台；坏文本回落默认。 */
+  /** 布局文本 → `normalize` → 工作台；坏文本回落默认。 */
   const applyLayoutText = useCallback((text: string | null) => {
     const parsed = text ? (parse(text) as WorkbenchState | null) : null;
     const next = normalize(parsed ?? defaultState(), visibleRef.current);
@@ -2461,42 +2511,11 @@ export default function StoryEditorPage() {
     return next;
   }, []);
 
-  const chooseLayout = useCallback((name: string) => {
-    const clean = String(name ?? "").trim() || DEFAULT_LAYOUT_NAME;
-    if (clean !== activeLayoutName) saveLayoutNamed(activeLayoutName, stringify(wbRef.current));
-    setActiveLayoutName(clean);
-    loadLayout(clean);
-    applyLayoutText(readLayout(clean));
-  }, [activeLayoutName, applyLayoutText]);
-
-  const saveAsLayout = useCallback((name: string) => {
-    const clean = String(name ?? "").trim();
-    if (!clean) return;
-    saveLayoutNamed(clean, stringify(wbRef.current));
-    setActiveLayoutName(clean);
-    setLayoutNames(listLayouts());
-  }, []);
-
-  const deleteLayoutNamed = useCallback((name: string) => {
-    deleteLayout(name);
-    const names = listLayouts();
-    setLayoutNames(names);
-    if (name === activeLayoutName) {
-      const fallback = names.includes(DEFAULT_LAYOUT_NAME) ? DEFAULT_LAYOUT_NAME : names[0] ?? DEFAULT_LAYOUT_NAME;
-      setActiveLayoutName(fallback);
-      loadLayout(fallback);
-      applyLayoutText(readLayout(fallback));
-    }
-  }, [activeLayoutName, applyLayoutText]);
-
-  /** 「重置」= 回到**随包默认形状**：覆盖 `default` 并把活跃布局切回它（不动命名快照）。 */
+  /** 「重置」= 回到**随包默认形状**（覆盖当前布局；命名快照不动）。 */
   const resetLayout = useCallback(() => {
     applyLayoutText(null);
     saveLayoutNamed(DEFAULT_LAYOUT_NAME, stringify(normalize(defaultState(), visibleRef.current)));
-    setActiveLayoutName(DEFAULT_LAYOUT_NAME);
-    setLayoutPick(DEFAULT_LAYOUT_NAME);
     loadLayout(DEFAULT_LAYOUT_NAME);
-    setLayoutNames(listLayouts());
   }, [applyLayoutText]);
 
   /** 工作台状态变化：受控 + 落盘 `prts-editor-wb:<active>`。 */
@@ -2777,7 +2796,7 @@ export default function StoryEditorPage() {
       </div>
 
       <div className="ed-panel-body">
-        {/* 控制器检视器（task-9 交付）：常驻在面板顶部，整行改参数。 */}
+        {/* 控制器检视器：常驻在面板顶部，整行改参数；高度可拖（下面那条 `.ed-inspector-grip`）。 */}
         {showInspector && (
           <div className="ed-inspector" data-editor-part="inspector">
             {ControllerInspectorPart ? (
@@ -2787,7 +2806,7 @@ export default function StoryEditorPage() {
                   line={caretLineText}
                   lineIndex={caretLineIndex}
                   onApply={onInspectorApply}
-                  height={190}
+                  height={clampInspectorHeight(inspector.height)}
                 />
               </Suspense>
             ) : (
@@ -2799,6 +2818,19 @@ export default function StoryEditorPage() {
             )}
           </div>
         )}
+        <div
+          className="ed-inspector-grip"
+          data-inspector-grip="1"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={tr("editor.inspector.gripTitle", undefined, "拖动调整检视器高度")}
+          title={tr("editor.inspector.gripTitle", undefined, "拖动调整检视器高度")}
+          onPointerDown={onInspectorResize}
+          onDoubleClick={() => {
+            setInspector({ height: INSPECTOR_DEFAULT_H, visible: true });
+            persistView(visibleRef.current, floatsRef.current, foldedRef.current, { inspector: { height: INSPECTOR_DEFAULT_H, visible: true } });
+          }}
+        />
         {tab === "diag" && (
           <>
             {!model && <p className="ed-hint">{tr("editor.diagnostics.modelMissing", undefined, "编辑器模型尚未加载：当前只做基础统计（未知指令按模型就绪后复核）。")}</p>}
@@ -3118,7 +3150,7 @@ export default function StoryEditorPage() {
           </button>
           <button
             className="ed-btn"
-            onClick={() => setShowInspector((value) => !value)}
+            onClick={() => toggleInspector()}
             title={tr("editor.toolbar.inspectorTitle", undefined, "显示/隐藏控制器检视器")}
           >
             {showInspector ? tr("editor.toolbar.inspectorShow", undefined, "收起检视器") : tr("editor.toolbar.inspectorHide", undefined, "检视器")}
@@ -3154,61 +3186,18 @@ export default function StoryEditorPage() {
           >
             {tr("editor.toolbar.wizardOpen", undefined, "插入控制器…")}
           </button>
-          {/* 命名布局（BRIEF §2.4）：切换 / 另存为 / 重置 / 删除。 */}
+          {/* 布局：**自动**落库（改变即记住），这里只留「重置」——用户原话
+              「不需要保存布局…直接复用上一次修改的布局」。命名布局的存储层
+              （`prts-editor-wb:<name>`）保留，供迁移 / 老数据复用。 */}
           <span className="ed-layout" data-layout-bar="1">
-            <select
-              className="ed-layout-select"
-              value={layoutPick}
-              aria-label={tr("editor.layout.aria", undefined, "布局")}
-              title={tr("editor.layout.selectTitle", undefined, "切换已保存的工作台布局")}
-              onChange={(event) => setLayoutPick(event.target.value)}
-            >
-              {(layoutNames.length ? layoutNames : [DEFAULT_LAYOUT_NAME]).map((name) => (
-                <option key={name} value={name}>
-                  {tr("editor.layout.option", { name }, `布局：${name}`)}
-                  {name === activeLayoutName ? " ✓" : ""}
-                </option>
-              ))}
-            </select>
-            <button
-              className="ed-btn"
-              data-layout-action="load"
-              onClick={() => chooseLayout(layoutPick)}
-              title={tr("editor.layout.loadTitle", undefined, "切换到选中的布局（切走前会把当前布局存回它自己的名字）")}
-            >
-              {tr("editor.layout.load", undefined, "切换")}
-            </button>
-            <button
-              className="ed-btn"
-              data-layout-action="save-as"
-              onClick={() => {
-                const name = window.prompt(tr("editor.layout.saveAsPrompt", undefined, "布局另存为（名字）："), layoutPick === DEFAULT_LAYOUT_NAME ? "" : layoutPick);
-                if (!name) return;
-                saveAsLayout(name);
-                setLayoutPick(name.trim());
-              }}
-              title={tr("editor.layout.saveAsTitle", undefined, "把当前布局另存为一个新名字")}
-            >
-              {tr("editor.layout.saveAs", undefined, "另存为…")}
-            </button>
             <button
               className="ed-btn"
               data-layout-action="reset"
               onClick={resetLayout}
               title={tr("editor.layout.resetTitle", undefined, "把当前布局恢复成默认（工具面板左 / 编辑区上 / 舞台下）")}
             >
-              {tr("editor.layout.reset", undefined, "重置")}
+              {tr("editor.layout.reset", undefined, "重置布局")}
             </button>
-            {layoutPick !== DEFAULT_LAYOUT_NAME && layoutNames.includes(layoutPick) && (
-              <button
-                className="ed-btn"
-                data-layout-action="delete"
-                onClick={() => deleteLayoutNamed(layoutPick)}
-                title={tr("editor.layout.deleteTitle", { name: layoutPick }, `删除布局「${layoutPick}」`)}
-              >
-                {tr("editor.layout.delete", undefined, "删除")}
-              </button>
-            )}
           </span>
           <button className="ed-btn" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
             {tr("editor.toolbar.reload", undefined, "重新载入")}
