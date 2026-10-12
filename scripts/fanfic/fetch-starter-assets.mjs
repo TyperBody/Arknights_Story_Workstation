@@ -91,6 +91,11 @@ const checkOnly = flag("--check");
 const planOnly = flag("--plan");
 const force = flag("--force");
 const quiet = flag("--quiet");
+/**
+ * 是否额外产出 `starter.zip`。用户结论：「exe 安装包自带压缩」→ NSIS/deb 已压缩随包
+ * 资源，逐文件放即可；zip 只对「直接拷贝 resources/ 的绿色版」有意义。默认**关**。
+ */
+const useArchive = flag("--archive");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 // ── 语料频次（可缺省；确定性排序）────────────────────────────────────────
