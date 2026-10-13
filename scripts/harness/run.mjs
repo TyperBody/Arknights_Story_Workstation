@@ -41,7 +41,7 @@ const GROUPS = {
     ["engine-failure-min.mjs", "⑤ 坏快照 → 换 pack → 内置快照"],
   ],
   assets: [
-    ["starter-assets.mjs", "⑥ 随包起步素材集（287 张/14.6 MB，覆盖层优先）"],
+    ["starter-assets.mjs", "⑥ 随包起步素材集（4.7k 图 + 2k 音频 / ≈1000 MB，覆盖层优先）"],
     ["rust-mirror-live.mjs", "⑦ Rust 源链接线 + 镜像 URL 形状"],
     ["live-download.mjs", "⑦ 设置页换源 → 落盘 + 预览 URL"],
   ],

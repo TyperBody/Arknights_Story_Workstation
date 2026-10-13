@@ -110,9 +110,10 @@ function walk(dir, out = []) {
 
 function corpusRanking() {
   const root = CORPUS_CANDIDATES.find((p) => existsSync(p) && statSync(p).isDirectory());
-  if (!root) return { root: null, files: 0, backgrounds: [], characters: [] };
+  if (!root) return { root: null, files: 0, backgrounds: [], characters: [], sounds: [] };
   const bg = new Map();
   const chr = new Map();
+  const snd = new Map();
   let files = 0;
   for (const file of walk(root)) {
     files += 1;
@@ -120,6 +121,11 @@ function corpusRanking() {
     for (const m of text.matchAll(/\[Background\(([^\]]*)\)/g)) {
       const image = /image\s*=\s*"([^"]+)"/.exec(m[1]);
       if (image) bg.set(image[1], (bg.get(image[1]) ?? 0) + 1);
+    }
+    // 音频变量引用：`$name` → 变量名（小写，与 `story_variables.json` 的键同域）。
+    for (const m of text.matchAll(/\$([A-Za-z][A-Za-z0-9_]*)/g)) {
+      const name = m[1].toLowerCase();
+      snd.set(name, (snd.get(name) ?? 0) + 1);
     }
     for (const m of text.matchAll(/\[(?:Character|charslot)\(([^\]]*)\)/g)) {
       for (const key of ["name", "name2"]) {
@@ -131,7 +137,7 @@ function corpusRanking() {
     }
   }
   const rank = (map) => [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  return { root, files, backgrounds: rank(bg), characters: rank(chr) };
+  return { root, files, backgrounds: rank(bg), characters: rank(chr), sounds: rank(snd) };
 }
 
 // ── 策展 ────────────────────────────────────────────────────────────────
@@ -230,44 +236,90 @@ function curate() {
     .filter(([base]) => base !== "char_empty")
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 
+  // 两趟（**保障覆盖**）：第一趟每个 base 收**本体**一张（`<base>.png`，没有则
+  // 第一张候选）；第二趟按 base 频次从高到低把**其余差分**补齐。这样预算被吃满时
+  // 也是"所有 base 都有主体立绘 + 高频角色差分更全"，而不是"前几百个 base 全差分、
+  // 其余一个都没有"。
+  const first = [];
+  const rest = [];
   let bases = 0;
   for (const [base, uses] of chrRanked) {
     const styles = stylesOf(base);
     if (!styles.length) continue;
     bases += 1;
-    for (const key of styles) {
-      push({ key, group: "portrait", kind: "portrait", base, url: `https://${key}`, uses, file: fileNameFor(key, "webp"), quality: QUALITY.portrait });
-    }
+    const entryOf = (key) => ({ key, group: "portrait", kind: "portrait", base, url: `https://${key}`, uses, file: fileNameFor(key, "webp"), quality: QUALITY.portrait });
+    const body = styles[0];
+    first.push({ ...entryOf(body), primary: true });
+    for (const key of styles.slice(1)) rest.push(entryOf(key));
+  }
+  for (const entry of first) push(entry);
+  for (const entry of rest) push(entry);
+
+  // 4) audio：`story_variables.json` 里指向 `Sound_Beta_2/...` 的音频变量，按语料
+  //    `$变量` 引用频次降序。URL 规则与引擎（`pack.mjs::audioUrl` /
+  //    `asset.ts::audioUrlFromValue`）逐字一致：`sound_beta_2` → `assets/audio`。
+  //    mp3 已压缩 → 不转码（`quality: null`）；体积大（≈0.3 MB/条）正是补足预算的主力。
+  const variables = upstream?.bundle?.data?.[`${ORIGIN}/gamedata/latest/story/story_variables.json`] ?? {};
+  const audioUses = new Map(corpus.sounds ?? []);
+  const audioRanked = Object.entries(variables)
+    .filter(([name, value]) => name && typeof value === "string" && /sound_beta_2\//i.test(value))
+    .map(([name, value]) => {
+      const url = `${ORIGIN}/${String(value).toLowerCase().replace("sound_beta_2", "assets/audio")}.mp3`;
+      return { name, url, uses: audioUses.get(name) ?? 0 };
+    })
+    .sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
+  for (const item of audioRanked) {
+    const key = item.url.replace(/^https?:\/\//, "");
+    if (!/\.mp3$/.test(key)) continue;
+    push({ key, group: "audio", kind: "audio", url: item.url, uses: item.uses, file: fileNameFor(key, "mp3"), quality: null });
   }
   return { entries, corpus, rank: corpus.backgrounds.length ? "corpus" : "catalog", bases };
 }
 
-/** 单条：URL → 目标文件路径。已在磁盘且非 --force → 复用。 */
+/**
+ * 「已确认没有的 key」缓存（`build/starter-missing.json`）。
+ * PRTS 的 `characterPaths` 里约 **83% 的 `$` 形态**已经下线（实测命中 ≈17%）：
+ * 第一轮为它们打了 1.4 万个 404，重跑不该再来一遍。
+ */
+const MISS_FILE = join(ROOT, "build/starter-missing.json");
+const missing = new Set((() => {
+  try { return JSON.parse(readFileSync(MISS_FILE, "utf8")); } catch { return []; }
+})());
+
+/** 单条：URL → 目标文件路径。已在磁盘且非 --force → 复用；已知缺失 → 立刻失败（不打网络）。 */
 async function ensure(entry) {
   const target = join(STARTER_DIR, entry.file);
   if (!force && existsSync(target)) {
     const size = statSync(target).size;
     return { bytes: size, reused: true, bytes0: size };
   }
+  if (!force && missing.has(entry.key)) throw new Error(`HTTP 404（缓存）for ${entry.url}`);
   const res = await fetch(encodeAssetUrl(entry.url), { headers: { "User-Agent": UA, Referer: "https://prts.wiki/" } });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${entry.url}`);
   const source = Buffer.from(await res.arrayBuffer());
-  // 小图（`ui_*` / `char_empty`）可以很小（几十字节的占位也算合法）；只挡 HTML/空响应。
-  const magicOk = source.subarray(0, 8).toString("latin1").startsWith("\x89PNG")
-    || source.subarray(0, 4).toString("latin1") === "RIFF"
-    || source.subarray(0, 3).toString("latin1") === "\xff\xd8\xff";
-  if (source.length < 64 || !magicOk) {
-    throw new Error(`不是图片（${source.length} B）：${entry.url}`);
+  const head = source.subarray(0, 8).toString("latin1");
+  // PNG / RIFF(WebP) / JPEG / MP3（`ID3` 标签或裸帧同步 0xFF）。
+  const magicOk = head.startsWith("\x89PNG") || head.slice(0, 4) === "RIFF"
+    || head.slice(0, 3) === "\xff\xd8\xff" || head.startsWith("ID3") || source[0] === 0xff;
+  // PRTS 图床对「目录里有、图还没生成」的差分（几乎全是 `$` 形态）回 200 + 57 B 中转页：
+  //   `<html><script>document.location.reload();</script></html>`
+  // 语义是"下次再来"，重试 6 次也**不变**（实测）→ 记 missing，重跑不再打网络。
+  if (/document\.location\.reload\(\)/.test(source.subarray(0, 200).toString("utf8"))) {
+    throw new Error(`PRTS 中转页（${source.length} B，图床未就绪）for ${entry.url}`);
+  }
+  if (source.length < 16 || !magicOk) {
+    throw new Error(`不是图片（${source.length} B, head=${JSON.stringify(head)}）：${entry.url}`);
   }
   let bytes = source;
   if (entry.quality) {
-    // `-preset picture` 对插画更快；`-compression_level 5` 在体积/耗时之间折中
-    // （默认 4 更快、更大；6 以上慢一倍、省 ~2%）。
+    // `-preset 4` = 图片（libwebp 的整数 preset；`-preset picture` 需新版 ffmpeg，
+    // 8.0 会报 `Option not found`）。`-compression_level 5` 在体积/耗时之间折中；
+    // 注意本构建的 libwebp **没有** `-alpha_quality`（透明度按 `-quality` 走）。
     const tmp = `${target}.src`;
     writeFileSync(tmp, source);
     execFileSync("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", tmp,
-      "-c:v", "libwebp", "-preset", "picture", "-compression_level", "5",
-      "-quality", String(entry.quality), "-alpha_quality", "100", target]);
+      "-c:v", "libwebp", "-preset", "4", "-compression_level", "5",
+      "-quality", String(entry.quality), target]);
     rmSync(tmp, { force: true });
     bytes = readFileSync(target);
   } else {
@@ -368,15 +420,15 @@ function check() {
   const extra = Object.keys(bundles).filter((key) => !curated.entries.some((e) => e.key === key));
   if (extra.length) problems.push(`bundles.json 有未知键：${extra.join(", ")}`);
   const onDisk = readdirSync(STARTER_DIR)
-    .filter((name) => !["curated.json", "bundles.json", "SOURCES.md", "starter.zip"].includes(name) && !name.endsWith(".src"));
+    .filter((name) => !["curated.json", "bundles.json", "SOURCES.md", "starter.zip"].includes(name)
+      && !name.endsWith(".src") && !name.endsWith(".pending"));
   const known = new Set(curated.entries.map((e) => e.file));
   for (const name of onDisk) if (!known.has(name)) problems.push(`目录里有多余文件 ${name}`);
   if (bytes > curated.budgetBytes) problems.push(`素材总量 ${bytes} B 超预算 ${curated.budgetBytes} B`);
   if (!existsSync(SOURCES)) problems.push("缺少 SOURCES.md");
-  // 归档：安装包分发的就是这个 zip —— 缺 / 条目不齐 / 体积偏差都要报。
+  // 归档（可选）：`--check` 时存在就校验条目齐不齐（安装包默认不依赖 zip）。
   let archiveBytes = 0;
-  if (!existsSync(ARCHIVE)) problems.push("缺少 starter.zip（先跑一次不带 --check 的脚本）");
-  else {
+  if (existsSync(ARCHIVE)) {
     archiveBytes = statSync(ARCHIVE).size;
     try {
       const list = execFileSync("unzip", ["-Z1", ARCHIVE], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 })
@@ -478,7 +530,11 @@ async function fetchAll() {
   let fetched = 0;
   for (const item of results) {
     if (!item || item.error) {
-      skipped.push({ key: item?.entry?.key ?? "?", reason: `fetch-failed: ${String(item?.error?.message ?? "?")}`.slice(0, 160) });
+      const key = item?.entry?.key;
+      const reason = `fetch-failed: ${String(item?.error?.message ?? "?")}`.slice(0, 200);
+      // 明确的 404 → 记进缓存，重跑时不再打网络（catalog 里大量 `$` 形态已下线）。
+      if (key && /HTTP 404/.test(reason)) missing.add(key);
+      skipped.push({ key: key ?? "?", reason });
       continue;
     }
     const { entry, result } = item;
@@ -498,13 +554,20 @@ async function fetchAll() {
       if (["curated.json", "bundles.json", "SOURCES.md"].includes(name)) continue;
       if (!keep.has(name)) rmSync(join(STARTER_DIR, name), { force: true });
     }
-    // 中断/失败留下的 `.src` 临时文件也清掉。
-    for (const name of readdirSync(STARTER_DIR)) if (name.endsWith(".src")) rmSync(join(STARTER_DIR, name), { force: true });
+    // 中断/失败留下的 `.src` 临时文件 / `.pending` 中转页标记也清掉。
+    for (const name of readdirSync(STARTER_DIR)) {
+      if (name.endsWith(".src") || name.endsWith(".pending")) rmSync(join(STARTER_DIR, name), { force: true });
+    }
   }
   if (bytes > budget) process.stderr.write(`warn 超出预算：${bytes} > ${budget}\n`);
-  // 归档：安装包只发布 `starter.zip`（逐文件放会让 NSIS/deb 膨胀 + 安装慢）。
-  const archive = planOnly ? { bytes: 0 } : writeArchive(selected.map((e) => e.file));
-  process.stderr.write(`[starter] 归档 starter.zip ${human(archive.bytes)}（源文件 ${human(bytes)}）\n`);
+  // 404 缓存落盘：重跑只需处理"新候选"，不必再为已下线的 `$` 形态打一轮网络。
+  if (!only.length && missing.size) {
+    mkdirSync(join(ROOT, "build"), { recursive: true });
+    writeFileSync(MISS_FILE, `${JSON.stringify([...missing].sort(), null, 0)}\n`);
+  }
+  // 归档（`--archive` 才写）：安装包本身已压缩（NSIS/deb），zip 只对绿色版有意义。
+  const archive = useArchive ? writeArchive(selected.map((e) => e.file)) : { bytes: 0 };
+  if (useArchive) process.stderr.write(`[starter] 归档 starter.zip ${human(archive.bytes)}（源文件 ${human(bytes)}）\n`);
   const bases = new Set(selected.filter((e) => e.group === "portrait").map((e) => e.base)).size;
   writeManifests(selected, {
     budgetBytes: budget,

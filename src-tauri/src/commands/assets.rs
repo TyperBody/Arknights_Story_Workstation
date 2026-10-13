@@ -754,10 +754,16 @@ fn starter_summary() -> (usize, u64, std::collections::BTreeMap<String, usize>) 
     (entries.len(), bytes, groups)
 }
 
-/// 图片扩展名白名单（起步素材集里只有 PNG/WebP）。
+/// 起步素材集的文件白名单：图片（PNG/WebP/JPEG）+ 音频（MP3/Ogg）。
+/// 音频是"补足预算"的主力（≈0.3 MB/条），命中覆盖层后播放器不必联网。
 fn is_starter_image(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.ends_with(".png") || lower.ends_with(".webp") || lower.ends_with(".jpg") || lower.ends_with(".jpeg")
+    lower.ends_with(".png")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".mp3")
+        || lower.ends_with(".ogg")
 }
 
 /// 起步素材集的概况（`starter_set_info` 命令的核心，可测）。
