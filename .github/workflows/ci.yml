@@ -83,6 +83,17 @@ jobs:
       - name: Install dependencies (locked)
         shell: bash
         run: npm ci --no-audit --no-fund
+
+      # 起步素材集（≈238 MB：清单 + 背景全量 + 每 base 主差分）**不进 git**，
+      # 构建前按清单补齐（幂等：已有即复用）。缓存按清单哈希失效。
+      - name: Cache starter assets
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/assets/starter
+          key: starter-${{ hashFiles('src-tauri/resources/assets/starter/curated.json') }}
+      - name: Fetch starter assets
+        run: npm run assets:starter
+
       - name: Build the app (native target)
         # CI/script builds ship with the on-screen debug console enabled by default
         # (users can turn it off in Settings). Ordinary local builds default off.
@@ -142,6 +153,15 @@ jobs:
       - name: Install dependencies (locked)
         shell: bash
         run: npm ci --no-audit --no-fund
+
+      # 起步素材集同桌面：不进 git，构建前按清单补齐 + 缓存。
+      - name: Cache starter assets
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/assets/starter
+          key: starter-android-${{ hashFiles('src-tauri/resources/assets/starter/curated.json') }}
+      - name: Fetch starter assets
+        run: npm run assets:starter
 
       - name: Build per-ABI release APKs (arm64-v8a + x86_64)
         env:

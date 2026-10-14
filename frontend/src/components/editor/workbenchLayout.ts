@@ -22,8 +22,12 @@ import type { PanelId } from "./workbenchStack";
 
 export type { PanelId };
 
-/** 面板清单（顺序 = 默认工具栏顺序，也是 §2.1 的常量顺序）。 */
-export const PANELS: PanelId[] = ["toolpanel", "stage", "preview", "branch"];
+/** 面板清单（顺序 = rail / 工具栏顺序，也是 §2.1 的常量顺序）。
+ *  `assets`（素材库）= dock，但**不进默认布局**（`defaultPlaced(false)`）。 */
+export const PANELS: PanelId[] = ["toolpanel", "assets", "stage", "preview", "branch"];
+
+/** 不在 `PANELS` 里、也**不**默认进树的面板（素材库：rail 放出才进树）。 */
+export const OPTIONAL_DEFAULT_OFF: readonly PanelId[] = ["assets"];
 
 export interface WindowSpec {
   /** 标题条文字；窗口根 `data-win="<title>"`、`aria-label` 都用它。 */
@@ -35,6 +39,8 @@ export interface WindowSpec {
   /** 工具栏/列出顺序（小 → 前）。 */
   order: number;
   kind: "dock" | "map";
+  /** 默认布局里是否**已经放好**（缺省 `true`）。`false` → 「曾收起」，rail 放出即进树。 */
+  defaultPlaced?: boolean;
 }
 
 /**
@@ -44,6 +50,7 @@ export interface WindowSpec {
  */
 export const WINDOW_SPECS: Record<PanelId, WindowSpec> = {
   toolpanel: { title: "工具面板", map: false, minW: 240, minH: 160, order: 10, kind: "dock" },
+  assets: { title: "素材库", map: false, minW: 280, minH: 180, order: 15, kind: "dock", defaultPlaced: false },
   stage: { title: "舞台", map: false, minW: 280, minH: 160, order: 20, kind: "dock" },
   preview: { title: "预览", map: true, minW: 320, minH: 200, order: 30, kind: "map" },
   branch: { title: "分支图", map: true, minW: 320, minH: 200, order: 40, kind: "map" },
@@ -86,14 +93,19 @@ export function isMapPanel(id: PanelId): boolean {
   return specOf(id).map;
 }
 
-/** 常驻 dock 面板（toolpanel / stage）：默认可见。 */
+/** 常驻 dock 面板：默认**在**可见清单里（`defaultPlaced !== false`）。 */
 export function isDockPanel(id: PanelId): boolean {
   return !isMapPanel(id);
 }
 
-/** 默认可见清单：常驻 dock。 */
+/** 默认布局里就**放好**的常驻面板（`assets` 这种"常驻但先收着"的不算）。 */
+export function isDefaultPlaced(id: PanelId): boolean {
+  return specOf(id).defaultPlaced !== false;
+}
+
+/** 默认可见清单：常驻 dock **且** 默认放好的（= `toolpanel` / `stage`）。 */
 export function defaultVisible(): PanelId[] {
-  return PANELS.filter(isDockPanel);
+  return PANELS.filter((id) => isDockPanel(id) && isDefaultPlaced(id));
 }
 
 /** 按 `order` 排序的面板清单（工具栏按钮 / 最小化项渲染用）。 */
@@ -322,6 +334,28 @@ export function saveView(view: Partial<WorkbenchView>): void {
 export function activeLayout(): string {
   const raw = (readRaw(WB_KEY_ACTIVE) ?? "").trim();
   return raw || DEFAULT_LAYOUT_NAME;
+}
+
+// ── 侧边栏（rail）：整条收起 / 展开 ──────────────────────────────
+//
+// 用户原话「引入侧边栏的概念 可以快速收缩 集合窗口」→ rail = **面板开关的集合**
+// （图标条）。它自己也能整条收起成一条 32px 窄条；状态与布局同一条持久化路径
+// （`stateStore` scope=workspace，无 Tauri 时自动回落 localStorage）。
+
+/** rail 的持久化键。 */
+export const RAIL_KEY = "prts-editor-rail";
+
+/** rail 的两种状态（`"collapsed"` = 只剩窄条）。 */
+export type RailState = "open" | "collapsed";
+
+/** 读 rail 状态（没存过 / 坏值 → `open`）。 */
+export function readRail(): RailState {
+  return readRaw(RAIL_KEY) === "collapsed" ? "collapsed" : "open";
+}
+
+/** 写 rail 状态（`"open"` 也写：这样"展开过"与"从没碰过"仍可区分，诊断友好）。 */
+export function saveRail(state: RailState): void {
+  writeRaw(RAIL_KEY, state === "collapsed" ? "collapsed" : "open");
 }
 
 /**

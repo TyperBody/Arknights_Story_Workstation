@@ -61,6 +61,15 @@ jobs:
         shell: bash
         run: npm ci --no-audit --no-fund
 
+      # 起步素材集（≈238 MB）不进 git：构建前按清单补齐 + 缓存（与 CI 同口径）。
+      - name: Cache starter assets
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/assets/starter
+          key: starter-release-${{ hashFiles('src-tauri/resources/assets/starter/curated.json') }}
+      - name: Fetch starter assets
+        run: npm run assets:starter
+
       - name: Build and publish to the release
         uses: tauri-apps/tauri-action@v0
         env:

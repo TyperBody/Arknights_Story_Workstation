@@ -943,14 +943,27 @@ function normalizeForkOptions(source, options) {
 // **一列长龙**（`degenerate: true`）——难看，但**零重叠**依旧成立。
 // ───────────────────────────────────────────────────────────────────────
 
-/** 卡片宽：dify 风两行卡片。 */
+/** 卡片宽：**横排（LR）**的 dify 风两行卡片。 */
 export const LAYOUT_W = 200;
-/** 卡片高（含 4px 左色条与状态点）。 */
+/** 卡片高（含 4px 左色条与状态点）；LR 用。 */
 export const LAYOUT_H = 64;
+/** 竖排（TB）卡片：工作流是一列**可读的**卡片，宽一点才放得下标题 + 摘要。 */
+export const LAYOUT_W_TB = 320;
+/** 竖排卡片高（比 LR 高一档：标题 / 摘要两行 + 状态点仍在一张卡里）。 */
+export const LAYOUT_H_TB = 92;
+/** 退化（> `CAP_NODES`）时的卡片：竖排用 240×52、横排沿用 140×44。 */
+export const LAYOUT_W_TB_DEGENERATE = 240;
+export const LAYOUT_H_TB_DEGENERATE = 52;
 /** 层间距：相邻两层卡片的**边到边**距离。 */
 export const LAYOUT_GAP_X = 32;
 /** 同层卡片之间的**边到边**距离。 */
 export const LAYOUT_GAP_Y = 32;
+/** 默认阅读方向 = **TB（竖排、从上到下）**：用户要的「工作流竖着编排」。 */
+export const LAYOUT_DIRECTION = "TB";
+/** 支持的方向（`layoutGraph(graph, {direction})`；其余值回落默认）。 */
+export const LAYOUT_DIRECTIONS = Object.freeze(["TB", "LR"]);
+/** 竖排卡片的标题宽度（CJK 记 2；LR 用 `TITLE_W`）。 */
+export const LAYOUT_TITLE_W_TB = 34;
 /** 「⤢ 适配」与滚轮缩放的上下限（视图与排布共用同一组常量）。 */
 export const LAYOUT_ZOOM_MIN = 0.2;
 export const LAYOUT_ZOOM_MAX = 2;
@@ -964,11 +977,13 @@ const CORNER = 6;
 const NODE_ID = /^n(\d+)$/;
 /** 超过这个节点数 → 退化成一列长龙（仍然零重叠）。 */
 const CAP_NODES = 400;
-/** 卡片标题 / 摘要的单行展示宽度（CJK 记 2、ASCII 记 1）。 */
+/** 卡片标题 / 摘要的单行展示宽度（CJK 记 2、ASCII 记 1）；TB 见 `LAYOUT_TITLE_W_TB`。 */
 const TITLE_W = 22;
-/** 标题 / 摘要的基线偏移（视图把 SVG 文本锚在这两行上）。 */
+/** 标题 / 摘要的基线偏移（视图把 SVG 文本锚在这两行上）；TB 卡片更高、行距同值。 */
 const TITLE_DY = 27;
 const SUMMARY_DY = 45;
+/** TB 卡片的第二行（摘要 / pills）基线：92 高的卡片里放到 62，别贴底。 */
+export const SUMMARY_DY_TB = 62;
 
 /**
  * 全角宽：CJK / 全角标点记 2，ASCII 记 1（截断用**码点**，代理对算 1 个字）。
@@ -1066,7 +1081,7 @@ function toward(here, target, distance) {
   return [here[0] + dx * step, here[1] + dy * step];
 }
 
-/** 折线的第一个**竖段**（视图的箭头 / 分支标签锚在它上面）。
+/** 折线的第一个**竖段**（LR 的箭头 / 分支标签锚在它上面；TB 下也用作文本兜底）。
  * @param {[number,number][]} points
  * @returns {{x:number,u:number,v:number,dy:number}|null} */
 function verticalOf(points) {
@@ -1081,19 +1096,53 @@ function verticalOf(points) {
 }
 
 /**
- * 正交折线：所有 x 只取「源卡片右缘 / 目标卡片左缘 / 空隙中线」，所有竖段都在
- * 卡片**之外**的空隙里 ⇒ 连线永远不会穿过 rect（可视化的前提，harness 另测）。
+ * 折线的第一个**横向段**（`TB` 的"沿层轴"那一段：`y` 恒定、`x` 从 u 到 v）。
+ * 竖排时分支标签锚在它上面 —— "横着走的那一段"就是分叉线。
+ * @param {[number,number][]} points
+ * @returns {{y:number,u:number,v:number,dx:number}|null}
+ */
+function horizontalOf(points) {
+  for (let at = 0; at + 1 < points.length; at += 1) {
+    const a = points[at];
+    const b = points[at + 1];
+    if (Math.abs(a[1] - b[1]) < 0.5 && Math.abs(a[0] - b[0]) >= 0.5) {
+      return { y: r2(a[1]), u: r2(Math.min(a[0], b[0])), v: r2(Math.max(a[0], b[0])), dx: b[0] > a[0] ? 1 : -1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * 正交折线（**按方向换轴**）：坐标只取「卡片边缘 / 层间空隙中线」，所有
+ * **跨层段**（TB 竖直 / LR 水平）都落在卡片**之外**的空隙里 ⇒ 不穿 rect。
  *
- * · **跨列**（`to.layer > from.layer`）：横到 32px 空隙的中线，竖，再横到目标。
- *   —— dify 的 S 折；`dTo`/`dFrom` 记录「横 → 竖 → 横」的三段方向。
- * · **同列 / 回边**：横到**目标列右外侧**的空隙中线，竖，再横回来（不压卡片）。
- * · **结束**：从右缘横一小段（虚线、无箭头）。
+ * TB（竖排）：`fromX/fromY` = 源卡**底缘中点**、`toX/toY` = 目标卡**顶缘中点**。
+ * · **跨层**（`to.layer > from.layer`）：竖到层间空隙中线 → 横 → 竖进目标顶缘；
+ * · **同层 / 回边**：竖到**目标层上侧**的空隙中线 → 横 → 竖回目标；
+ * · **结束**：从底缘竖一小段（虚线、无箭头）。
  *
- * @param {{fromX:number,fromY:number,toX:number,toY:number,sameColumn:boolean,back:boolean,dead:boolean}} p
+ * LR（横排）＝ 老行为：横 → 竖 → 横；同列 / 回边绕到目标列右外侧的空隙中线。
+ * 两条分支**结构同构**，只是交换了 x/y。
+ *
+ * @param {{fromX:number,fromY:number,toX:number,toY:number,sameColumn:boolean,back:boolean,dead:boolean,axis?:"x"|"y",cardW?:number,cardH?:number,gapX?:number,gapY?:number}} p
  * @returns {[number,number][]}
  */
 function orthPoints(p) {
   const { fromX, fromY, toX, toY, sameColumn, back, dead } = p;
+  if (p.axis === "y") {
+    // ── TB：层轴 = y。「在卡片之外」的约束落在 y（层间 32px 空隙） ──
+    if (dead) return [[fromX, fromY], [fromX, toY]];
+    const cardH = p.cardH ?? LAYOUT_H_TB;
+    const gapY = p.gapY ?? LAYOUT_GAP_Y;
+    if (back || sameColumn) {
+      /** 目标层**上侧**的空隙中线（= LR 的"右外侧"）；在源-目标之间时退回两者中线。 */
+      const outside = r2(toY - (cardH + gapY) + gapY / 2);
+      const seam = toY > outside ? outside : r2((fromY + toY) / 2);
+      return [[fromX, fromY], [fromX, seam], [toX, seam], [toX, toY]];
+    }
+    const seam = r2((fromY + toY) / 2);
+    return [[fromX, fromY], [fromX, seam], [toX, seam], [toX, toY]];
+  }
   if (dead) return [[fromX, fromY], [toX, fromY]];
   if (back || sameColumn) {
     /** 目标卡片所在列的**右外侧**空隙中线；在源-目标之间时退回两者中线。 */
@@ -1105,11 +1154,18 @@ function orthPoints(p) {
   return [[fromX, fromY], [seam, fromY], [seam, toY], [toX, toY]];
 }
 
-/** 分支标签的锚点（折线中点；有竖段就取竖向段中点）。@param {[number,number][]} points
+/** 分支标签的锚点：`TB` 取横向段（分叉线）中点、`LR` 取竖向段中点；
+ *  都没有则取折线中点。@param {[number,number][]} points
+ * @param {"TB"|"LR"} [direction]
  * @returns {{x:number,y:number}|null} */
-function labelAnchor(points) {
-  const vertical = verticalOf(points);
-  if (vertical) return { x: vertical.x, y: r2((vertical.u + vertical.v) / 2) };
+function labelAnchor(points, direction = LAYOUT_DIRECTION) {
+  const flat = horizontalOf(points);
+  if (direction === "TB") {
+    if (flat) return { x: r2((flat.u + flat.v) / 2), y: flat.y };
+  } else {
+    const vertical = verticalOf(points);
+    if (vertical) return { x: vertical.x, y: r2((vertical.u + vertical.v) / 2) };
+  }
   const first = points[0];
   const last = points[points.length - 1];
   if (!first || !last) return null;
@@ -1152,7 +1208,7 @@ function mergeLinesFrom(source, nodes) {
 }
 
 /** 空图（形状齐全，视图不用判 `undefined`）。@param {any} source @returns {any} */
-function emptyLayout(source) {
+function emptyLayout(source, direction = LAYOUT_DIRECTION) {
   const routes = Array.isArray(source?.routes) ? source.routes.filter(Boolean) : [];
   return {
     nodes: [],
@@ -1162,13 +1218,17 @@ function emptyLayout(source) {
     decisions: [],
     choiceLines: [],
     mergeLines: [],
+    direction,
+    layerStep: 0,
+    slotStep: 0,
+    readOrder: [],
     width: 0,
     height: 0,
     layers: [],
     rects: [],
     degenerate: false,
     degraded: Boolean(source?.degraded),
-    stats: { nodes: 0, edges: 0, layers: 0, lanes: routes.length, choices: 0, merges: 0, width: 0, height: 0 },
+    stats: { nodes: 0, edges: 0, layers: 0, lanes: routes.length, choices: 0, merges: 0, direction, width: 0, height: 0 },
   };
 }
 
@@ -1188,20 +1248,30 @@ function laneOf(route, at) {
 /**
  * dify 风分层 DAG 排布（**纯函数、确定性、绝不抛异常**）。
  *
+ * `direction`（默认 `"TB"` = **竖排、从上到下**）：
+ *   · `TB`：`layer` → **y 轴**（层往下走），同层沿 **x** 打包 + 重心排序；
+ *     卡片默认 **320×92**（`LAYOUT_W_TB`/`LAYOUT_H_TB`，退化 240×52）——
+ *     工作流是一列**可读的**卡片（标题 + 摘要一行放得下）；
+ *   · `LR`：`layer` → **x 轴**（老的横向 dify 风），卡片 200×64，逐字节与旧版一致。
+ * 两种方向的**正交折线**都走"垂直于阅读方向的一段 + 沿阅读方向的一段"：
+ * `TB` 是「竖 → 横 → 竖」，`LR` 是「横 → 竖 → 横」。
+ *
  * @param {any} graph `buildGraph(text)` 的产物（缺字段 / 手造图 / `null` 都不抛）
- * @param {{w?:number,h?:number,gapX?:number,gapY?:number,titleW?:number}} [opts]
+ * @param {{w?:number,h?:number,gapX?:number,gapY?:number,titleW?:number,direction?:"TB"|"LR"}} [opts]
  * @returns {any} 见文件头 / `frontend/src/components/editor/BranchGraph.tsx`
  */
 export function layoutGraph(graph, opts) {
   const source = graph && typeof graph === "object" ? graph : {};
   const options = opts && typeof opts === "object" ? opts : {};
-  const w = positive(options.w, LAYOUT_W);
-  const h = positive(options.h, LAYOUT_H);
+  const direction = options.direction === "LR" ? "LR" : LAYOUT_DIRECTION;
+  const tb = direction === "TB";
+  const w = positive(options.w, tb ? LAYOUT_W_TB : LAYOUT_W);
+  const h = positive(options.h, tb ? LAYOUT_H_TB : LAYOUT_H);
   const gapX = nonNegative(options.gapX, LAYOUT_GAP_X);
   const gapY = nonNegative(options.gapY, LAYOUT_GAP_Y);
-  const titleW = positive(options.titleW, TITLE_W);
+  const titleW = positive(options.titleW, tb ? LAYOUT_TITLE_W_TB : TITLE_W);
   const rawNodes = Array.isArray(source.nodes) ? source.nodes.filter((node) => node && node.id !== undefined) : [];
-  if (!rawNodes.length) return emptyLayout(source);
+  if (!rawNodes.length) return emptyLayout(source, direction);
   const routes = Array.isArray(source.routes) ? source.routes.filter(Boolean) : [];
 
   /** 1) 文档序（行号 = 唯一真源，`buildGraph` 本来就是这个序）。 */
@@ -1236,7 +1306,7 @@ export function layoutGraph(graph, opts) {
   /** @type {number[]} */
   const layers = ordered.map(() => 0);
   if (degenerate) {
-    /** 退化：**一列长龙**（零重叠优先；`u`/`h` 也缩到 140×44）。 */
+    /** 退化：**一列长龙**（零重叠优先；卡片也缩一档）。 */
     for (let at = 0; at < ordered.length; at += 1) layers[at] = at;
   } else {
     for (let pass = 0; pass <= ordered.length; pass += 1) {
@@ -1253,9 +1323,17 @@ export function layoutGraph(graph, opts) {
     }
   }
 
-  /** 4) 同层堆叠：y = PAD + slot × (h + gapY)（文档序打包 → σ 稳定）。 */
-  const cardW = degenerate ? 140 : w;
-  const cardH = degenerate ? 44 : h;
+  /**
+   * 4) 轴分配（`TB` 竖排 / `LR` 横排）：
+   *   · **层轴**（层号 → 坐标）：`TB` = y、`LR` = x；层内间距 = `cardH/cardW + gap`；
+   *   · **同层轴**（层内 slot → 坐标）：`TB` = x（沿 x 打包）、`LR` = y。
+   * 两种方向共用同一份 `assemble` / 重心排序（它们按 `axis` 换轴）。
+   */
+  const cardW = degenerate ? (tb ? LAYOUT_W_TB_DEGENERATE : 140) : w;
+  const cardH = degenerate ? (tb ? LAYOUT_H_TB_DEGENERATE : 44) : h;
+  /** 层轴（层 → 坐标）步长 / 层内轴步长。 */
+  const layerStep = (tb ? cardH : cardW) + (tb ? gapY : gapX);
+  const slotStep = (tb ? cardW : cardH) + (tb ? gapX : gapY);
   /** @type {Map<number, number[]>} */
   const byLayer = new Map();
   for (let at = 0; at < ordered.length; at += 1) {
@@ -1265,17 +1343,26 @@ export function layoutGraph(graph, opts) {
     byLayer.set(key, list);
   }
   /** @type {{x:number,y:number,w:number,h:number,layer:number}[]} */
-  const boxes = ordered.map((_, at) => ({ x: r2(PAD + (layers[at] ?? 0) * (cardW + gapX)), y: PAD, w: cardW, h: cardH, layer: layers[at] ?? 0 }));
+  const boxes = ordered.map((_, at) => {
+    const layer = layers[at] ?? 0;
+    const along = r2(PAD + layer * layerStep);
+    return tb
+      ? { x: PAD, y: along, w: cardW, h: cardH, layer }
+      : { x: along, y: PAD, w: cardW, h: cardH, layer };
+  });
   for (const list of byLayer.values()) {
     for (let slot = 0; slot < list.length; slot += 1) {
       const box = boxes[list[slot]];
-      if (box) box.y = r2(PAD + slot * (cardH + gapY));
+      if (!box) continue;
+      const at = r2(PAD + slot * slotStep);
+      if (tb) box.x = at;
+      else box.y = at;
     }
   }
-  if (!degenerate) barycenterPass(ordered, edges, boxes, byLayer, cardH, gapY);
+  if (!degenerate) barycenterPass(ordered, edges, boxes, byLayer, direction, slotStep);
 
   /** 5) 汇总。 */
-  return assemble({ source, routes, ordered, edges, boxes, byLayer, titleW, degenerate });
+  return assemble({ source, routes, ordered, edges, boxes, byLayer, titleW, degenerate, direction, layerStep, slotStep });
 }
 
 /** 正整数选项；否则默认。@param {unknown} value @param {number} fallback @returns {number} */
@@ -1289,15 +1376,19 @@ function nonNegative(value, fallback) {
 }
 
 /**
- * 层内按「入边来源 y 的中位数」稳定排序（3 轮；dify 的对称观感）。
- * 只重排**同一层内**的 y（框个子都不动），所以零重叠不受影响。
+ * 层内按「入边来源的**同层轴**坐标中位数」稳定排序（3 轮；dify 的对称观感）。
+ * 只重排**同一层内**的同层轴坐标（框子大小 / 层轴坐标都不动）⇒ 零重叠不受影响。
+ * `direction` 决定同层轴：`TB` 用 x（卡片沿 x 并排）、`LR` 用 y。
  * @param {any[]} ordered
  * @param {{from:number,to:number|null}[]} edges
  * @param {{x:number,y:number,w:number,h:number,layer:number}[]} boxes
  * @param {Map<number, number[]>} byLayer
- * @param {number} cardH @param {number} gapY
+ * @param {"TB"|"LR"} direction
+ * @param {number} slotStep 同层轴步长（TB = 卡片宽 + gapX；LR = 卡片高 + gapY）
  */
-function barycenterPass(ordered, edges, boxes, byLayer, cardH, gapY) {
+function barycenterPass(ordered, edges, boxes, byLayer, direction, slotStep) {
+  const tb = direction === "TB";
+  const slotOf = (at) => (tb ? boxes[at]?.x ?? 0 : boxes[at]?.y ?? 0);
   /** @type {number[][]} */
   const parents = ordered.map(() => []);
   for (const edge of edges) if (edge.to !== null) parents[edge.to]?.push(edge.from);
@@ -1308,7 +1399,7 @@ function barycenterPass(ordered, edges, boxes, byLayer, cardH, gapY) {
       const desired = list
         .map((at) => {
           const from = parents[at] ?? [];
-          const want = from.length ? from.reduce((sum, item) => sum + (boxes[item]?.y ?? 0), 0) / from.length : (boxes[at]?.y ?? 0);
+          const want = from.length ? from.reduce((sum, item) => sum + slotOf(item), 0) / from.length : slotOf(at);
           return { at, want };
         })
         .sort((a, b) => (a.want - b.want) || (a.at - b.at))
@@ -1316,7 +1407,10 @@ function barycenterPass(ordered, edges, boxes, byLayer, cardH, gapY) {
       byLayer.set(key, desired);
       for (let slot = 0; slot < desired.length; slot += 1) {
         const box = boxes[desired[slot]];
-        if (box) box.y = r2(PAD + slot * (cardH + gapY));
+        if (!box) continue;
+        const at = r2(PAD + slot * slotStep);
+        if (tb) box.x = at;
+        else box.y = at;
       }
     }
   }
@@ -1324,13 +1418,14 @@ function barycenterPass(ordered, edges, boxes, byLayer, cardH, gapY) {
 
 /**
  * 汇总：节点 + 正交边 + 图例 + 画布尺寸。
- * @param {{source:any,routes:any[],ordered:any[],edges:any[],boxes:any[],byLayer:Map<number,number[]>,titleW:number,degenerate:boolean}} p
+ * @param {{source:any,routes:any[],ordered:any[],edges:any[],boxes:any[],byLayer:Map<number,number[]>,titleW:number,degenerate:boolean,direction:"TB"|"LR",layerStep:number,slotStep:number}} p
  * @returns {any}
  */
 function assemble(p) {
-  const { source, routes, ordered, edges, boxes, byLayer, titleW, degenerate } = p;
-  const cardW = boxes[0]?.w ?? LAYOUT_W;
-  const cardH = boxes[0]?.h ?? LAYOUT_H;
+  const { source, routes, ordered, edges, boxes, byLayer, titleW, degenerate, direction, layerStep, slotStep } = p;
+  const tb = direction === "TB";
+  const cardW = boxes[0]?.w ?? (tb ? LAYOUT_W_TB : LAYOUT_W);
+  const cardH = boxes[0]?.h ?? (tb ? LAYOUT_H_TB : LAYOUT_H);
   /** 入 / 出度（`start` / `end` 的判定）。 */
   /** @type {number[][]} */
   const incoming = ordered.map(() => []);
@@ -1386,7 +1481,7 @@ function assemble(p) {
       lines: cardBody(node?.kind === "choice" || /^\[decision\]/i.test(String(node?.text ?? "")) ? { role: "decision", text: node?.text } : node, range, titleW),
       text: String(node?.text ?? ""),
       titleDy: TITLE_DY,
-      summaryDy: SUMMARY_DY,
+      summaryDy: tb ? SUMMARY_DY_TB : SUMMARY_DY,
     };
     shaped.title = clip(shaped.text, titleW) || `#${range[0]}`;
     shaped.summary = shaped.role === "decision" ? "分支" : summaryOf(node, range);
@@ -1399,15 +1494,27 @@ function assemble(p) {
     const from = nodes[edge.from] ?? nodes[0];
     const to = edge.to === null ? null : nodes[edge.to] ?? null;
     const sameColumn = Boolean(to) && to.layer === from.layer;
-    const back = Boolean(to) && (to.layer < from.layer || (sameColumn && to.y < from.y));
+    // `back` 的判据：层号回退；**同层**时看"同层轴"是否逆着阅读方向
+    // （TB 比 x、LR 比 y）——同一条逻辑换轴，别把 TB 的 x 当成横排的 y。
+    const back = Boolean(to) && (to.layer < from.layer || (sameColumn && (tb ? to.x < from.x : to.y < from.y)));
+    /** 端点（TB：源**底缘**中点 → 目标**顶缘**中点；LR：右缘中点 → 左缘中点）。 */
+    const fromX = tb ? r2(from.x + from.w / 2) : r2(from.x + from.w);
+    const fromY = tb ? r2(from.y + from.h) : r2(from.y + from.h / 2);
+    const toX = to ? (tb ? r2(to.x + to.w / 2) : r2(to.x)) : r2(from.x + from.w + LAYOUT_GAP_X + LAYOUT_GAP_X);
+    const toY = to ? (tb ? r2(to.y) : r2(to.y + to.h / 2)) : (tb ? r2(from.y + from.h + LAYOUT_GAP_Y + LAYOUT_GAP_Y) : r2(from.y + from.h / 2));
     const points = orthPoints({
-      fromX: r2(from.x + from.w),
-      fromY: r2(from.y + from.h / 2),
-      toX: to ? to.x : r2(from.x + from.w + LAYOUT_GAP_X + LAYOUT_GAP_X),
-      toY: to ? r2(to.y + to.h / 2) : r2(from.y + from.h / 2),
+      fromX,
+      fromY,
+      toX,
+      toY,
       sameColumn,
       back,
       dead: edge.to === null,
+      axis: tb ? "y" : "x",
+      cardW,
+      cardH,
+      gapX: slotStep - cardW,
+      gapY: layerStep - cardH,
     });
     /** 语义角色：`choice` 必需 `from` 是决策卡且带 label；`merge` = 汇入合流 / 标签"合流"。 */
     const role = edge.to === null
@@ -1428,18 +1535,19 @@ function assemble(p) {
       points,
       d: toPath(points),
       path: toPath(points),
-      anchor: labelAnchor(points),
+      anchor: labelAnchor(points, direction),
       vertical: verticalOf(points),
+      flat: horizontalOf(points),
       role,
       kind: role,
       label: edge.label === "合流" ? "" : edge.label,
       value: edge.value,
       lane: edge.routes.length ? edge.routes[0] : (edge.value !== null && Number.isFinite(edge.value) ? `d${from.line}/${edge.value}` : null),
       routes: edge.routes,
-      fromX: r2(from.x + from.w),
-      fromY: r2(from.y + from.h / 2),
-      toX: to ? r2(to.x) : r2(from.x + from.w + LAYOUT_GAP_X + LAYOUT_GAP_X),
-      toY: to ? r2(to.y + to.h / 2) : r2(from.y + from.h / 2),
+      fromX,
+      fromY,
+      toX,
+      toY,
       approx: edge.to !== null && !to,
     };
   });
@@ -1456,6 +1564,11 @@ function assemble(p) {
   const layers = [...new Set(nodes.map((node) => node.layer))].sort((a, b) => a - b);
   const width = nodes.reduce((max, node) => Math.max(max, node.x + node.w), 0) + PAD;
   const height = nodes.reduce((max, node) => Math.max(max, node.y + node.h), 0) + PAD;
+  /** 阅读序（↑/↓ 的卡片顺序）：层号升序 → 层内**阅读方向**（TB 看 x、LR 看 y）。
+   *  `readOrder` = 节点 id 数组；`layerStep/slotStep` 给视图做"滚进视野"。 */
+  const readOrder = [...nodes]
+    .sort((a, b) => (a.layer - b.layer) || (tb ? a.x - b.x : a.y - b.y) || a.line - b.line)
+    .map((node) => node.id);
   return {
     nodes,
     edges: edgeRows,
@@ -1464,6 +1577,10 @@ function assemble(p) {
     decisions: choiceLines,
     choiceLines,
     mergeLines: mergeLinesFrom(source, nodes),
+    direction,
+    layerStep: r2(layerStep),
+    slotStep: r2(slotStep),
+    readOrder,
     width: r2(width),
     height: r2(height),
     layers,
@@ -1477,6 +1594,7 @@ function assemble(p) {
       lanes: lanes.length,
       choices: choiceLines.length,
       merges: mergeLinesFrom(source, nodes).length,
+      direction,
       width: r2(width),
       height: r2(height),
     },

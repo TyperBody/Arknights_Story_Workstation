@@ -27,8 +27,10 @@
 // 类型剥离不支持无后缀解析）。
 import { SHARE_MAX, SHARE_MIN, isPanelId } from "./workbenchLayout.ts";
 
-/** 可停靠/可拼接的面板（§2.1 常量，顺序即工具栏顺序）。 */
-export type PanelId = "toolpanel" | "stage" | "preview" | "branch";
+/** 可停靠/可拼接的面板（§2.1 常量，顺序即工具栏顺序）。
+ *  `assets`（素材库）= **常驻但不默认在树里** 的 dock（task-8/9）：默认布局仍是
+ *  `toolpanel + holder + stage`，它只在 rail 里"放出"时才进树。 */
+export type PanelId = "toolpanel" | "stage" | "preview" | "branch" | "assets";
 
 /** `row` = 左右分屏；`col` = 上下分屏。 */
 export type Dir = "row" | "col";
@@ -59,6 +61,11 @@ export interface WorkbenchState {
 export type SubjectLike = Subject;
 
 const SHARE_DEFAULT = 0.5;
+
+/** 全部面板（**只在本文件里**给 `normalize` 的"全可见"兜底用；顺序 = `PANELS`）。
+ *  写成字面量而不是 import `PANELS`：`workbenchLayout` 已经 import 本文件的类型，
+ *  反向 import 会成环（`workbenchLayout` 的 `PANELS` 才是唯一真源）。 */
+const PANELS_ALL: PanelId[] = ["toolpanel", "stage", "preview", "branch", "assets"];
 
 /** 默认布局的左侧占比。 */
 export const DEFAULT_SHARE = 0.32;
@@ -118,7 +125,7 @@ export function defaultState(): WorkbenchState {
  */
 export function normalize(state: WorkbenchState, visible?: PanelId[]): WorkbenchState {
   const allow = new Set<PanelId>(
-    Array.isArray(visible) ? visible.filter(isPanelId) : (["toolpanel", "stage", "preview", "branch"] as PanelId[])
+    Array.isArray(visible) ? visible.filter(isPanelId) : PANELS_ALL
   );
   const taken = new Set<PanelId>();
 

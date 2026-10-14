@@ -36,6 +36,7 @@ import {
   forkPatch,
   graphAt,
   layoutGraph,
+  LAYOUT_DIRECTION,
   LAYOUT_ZOOM_MAX,
   LAYOUT_ZOOM_MIN,
   suggestForkOptions,
@@ -55,6 +56,12 @@ export interface BranchGraphProps {
   onPatch?: (nextText: string, caretLine?: number) => void;
   height?: number;
   onClose?: () => void;
+  /**
+   * 可选：「把预览跟到这一行」（task-10）。`onJumpToLine` 负责编辑器光标 /
+   * 舞台跟随；`onFocusLine` 由页面实现为「预览到此处」（复用 `previewUpto`）。
+   * **可选** → 不给时方向键只跳行，不碰预览。
+   */
+  onFocusLine?: (line: number) => void;
   /**
    * 窗口壳 chrome（BRIEF §2.2 / P4 的 `inspectorWindow.ts`）。
    * **可选**：不给时内容照常渲染（只少一条 `.bg-chrome`）。
@@ -104,6 +111,10 @@ interface Layout {
   width: number;
   height: number;
   degenerate: boolean;
+  /** 阅读方向（task-10）：`TB` = 竖排（默认）、`LR` = 横排。 */
+  direction: "TB" | "LR";
+  /** 阅读序：层号升序 → 层内阅读方向（↑/↓ 走它）。 */
+  readOrder: string[];
 }
 
 /** 线路配色（固定 8 色循环；节点分类色条 + 边 + 图例共用）。 */
@@ -135,6 +146,7 @@ const EMPTY_STATS = {
 /** 空布局（`layoutGraph` 理论上不抛；这里只是第二道保险）。 */
 const EMPTY_LAYOUT: Layout = {
   nodes: [], edges: [], lanes: [], choiceLines: [], width: 0, height: 0, degenerate: false,
+  direction: LAYOUT_DIRECTION, readOrder: [],
 };
 
 /** 数值 clamp。 */
@@ -174,9 +186,18 @@ export default function BranchGraph({
   onPatch,
   height = 320,
   onClose,
+  onFocusLine,
   chrome,
 }: BranchGraphProps) {
   const tr = useT();
+  /**
+   * 阅读方向（task-10）：**默认竖排 TB**（「工作流从上到下」）；HUD 的
+   * `[data-branch-action="direction"]` 切换 TB ↔ LR。方向是**视图本地状态**
+   * （窗口重新挂载就回到默认竖排），不进 `layoutGraph` 的输入图。
+   */
+  const [direction, setDirection] = useState<"TB" | "LR">(LAYOUT_DIRECTION);
+  /** 读数 / 方向键面板的宿主（焦点 + "滚进视野"都用它）。 */
+  const panFocusRef = useRef<HTMLDivElement | null>(null);
   /** 图：文本变化才重算（大脚本也只算一次）；`tr` 每语言一个稳定函数，切语言即重算。 */
   const graph: Graph = useMemo(() => {
     try {
@@ -195,14 +216,26 @@ export default function BranchGraph({
     }
   }, [text, caret]);
 
-  /** 布局（纯函数、确定性；同一 `graph` 只算一次）。 */
+  /** 布局（纯函数、确定性；同一 `graph` + 方向只算一次）。 */
   const layout: Layout = useMemo(() => {
     try {
-      return (layoutGraph(graph) ?? EMPTY_LAYOUT) as Layout;
+      return (layoutGraph(graph, { direction }) ?? EMPTY_LAYOUT) as Layout;
     } catch {
       return EMPTY_LAYOUT;
     }
-  }, [graph]);
+  }, [graph, direction]);
+
+  /** 阅读序（↑/↓ 的顺序）：布局已给；缺（手造 layout / 旧实现）时按 layer → 层内轴兜底。 */
+  const readOrder = useMemo(() => {
+    const known = new Set(layout.nodes.map((node) => node.id));
+    const declared = Array.isArray(layout.readOrder) ? layout.readOrder.filter((id) => known.has(id)) : [];
+    if (declared.length === layout.nodes.length && declared.length > 0) return declared;
+    /** 兜底：竖排按 x、横排按 y（与本文件 `direction` 同一口径）。 */
+    const axis = direction === "TB" ? "x" : "y";
+    return [...layout.nodes]
+      .sort((a, b) => (a.layer - b.layer) || (a[axis] - b[axis]) || (a.line - b.line))
+      .map((node) => node.id);
+  }, [direction, layout]);
 
   /** 手动点选（优先于光标行）；文本一变视为未点选（避免悬空 id）。 */
   const [picked, setPicked] = useState<{ text: string; id: string } | null>(null);

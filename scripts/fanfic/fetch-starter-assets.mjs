@@ -38,7 +38,24 @@ import { dirname, join, relative, resolve } from "node:path";
 import { cpus } from "node:os";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
-const STARTER_DIR = join(ROOT, "src-tauri/resources/assets/starter");
+/** argv 的一行式解析（`value`/`flag` 定义在下方；这里先用最朴素的实现）。 */
+const argOf = (name, fallback) => {
+  const hit = process.argv.slice(2).find((a) => a === name || a.startsWith(`${name}=`));
+  if (!hit) return fallback;
+  return hit === name ? "" : hit.slice(name.length + 1);
+};
+/**
+ * 打包档：
+ * - `full`     —— 历史行为：背景全量 + 立绘全差分 + 音频（≈1000 MB，全部随包）。
+ * - `starters` —— **随包预素材**：背景全量 + 立绘每 base **主差分**，**不含音频**（≈230 MB）。
+ * - `patch`    —— **补丁包**：立绘**其余差分** + 全部音频（≈2.5 GB）；用户下载后解到
+ *                 `<资源目录>/assets/starter/` 即生效（覆盖层按 canonical key 命中）。
+ */
+const PACK = (argOf("--pack", "") || "full").toLowerCase();
+/** 产出目录：`--dir` 优先；`patch` 默认落 `build/starter-patch`（不进安装包）。 */
+const STARTER_DIR = argOf("--dir", "")
+  ? resolve(ROOT, argOf("--dir", ""))
+  : resolve(ROOT, PACK === "patch" ? "build/starter-patch" : "src-tauri/resources/assets/starter");
 const CATALOG = join(ROOT, "src/akstage/catalog-data.json");
 const UPSTREAM = join(ROOT, "build/fanfic/upstream.json");
 const CURATED = join(STARTER_DIR, "curated.json");
@@ -141,6 +158,11 @@ function corpusRanking() {
 }
 
 // ── 策展 ────────────────────────────────────────────────────────────────
+/** 该 pack 是否需要音频组（`PACK` 见文件顶部）。 */
+const wantsAudio = () => PACK !== "starters";
+/** 立绘差分取哪一段（`first` = 每 base 主差分；`rest` = 其余差分/表情）。 */
+const wantsPortrait = (part) => (PACK === "starters" ? part === "first" : PACK === "patch" ? part === "rest" : true);
+
 function fileNameFor(key, extension) {
   // `torappu.prts.wiki/assets/avg/black.../bg_corridor.png` → `bg_corridor.webp`
   // 立绘带一层目录（`char_x/char_x$1.png`）→ 两级都用 `__` 连起来，避免重名；
@@ -172,22 +194,26 @@ function curate() {
     entries.push(entry);
   };
 
-  // 1) core：UI 小图，保持原格式。
-  for (const item of catalog.external ?? []) {
-    if (item.kind !== "src") continue;
-    if (!/\/assets\/scenario\/ui\/|widgets\/production\/(slide_mask|back_shadow)\./.test(item.url)) continue;
-    const key = item.url.replace(/^https?:\/\//, "");
-    push({ key, group: "core", kind: "ui", url: item.url, file: fileNameFor(key, key.split(".").pop()), quality: null });
+  // 1) core：UI 小图（`patch` 是**增量**包 —— starters 已含 UI，跳过）。
+  if (PACK !== "patch") {
+    for (const item of catalog.external ?? []) {
+      if (item.kind !== "src") continue;
+      if (!/\/assets\/scenario\/ui\/|widgets\/production\/(slide_mask|back_shadow)\./.test(item.url)) continue;
+      const key = item.url.replace(/^https?:\/\//, "");
+      push({ key, group: "core", kind: "ui", url: item.url, file: fileNameFor(key, key.split(".").pop()), quality: null });
+    }
   }
 
-  // 2) background：**全量**，语料频次降序（缺语料 → 按 catalog 排序）。
-  const bgRanked = corpus.backgrounds.length
-    ? corpus.backgrounds.map(([name, uses]) => [`${ORIGIN}/assets/avg/background/${name}.png`, uses])
-    : catalog.backgroundPaths.map((key) => [key, 0]);
-  for (const [url, uses] of bgRanked) {
-    const key = url.replace(/^https?:\/\//, "");
-    if (!backgroundPaths.has(key)) continue;
-    push({ key, group: "background", kind: "background", url, uses, file: fileNameFor(key, "webp"), quality: QUALITY.background });
+  // 2) background：**全量**，语料频次降序（缺语料 → 按 catalog 排序）。`patch` 跳过。
+  if (PACK !== "patch") {
+    const bgRanked = corpus.backgrounds.length
+      ? corpus.backgrounds.map(([name, uses]) => [`${ORIGIN}/assets/avg/background/${name}.png`, uses])
+      : catalog.backgroundPaths.map((key) => [key, 0]);
+    for (const [url, uses] of bgRanked) {
+      const key = url.replace(/^https?:\/\//, "");
+      if (!backgroundPaths.has(key)) continue;
+      push({ key, group: "background", kind: "background", url, uses, file: fileNameFor(key, "webp"), quality: QUALITY.background });
+    }
   }
 
   // 3) portrait：语料 base 频次 → 每个 base 收**全差分**。
@@ -252,8 +278,8 @@ function curate() {
     first.push({ ...entryOf(body), primary: true });
     for (const key of styles.slice(1)) rest.push(entryOf(key));
   }
-  for (const entry of first) push(entry);
-  for (const entry of rest) push(entry);
+  if (wantsPortrait("first")) for (const entry of first) push(entry);
+  if (wantsPortrait("rest")) for (const entry of rest) push(entry);
 
   // 4) audio：`story_variables.json` 里指向 `Sound_Beta_2/...` 的音频变量，按语料
   //    `$变量` 引用频次降序。URL 规则与引擎（`pack.mjs::audioUrl` /
@@ -268,7 +294,7 @@ function curate() {
       return { name, url, uses: audioUses.get(name) ?? 0 };
     })
     .sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
-  for (const item of audioRanked) {
+  for (const item of wantsAudio() ? audioRanked : []) {
     const key = item.url.replace(/^https?:\/\//, "");
     if (!/\.mp3$/.test(key)) continue;
     push({ key, group: "audio", kind: "audio", url: item.url, uses: item.uses, file: fileNameFor(key, "mp3"), quality: null });
@@ -294,7 +320,18 @@ async function ensure(entry) {
     return { bytes: size, reused: true, bytes0: size };
   }
   if (!force && missing.has(entry.key)) throw new Error(`HTTP 404（缓存）for ${entry.url}`);
-  const res = await fetch(encodeAssetUrl(entry.url), { headers: { "User-Agent": UA, Referer: "https://prts.wiki/" } });
+  // PRTS 在**高频并发**下会对正常资源偶发 404 / 中转页（限流）。实测同一张
+  // `char_002_amiya_2.png`：单独请求 200，批量并发时被记成 404。故 404 →
+  // 退避重试 2 次；仍失败才抛（调用方据此写进 missing 缓存）。
+  const url = encodeAssetUrl(entry.url);
+  const headers = { "User-Agent": UA, Referer: "https://prts.wiki/" };
+  let res;
+  for (let attempt = 1; ; attempt += 1) {
+    res = await fetch(url, { headers });
+    if (res.ok || attempt > 2) break;
+    await res.arrayBuffer().catch(() => {});
+    await new Promise((r) => setTimeout(r, 250 * attempt));
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${entry.url}`);
   const source = Buffer.from(await res.arrayBuffer());
   const head = source.subarray(0, 8).toString("latin1");

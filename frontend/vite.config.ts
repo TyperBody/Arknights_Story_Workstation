@@ -29,5 +29,8 @@ export default defineConfig({
     // 相对 Vite root（frontend/）解析 → 仓库根的 build/dist。
     outDir: '../build/dist',
     emptyOutDir: true,
+    // 桌面应用（Tauri）本地加载，主包 ~2 MB（gzip 369 KB）完全可接受：
+    // 抬阈值只为消掉 Vite 的「chunk > 500 kB」提示，不做无收益的拆包。
+    chunkSizeWarningLimit: 2500,
   },
 })

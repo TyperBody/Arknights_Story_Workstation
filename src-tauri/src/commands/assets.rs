@@ -726,15 +726,9 @@ pub struct StarterSetInfo {
     pub dir: String,
 }
 
-/// 清单里声明的**预算**（`budgetBytes`，策展脚本写进来的；缺 → 0）。
-fn starter_budget_bytes() -> u64 {
-    serde_json::from_str::<serde_json::Value>(STARTER_CURATED)
-        .ok()
-        .and_then(|v| v.get("budgetBytes").and_then(|b| b.as_u64()))
-        .unwrap_or(0)
-}
-
 /// 读清单（内置的那份）：`(条目数, 字节, 每组条目数)`。坏清单 → 全 0（不抛）。
+/// （原先另有 `starter_budget_bytes()` 读 `budgetBytes` 供展示；总量现已由
+///  `StarterSetInfo.bytes` 直接给出，故并入 summary 并删除，避免 dead_code。）
 fn starter_summary() -> (usize, u64, std::collections::BTreeMap<String, usize>) {
     let mut groups: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let Ok(value) = serde_json::from_str::<serde_json::Value>(STARTER_CURATED) else {
