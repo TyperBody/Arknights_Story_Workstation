@@ -1,0 +1,17 @@
+import { chromium } from "playwright-core";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
+const DEV = process.env.DEV_URL ?? "http://localhost:5174";
+const OUT = resolve("build/harness/shots"); mkdirSync(OUT, { recursive: true });
+const b = await chromium.launch({ executablePath: "/snap/bin/chromium", args: ["--no-sandbox"] });
+const p = await b.newPage({ viewport: { width: 1680, height: 1000 } });
+await p.addInitScript(() => { const fix = () => { const r = document.head || document.documentElement; if (!r) return; if (document.getElementById("s")) return; const s = document.createElement("style"); s.id = "s"; s.textContent = ".bookshelf-sync-warning,.dl-bar{display:none!important}"; r.appendChild(s); }; fix(); setTimeout(fix, 500); setTimeout(fix, 1500); });
+await p.goto(`${DEV}/editor/demo?text=${encodeURIComponent('[Character(name="char_002_amiya_1",fadetime=0.5)]\n[Decision(options="A;B",values="1;2")]\n[Predicate(references="1")]\n[name="阿米娅"]  A\n[Predicate(references="2")]\n[name="阿米娅"]  B\n[Predicate(references="1;2")]\n[name="阿米娅"]  merge')}`, { waitUntil: "domcontentloaded", timeout: 90000 });
+await p.waitForSelector("[data-wb-gutter]", { timeout: 40000 });
+await p.waitForTimeout(2000);
+await p.locator('[data-layout-action="save-as"]').first().evaluate((el) => el.click());
+await p.waitForTimeout(700);
+const bar = await p.locator("[data-layout-bar]").first().boundingBox();
+await p.screenshot({ path: resolve(OUT, "named-layout.png"), clip: { x: Math.max(0, bar.x - 620), y: 0, width: Math.min(1000, 1680 - Math.max(0, bar.x - 620)), height: 60 } });
+console.log("shot ok");
+await b.close();
