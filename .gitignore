@@ -15,7 +15,13 @@ dist-ssr
 
 # ============ Unified build output ============
 # Frontend bundle + installers/APK. Supersedes build/ctx & build/fanfic.
-/build/
+# 例外：`build/harness/**` 是**手工维护的验收入口**（每项自带断言 + 退出码），
+# 与 `scripts/harness/run.mjs` 一起对外、需要进版本库。
+# 注意：`/build/` 会**连目录一起**排除，导致后面的 `!/build/harness/` 无效
+#（git 的规则：父目录被排除时不能再 re-include 子路径）——必须用 `/build/*`。
+/build/*
+!/build/harness/
+!/build/harness/**
 
 # ============ Tauri ============
 src-tauri/target/
