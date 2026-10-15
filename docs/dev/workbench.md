@@ -65,6 +65,7 @@
 | **工作流竖排**（分支图 TB + ↑/↓ 切卡片） | ![vertical](images/branch-vertical.png) |
 | **新建剧本** + 工具栏三组 / 面包屑（1024 宽） | ![create](images/layout-create.png) |
 | **素材库**（预览/试听 + 拖到舞台/正文） | ![assets](images/asset-lib.png) |
+| **第三轮总览**（左侧托盘 + 面包屑 + 竖排工作流 + 素材库，↑/↓ 已选第 3/12 张） | ![round3](images/round3-overview.png) |
 
 ## 4. 回归
 
