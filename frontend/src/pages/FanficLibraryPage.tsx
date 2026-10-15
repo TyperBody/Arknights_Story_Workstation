@@ -8,6 +8,8 @@ import {
   type LocalStoryMeta,
 } from "../lib/localStories";
 import { confirmAction, showNotice } from "../lib/dialogs";
+import { useT } from "../i18n/index.ts";
+import CreatePackDialog, { type CreatedPack } from "../components/editor/CreatePackDialog";
 
 /**
  * 同人剧本目录页（`/fanfic`）。
@@ -70,6 +72,10 @@ export default function FanficLibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  /** 「新建剧本…」对话框（task-11）；无 Tauri 时按钮禁用 + title 提示。 */
+  const [createOpen, setCreateOpen] = useState(false);
+  const tr = useT();
+  const desktopCreate = inTauri();
   const seeded = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -159,6 +165,17 @@ export default function FanficLibraryPage() {
     }
   }, [refresh]);
 
+  const onCreated = useCallback(
+    (pack: CreatedPack) => {
+      setCreateOpen(false);
+      // 建完直接进编辑器（列表刷新在后台完成；失败了也不挡跳转）。
+      void refresh();
+      void showNotice(tr("editor.create.done", { title: pack.id }, `已创建「${pack.id}」`));
+      navigate(`/editor/${encodeURIComponent(pack.id)}`);
+    },
+    [navigate, refresh, tr]
+  );
+
   const openFolder = useCallback(async () => {
     if (!inTauri()) {
       setError(NO_TAURI);
@@ -213,12 +230,15 @@ export default function FanficLibraryPage() {
         </button>
         <h1>同人剧本</h1>
         <span className="fl-spacer" />
-        {packs.length > 0 && <span className="fl-count">已安装 {packs.length} 个剧本包</span>}
+        {packs.length > 0 && <span className="fl-count">{tr("fanfic.count", { count: packs.length }, `已安装 ${packs.length} 个剧本包`)}</span>}
       </div>
 
       <div className="browser-content fl-content">
         <div className="fl-toolbar">
-          <button className="btn-primary" onClick={importPacks} disabled={busy !== ""}>
+          <button className="btn-primary" data-fanfic-action="create" onClick={() => setCreateOpen(true)} disabled={busy !== ""} title={desktopCreate ? undefined : tr("editor.create.needDesktop", undefined, "新建剧本需要桌面版（Tauri）。")}>
+            {tr("editor.create.button", undefined, "新建剧本…")}
+          </button>
+          <button className="nav-btn" onClick={importPacks} disabled={busy !== ""}>
             {busy === "import" ? "导入中…" : "导入剧本包…"}
           </button>
           <button className="nav-btn" onClick={openFolder} disabled={busy !== ""}>
@@ -271,6 +291,9 @@ export default function FanficLibraryPage() {
               <code>{importCmd}</code>
             </pre>
             <div className="fl-empty-actions">
+              <button className="btn-primary" data-fanfic-action="create" onClick={() => setCreateOpen(true)} title={desktopCreate ? undefined : tr("editor.create.needDesktop", undefined, "新建剧本需要桌面版（Tauri）。")}>
+                {tr("editor.create.button", undefined, "新建剧本…")}
+              </button>
               <button className="btn-primary" onClick={importPacks} disabled={busy !== ""}>
                 {busy === "import" ? "导入中…" : "导入剧本包…"}
               </button>
@@ -324,6 +347,10 @@ export default function FanficLibraryPage() {
           </div>
         )}
       </div>
+
+      {createOpen && (
+        <CreatePackDialog onCancel={() => setCreateOpen(false)} onCreated={onCreated} />
+      )}
     </div>
   );
 }

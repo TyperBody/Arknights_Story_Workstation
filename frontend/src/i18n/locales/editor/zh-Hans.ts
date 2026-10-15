@@ -137,12 +137,14 @@ export default {
   panel: {
     title: {
       toolpanel: "工具面板",
+      assets: "素材库",
       stage: "舞台",
       preview: "预览",
       branch: "分支图",
     },
     ariaLabel: "{{title}}面板",
     branchAriaFallback: "分支图",
+    assetsPlaceholder: "素材库：预览 / 试听 / 拖拽 / 导入由素材库面板接入。",
   },
 
   diagnostics: {
@@ -415,6 +417,7 @@ export default {
     folded: "已收起",
     expandPanel: "展开面板",
     collapsePanel: "收起面板",
+    park: "收进侧边栏",
     dockBack: "停靠回工作台",
     dockWindow: "停靠窗口",
     floatWindow: "浮动窗口",
@@ -465,8 +468,10 @@ export default {
     aria: "侧边栏",
     collapse: "收起侧边栏",
     expand: "展开侧边栏",
-    hint: "侧边栏：点图标把窗口收进来／放回去；脱离出去的窗口不再在原处留洞。",
+    hint: "侧边栏：收起的窗口挂在这里，点一下放回工作台；脱离出去的窗口不再在原处留洞。",
     groupPanels: "窗口",
+    restore: "放回工作台",
+    empty: "收起的窗口会挂在这里",
   },
 
   // ── 素材库（task-B）────────────────────────────────────────

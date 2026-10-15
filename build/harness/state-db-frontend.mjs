@@ -91,11 +91,23 @@ try {
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector("[data-wb-gutter]", { timeout: 40_000 });
   await page.waitForTimeout(1500);
-  const width1 = await page.evaluate(() => Math.round(document.querySelector('[data-wb-panel="toolpanel"]').getBoundingClientRect().width));
+  // ⚠️ share 是相对**工作台容器**（不含左侧 rail）的，不是相对视口宽度：
+  // rail 一进来（60px）之后，"1500 × share" 必然差一条 rail 的宽度。
+  // 所以基准取**根 split 的实测宽**（与 `resize()` 的语义一致）。
+  const box = await page.evaluate(() => {
+    const panel = document.querySelector('[data-wb-panel="toolpanel"]');
+    const root = document.querySelector('[data-wb-split="root"]') ?? panel?.closest("[data-wb-split]") ?? panel?.parentElement;
+    return {
+      panel: Math.round(panel?.getBoundingClientRect().width ?? 0),
+      container: Math.round(root?.getBoundingClientRect().width ?? 0),
+    };
+  });
+  const width1 = box.panel;
   const shares = [...String(stored ?? "").matchAll(/%(\d+)/g)].map((m) => Number(m[1]));
   const wantShare = shares.at(-1) ?? 0;
-  t("刷新后仍是 DB 里的布局（记得住）", Math.abs(width1 - Math.round((1500 * wantShare) / 100)) < 40,
-    `reload toolpanel=${width1}px，DB 期望 ${wantShare}% → ${Math.round(1500 * wantShare / 100)}px`);
+  const want = Math.round((box.container * wantShare) / 100);
+  t("刷新后仍是 DB 里的布局（记得住）", Math.abs(width1 - want) < 40,
+    `reload toolpanel=${width1}px，容器 ${box.container}px，DB 期望 ${wantShare}% → ${want}px`);
 } finally {
   await b.close();
 }

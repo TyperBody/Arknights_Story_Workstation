@@ -4,12 +4,17 @@
 //
 // 两段：
 //   A. Node 侧（不需要浏览器）：对三份内联样例 + 仓库内置样例跑
-//      `buildGraph` → `layoutGraph`，断言 矩形零重叠 / 确定性 / 层单调 /
-//      边点集合法 / 节点尺寸 200×64 / 同层不重叠。
+//      `buildGraph` → `layoutGraph`，**两个方向各一遍**：
+//        · TB（竖排，**默认调用**）= 320×92 卡片、层 → y 单调、主轴单调、
+//          边起点贴底缘、`readOrder`（键盘漫游序）= layer → x；
+//        · LR（横排，显式 `{direction:"LR"}`）= 老的 200×64 / 层 → x。
+//      两方向都断言 矩形零重叠 / 边正交 + 拐点 ≤ 3 / 层单调 / 确定性。
 //   B. 浏览器侧（镜像 `build/ed-win-check.mjs` 的启动 + initScript 约定）：
 //      `/editor/demo?text=…` → 点「⌥ 分支图」；契约 DOM 标记缺失（并行改造未
-//      落盘）时再兜底 `/branch-demo.html`，断言 容器 / 节点 / 边 + 按 0，
-//      并写出 `build/harness/shots/{branch,branch-editor}.png`。
+//      落盘）时再兜底 `/branch-demo.html`，断言 容器 / 节点 / 边 / 默认竖排
+//      （`[data-branch-direction]="tb"` + 卡片 320×92）/ 方向切换（→ lr 200×64
+//      → 回 tb）/ 方向键漫游（↓↑ 改选中 + 读数条）/ Enter 跳行（定位滑杆）+ 按 0，
+//      并写出 `build/harness/shots/{branch,branch-vertical,branch-editor}.png`。
 //
 // 说明：
 //   · 只依赖 `playwright-core` + `node:fs` / `node:path` / `node:url`
@@ -43,6 +48,8 @@ const SAMPLE_SCRIPT = resolve(REPO, "src-tauri/resources/library/sample-fanfic/s
 const SHOTS = resolve(REPO, "build/harness/shots");
 const SHOT_BRANCH = resolve(SHOTS, "branch.png");
 const SHOT_EDITOR = resolve(SHOTS, "branch-editor.png");
+/** 竖排（默认）视图的截图 —— 用户要的"工作流竖着编排"。 */
+const SHOT_VERTICAL = resolve(SHOTS, "branch-vertical.png");
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 const DEV_ORIGIN = DEV.replace(/\/+$/, "").replace(/:\d+$/, "");
 const DEV_PORT = Number(new URL(DEV).port || 80);
@@ -51,6 +58,13 @@ const PORT_SCAN = 12;
 
 const NODE_W = 200;
 const NODE_H = 64;
+/** 竖排（TB，默认）卡片：320×92 —— 与旧横排（LR）200×64 各自成对。 */
+const NODE_W_TB = 320;
+const NODE_H_TB = 92;
+/** 方向 → 期望卡片尺寸（`layoutGraph(graph, {direction})`）。 */
+const SIZES = { TB: { w: NODE_W_TB, h: NODE_H_TB }, LR: { w: NODE_W, h: NODE_H } };
+/** `checkSample` 覆盖的方向：TB（默认、主口径）在前。 */
+const DIRECTIONS = ["TB", "LR"];
 /** 契约 `role` 词表。 */
 const CONTRACT_ROLES = new Set(["main", "choice", "merge", "back"]);
 /** 仓库里并行落盘的另一套（位置）词表；两套都认，但都要是已知值。 */
@@ -142,8 +156,8 @@ function pointsWrong(points) {
 /** 决策节点（两套 role 词表都认；不看 `kind`，避免 `merge` / `text` 混进来）。 */
 const decisionNodes = (out) => (out?.nodes ?? []).filter((node) => DECISION_ROLES.has(node?.role));
 
-/** 规范化一次 `layoutGraph` 输出。 */
-function normalize(out) {
+/** 规范化一次 `layoutGraph` 输出。`size` = 该方向的期望卡片尺寸。 */
+function normalize(out, size = SIZES.TB) {
   const rawNodes = Array.isArray(out?.nodes) ? out.nodes : [];
   const edges = Array.isArray(out?.edges) ? out.edges : [];
   const edgesAll = Array.isArray(out?.edgesAll) && out.edgesAll.length ? out.edgesAll : edges;
@@ -151,11 +165,11 @@ function normalize(out) {
     id: String(node?.id ?? "?"),
     x: Number(node?.x ?? 0),
     y: Number(node?.y ?? 0),
-    w: Number(node?.w ?? NODE_W),
-    h: Number(node?.h ?? NODE_H),
+    w: Number(node?.w ?? size.w),
+    h: Number(node?.h ?? size.h),
   }));
   const roleUnknown = rawNodes.filter((node) => !ALL_ROLES.has(node?.role)).map((node) => `${node?.id}:${node?.role}`);
-  const sizeMismatch = rects.filter((rect) => rect.w !== NODE_W || rect.h !== NODE_H).map((rect) => `${rect.id}:${rect.w}x${rect.h}`);
+  const sizeMismatch = rects.filter((rect) => rect.w !== size.w || rect.h !== size.h).map((rect) => `${rect.id}:${rect.w}x${rect.h}`);
   return { rawNodes, edges, edgesAll, rects, roleUnknown, sizeMismatch, byId: new Map(rects.map((rect) => [rect.id, rect])) };
 }
 
@@ -195,27 +209,74 @@ function declaredLayers(edges, layerOfId, has) {
   return layers;
 }
 
+/**
+ * 轮询"节点卡片尺寸 + 方向属性"到达期望值（React 提交与 Playwright 读取之间
+ * 有微任务间隙；这里断言的是**最终**几何，不是某一拍的中间态）。
+ * @param {import("playwright-core").Page} page
+ * @param {"TB"|"LR"} want
+ * @param {number} [timeoutMs]
+ */
+async function waitForCards(page, want, timeoutMs = 3000) {
+  const size = SIZES[want];
+  const wantDir = want.toLowerCase();
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  do {
+    last = await page.evaluate(() => ({
+      dir: document.querySelector('[data-branch-pan="1"]')?.getAttribute("data-branch-direction") ?? null,
+      sizes: [...new Set([...document.querySelectorAll("[data-branch-node]")].map((node) => {
+        const rect = node.querySelector("rect");
+        return `${Number(rect?.getAttribute("width") ?? 0)}x${Number(rect?.getAttribute("height") ?? 0)}`;
+      }))],
+    })).catch(() => null);
+    if (last && last.dir === wantDir && last.sizes.length > 0
+      && last.sizes.every((row) => row === `${size.w}x${size.h}`)) return { ok: true, ...last, tries: Math.round((timeoutMs - (deadline - Date.now())) / 150) };
+    await page.waitForTimeout(150);
+  } while (Date.now() < deadline);
+  return { ok: false, ...(last ?? { dir: null, sizes: [] }) };
+}
+
+/**
+ * "点得动就点，点不动（被浮层盖住 / 正在重渲染）就退化为 DOM `click()`"。
+ * 断言的是**行为**（方向切了、面板开了），不是"这一像素没被挡"。
+ * @param {import("playwright-core").Locator} locator
+ */
+async function softClick(locator) {
+  const ok = await locator.click({ timeout: 6000 }).then(() => true).catch(() => false);
+  if (!ok) await locator.evaluate((el) => /** @type {HTMLElement} */ (el).click()).catch(() => {});
+  return ok;
+}
+
 // ── A 段：单个样例的全部断言 ────────────────────────────────────
 /**
+ * 同一份样例：竖排（TB，默认）/ 横排（LR）各跑一遍；几何断言按 `axis` 换轴。
+ * TB 那次**不传 options**（顺带证明「默认 = 竖排」），LR 那次显式传 `{direction:"LR"}`。
  * @param {{id:string,title:string,text:string,minDecisions?:number,maxDecisions?:number,
  *          minSpeakers?:number,deterministic?:boolean}} spec
  * @param {Function} layoutGraph
  * @param {Function} buildGraph
+ * @param {"TB"|"LR"} direction
  */
-function checkSample(spec, layoutGraph, buildGraph) {
-  const tag = `[${spec.id}] ${spec.title}`;
+function checkSample(spec, layoutGraph, buildGraph, direction = "TB") {
+  const tb = direction === "TB";
+  /** 主轴（层的方向）：TB = y、LR = x；同层轴（层内）正好相反。 */
+  const axis = tb ? "y" : "x";
+  const slotAxis = tb ? "x" : "y";
+  const size = SIZES[direction];
+  const tag = `[${spec.id}/${direction}] ${spec.title}`;
   let graph;
   let layout;
   try {
     graph = buildGraph(spec.text);
-    layout = layoutGraph(graph);
+    // TB = **默认调用**（不传 options）：断言"不传就是竖排"。
+    layout = tb ? layoutGraph(graph) : layoutGraph(graph, { direction });
   } catch (error) {
     check(`${tag} 不抛异常`, `${error?.name ?? "Error"}: ${error?.message ?? error} @ ${repoFrame(error)}`, false);
     return null;
   }
   check(`${tag} 不抛异常`, `graph.nodes=${graph?.nodes?.length ?? "?"} layout.nodes=${layout?.nodes?.length ?? "?"}`, true);
 
-  const norm = normalize(layout);
+  const norm = normalize(layout, size);
   const n = norm.rects.length;
   const edges = norm.edgesAll;
 
@@ -232,8 +293,12 @@ function checkSample(spec, layoutGraph, buildGraph) {
     badPairs.length ? { pairs: badPairs, checked: (n * (n - 1)) / 2 } : `pairs=0/${(n * (n - 1)) / 2}`,
     badPairs.length === 0);
 
-  // 2) 节点尺寸 200×64。
-  check(`${tag} 节点尺寸 ${NODE_W}×${NODE_H}`, norm.sizeMismatch.length ? norm.sizeMismatch.slice(0, 3) : `${n} 个全部一致`, norm.sizeMismatch.length === 0);
+  // 2) 节点尺寸：TB = 320×92、LR = 200×64（按 `direction` 换）。
+  check(`${tag} 节点尺寸 ${size.w}×${size.h}`, norm.sizeMismatch.length ? norm.sizeMismatch.slice(0, 3) : `${n} 个全部一致`, norm.sizeMismatch.length === 0);
+
+  // 2b) 方向回执：默认（不传 options）必须是 TB；`stats.direction` 同步。
+  const gotDir = layout?.direction ?? layout?.stats?.direction ?? null;
+  check(`${tag} direction 回执 = ${direction}`, { direction: layout?.direction, stats: layout?.stats?.direction }, gotDir === direction);
 
   // 3) role 词表（契约 / 位置两套都认，但都要是已知值）。
   check(`${tag} role 词表合法（契约 / 位置两套都认）`, norm.roleUnknown.length ? norm.roleUnknown.slice(0, 3) : `role ok (${n})`, norm.roleUnknown.length === 0);
@@ -248,6 +313,41 @@ function checkSample(spec, layoutGraph, buildGraph) {
   if (edges.length) {
     const curved = edges.filter((edge) => (Array.isArray(edge?.points) ? edge.points.length > 2 : false) || (typeof edge?.d === "string" && /[CQAS]/.test(edge.d)));
     check(`${tag} 走过曲线/折线的边（观测，不设阈值）`, `${curved.length}/${edges.length}`, true);
+  }
+
+  // 4c) 正交（TB 主口径）：每段要么平行主轴、要么平行同层轴；拐点 ≤ 3。
+  const orthBad = [];
+  for (const edge of edges) {
+    const points = Array.isArray(edge?.points) ? edge.points : [];
+    for (let at = 1; at < points.length; at += 1) {
+      const dx = Math.abs(points[at][0] - points[at - 1][0]);
+      const dy = Math.abs(points[at][1] - points[at - 1][1]);
+      if (dx > 1e-6 && dy > 1e-6) orthBad.push(`${edge?.from}->${edge?.to}@${at}`);
+    }
+    if (points.length > 4) orthBad.push(`${edge?.from}->${edge?.to}:points=${points.length}`);
+  }
+  check(`${tag} 边正交（每段水平/垂直）+ 拐点 ≤ 3`, orthBad.length ? orthBad.slice(0, 3) : `edges=${edges.length}`, orthBad.length === 0);
+
+  // 4d) TB 专项：至少一条边带**主轴方向**的段（竖排 = 从上往下），
+  //     且跨层边的起点贴在源卡的主轴**下缘**（TB）/ 主轴**右缘**（LR）。
+  if (tb && edges.length) {
+    const withPrimary = edges.filter((edge) => Array.isArray(edge?.points) && edge.points.some((point, at) => at > 0
+      && Math.abs(point[0] - edge.points[at - 1][0]) < 0.5 && Math.abs(point[1] - edge.points[at - 1][1]) > 0.5));
+    check(`${tag} 至少一条边有竖段（TB 从上往下）`, `${withPrimary.length}/${edges.length}`, withPrimary.length > 0);
+  }
+  if (edges.length) {
+    const offEdge = [];
+    for (const edge of edges) {
+      const from = norm.byId.get(String(edge?.from));
+      if (!from || !Array.isArray(edge?.points) || !edge.points.length) continue;
+      const start = edge.points[0];
+      const want = tb
+        ? { v: from.y + from.h, u: from.x + from.w / 2 }
+        : { v: from.x + from.w, u: from.y + from.h / 2 };
+      const got = tb ? { v: start[1], u: start[0] } : { v: start[0], u: start[1] };
+      if (Math.abs(got.v - want.v) > 0.5 || Math.abs(got.u - want.u) > 0.5) offEdge.push(`${edge.from}->${edge.to}: ${JSON.stringify(start)} ≠ ${JSON.stringify(want)}`);
+    }
+    check(`${tag} 边起点贴在源卡${tb ? "底缘" : "右缘"}中点`, offEdge.length ? offEdge.slice(0, 2) : `edges=${edges.length}`, offEdge.length === 0);
   }
 
   // 5) 层单调：非回边 `from.layer < to.layer`。
@@ -297,11 +397,40 @@ function checkSample(spec, layoutGraph, buildGraph) {
   }
   check(`${tag} 同层矩形不重叠（层号声明 ${declared.size} 个）`, sameLayerBad.length ? sameLayerBad.slice(0, 2) : "ok", sameLayerBad.length === 0);
 
+  // 7b) 主轴单调：`layer` → 主轴坐标单调（TB：层越深 y 越大）。
+  const layersSeen = [...new Set(norm.rawNodes.map((node) => layerOf(layout, node?.id)))].sort((a, b) => a - b);
+  const axisBad = [];
+  for (let i = 1; i < layersSeen.length; i += 1) {
+    const above = norm.rects.filter((rect) => layerOf(layout, rect.id) === layersSeen[i - 1]);
+    const below = norm.rects.filter((rect) => layerOf(layout, rect.id) === layersSeen[i]);
+    if (!above.length || !below.length) continue;
+    const a = Math.max(...above.map((rect) => (tb ? rect.y + rect.h : rect.x + rect.w)));
+    const b = Math.min(...below.map((rect) => (tb ? rect.y : rect.x)));
+    if (!(b >= a - 1e-6)) axisBad.push(`L${layersSeen[i - 1]}→L${layersSeen[i]}: ${a} > ${b}`);
+  }
+  check(`${tag} 主轴单调（层 ${layersSeen.length} 层，${axis} 递增）`, axisBad.length ? axisBad.slice(0, 2) : "ok", axisBad.length === 0);
+
+  // 7c) 阅读序（键盘 ↑/↓ 的顺序）：层号升序 → 层内**阅读方向**升序。
+  const readSeq = Array.isArray(layout?.readOrder) ? layout.readOrder.map(String) : null;
+  if (readSeq) {
+    const wantRead = [...norm.rawNodes]
+      .sort((a, b) => (layerOf(layout, a?.id) - layerOf(layout, b?.id))
+        || ((Number(a?.[slotAxis]) || 0) - (Number(b?.[slotAxis]) || 0))
+        || ((Number(a?.line) || 0) - (Number(b?.line) || 0)))
+      .map((node) => String(node?.id));
+    const readOk = readSeq.length === wantRead.length && readSeq.every((id, at) => id === wantRead[at]);
+    check(`${tag} readOrder = layer → ${slotAxis} 升序（键盘漫游顺序）`,
+      readOk ? `ok(${readSeq.length})` : { got: readSeq.slice(0, 6), want: wantRead.slice(0, 6) },
+      readOk);
+  } else {
+    skip(`${tag} readOrder`, "布局未声明 `readOrder`（视图按 layer → 层内轴兜底）");
+  }
+
   // 8) 确定性：两次调用 JSON 全等（内置样例按任务书豁免）。
   if (spec.deterministic !== false) {
     let again;
     try {
-      again = JSON.stringify(layoutGraph(buildGraph(spec.text)));
+      again = JSON.stringify(tb ? layoutGraph(buildGraph(spec.text)) : layoutGraph(buildGraph(spec.text), { direction }));
     } catch (error) {
       again = `THROW ${error}`;
     }
@@ -478,9 +607,13 @@ check("layoutGraph 可用（未抛出，schema 有 nodes[]）",
 let sampleB = null;
 let sampleC = null;
 if (layoutGraph) {
-  checkSample({ id: "A", title: "无决策：纯对白/旁白", text: SAMPLE_A, maxDecisions: 0 }, layoutGraph, buildGraph);
-  sampleB = checkSample({ id: "B", title: "一个决策两条线 + 合流", text: SAMPLE_B, minDecisions: 1 }, layoutGraph, buildGraph);
-  sampleC = checkSample({ id: "C", title: "三方说话 + 两个决策（含嵌套）", text: SAMPLE_C, minDecisions: 2, minSpeakers: 3 }, layoutGraph, buildGraph);
+  // 三份内联样例 × 两个方向：TB（默认）在前，LR 复用同一套断言（按轴换）。
+  for (const direction of DIRECTIONS) {
+    checkSample({ id: "A", title: "无决策：纯对白/旁白", text: SAMPLE_A, maxDecisions: 0 }, layoutGraph, buildGraph, direction);
+    const b = checkSample({ id: "B", title: "一个决策两条线 + 合流", text: SAMPLE_B, minDecisions: 1 }, layoutGraph, buildGraph, direction);
+    const c = checkSample({ id: "C", title: "三方说话 + 两个决策（含嵌套）", text: SAMPLE_C, minDecisions: 2, minSpeakers: 3 }, layoutGraph, buildGraph, direction);
+    if (direction === "TB") { sampleB = b; sampleC = c; }
+  }
 
   // 分支语义的软观测：layout 认了就必须对（没认不算失败）。
   for (const [name, result] of [["B", sampleB], ["C", sampleC]]) {
@@ -493,13 +626,15 @@ if (layoutGraph) {
 
   // 仓库内置样例：只要求 不抛 + 零重叠（确定性按任务书豁免）。
   if (existsSync(SAMPLE_SCRIPT)) {
-    checkSample({
-      id: "S",
-      title: "内置样例 library/sample-fanfic/script.txt",
-      text: readFileSync(SAMPLE_SCRIPT, "utf8"),
-      minDecisions: 1,
-      deterministic: false,
-    }, layoutGraph, buildGraph);
+    for (const direction of DIRECTIONS) {
+      checkSample({
+        id: "S",
+        title: "内置样例 library/sample-fanfic/script.txt",
+        text: readFileSync(SAMPLE_SCRIPT, "utf8"),
+        minDecisions: 1,
+        deterministic: false,
+      }, layoutGraph, buildGraph, direction);
+    }
   } else {
     skip("[S] 内置样例脚本", `不存在 ${SAMPLE_SCRIPT}`);
   }
@@ -513,13 +648,19 @@ try {
   await page.goto(`${devOrigin}/editor/demo?text=${encodeURIComponent(SAMPLE_B)}`, { waitUntil: "domcontentloaded" });
   // 编辑器页依赖 P5 的接线（`readWindowState` 等）：起不来时直接走 `/branch-demo.html`
   // 兜底（那是 T6 自己的入口，只挂 BranchGraph，断言同一套契约标记）。
+  // 编辑器页首帧要等 i18n / workbench / rail 都水合完（并行任务在同一个
+  // dev server 上热更新时会慢一拍）：给 30s，仍起不来才退回 /branch-demo.html。
   const editorUp = await page
-    .waitForSelector("textarea.ed-textarea", { timeout: 12000 })
+    .waitForSelector("textarea.ed-textarea", { timeout: 30000 })
     .then(() => true)
     .catch(() => false);
   if (!editorUp) {
     console.log("… 编辑器页未就绪（P5 接线中）→ 走 /branch-demo.html");
   } else {
+  // 编辑器页还要等**chrome 水合完**（定位条 / 工具条）：并行任务在同一个 dev
+  // server 上热更新时，`textarea` 先到、面板后到；不等就会"半页"跑断言。
+  await page.locator('input[type="range"]').first().waitFor({ state: "attached", timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(400);
   const textareaCount = await page.locator("textarea.ed-textarea").count();
   check("浏览器 textarea.ed-textarea 存在", textareaCount, textareaCount >= 1);
 
@@ -529,7 +670,9 @@ try {
   const tab = (await legacyTab.count()) ? legacyTab.first() : anyTab.first();
   if (await tab.count()) {
     if (await tab.isEnabled()) {
-      await tab.click({ timeout: 8000 }).catch(() => {});
+      // 点得动就点；被别的浮层盖住（toolbar 上的横幅）时退化为 DOM `click()`
+      // —— 断言的是"开关能开分支图"，不是"这一像素没被挡"。
+      await softClick(tab);
       // 面板可能是懒加载 / 正在改写：给契约标记与 legacy DOM 各 ~4s。
       await Promise.race([
         page.locator('[data-branch-graph="1"]').first().waitFor({ state: "attached", timeout: 4000 }).catch(() => {}),
@@ -587,6 +730,88 @@ try {
     check("浏览器 节点（[data-branch-node] / .ed-graph-node）≥ 1", { nodes, edges: paths, emptyState }, nodes >= 1);
     check('浏览器 边 path（[data-branch-path="1"] / graph 层 path）≥ 1', { edges: paths }, paths >= 1);
     if (isMarker) {
+      // 卡片几何：默认（竖排）320×92；按 `[data-branch-direction]` 读页面当前口径。
+      const dirAttr = await page.locator('[data-branch-pan="1"]').first().getAttribute("data-branch-direction").catch(() => null);
+      const curDir = dirAttr === "lr" ? "LR" : "TB";
+      const want = SIZES[curDir];
+      const sized = await waitForCards(page, curDir);
+      check(`浏览器 卡片尺寸 = ${want.w}×${want.h}（${curDir}）`,
+        sized.ok ? `${sized.sizes.length} 种 · direction=${sized.dir}` : sized,
+        sized.ok === true);
+
+      // 默认方向 = 竖排：`[data-branch-direction]` 必须存在且是 TB（或至少不是 lr）。
+      check("浏览器 默认方向 = 竖排（[data-branch-direction] 非 lr）", dirAttr, dirAttr !== "lr");
+
+      // 方向键漫游：面板聚焦 → ↓ 选下一张、↑ 回上一张、Home/End 跳首末。
+      const panSel = '[data-branch-pan="1"]';
+      await page.locator(panSel).first().click({ position: { x: 10, y: 10 }, timeout: 6000 }).catch(() => {});
+      await page.waitForTimeout(300);
+      const readSel = async () => page.evaluate(() => {
+        const picked = document.querySelector("[data-branch-node].is-picked");
+        const hint = document.querySelector('[data-branch-hint-keys="1"]');
+        return {
+          picked: picked ? (picked.getAttribute("data-node") ?? picked.getAttribute("data-branch-node")) : null,
+          hint: (hint?.textContent ?? "").trim(),
+        };
+      });
+      const before = await readSel();
+      await page.keyboard.press("ArrowDown").catch(() => {});
+      await page.waitForTimeout(250);
+      const afterDown = await readSel();
+      await page.keyboard.press("ArrowUp").catch(() => {});
+      await page.waitForTimeout(250);
+      const afterUp = await readSel();
+      check("浏览器 ↓ 切换选中卡片（选中 id 变化）",
+        { before: before.picked, after: afterDown.picked },
+        afterDown.picked !== null && afterDown.picked !== before.picked);
+      check("浏览器 ↑ 回到上一张（id 复原）",
+        { want: before.picked, got: afterUp.picked },
+        afterUp.picked === before.picked);
+      check("浏览器 键位读数条 [data-branch-hint-keys] 跟着更新",
+        { hint: afterDown.hint.slice(0, 40) },
+        afterDown.hint.length > 0 && afterDown.hint !== before.hint);
+
+      // Enter = 跳到该行 + （编辑器页）预览跟到该行：定位滑杆 / 数字框的 value
+      // = 选中卡片的行号。契约标记优先，滑杆缺失（/branch-demo.html）时跳过。
+      const scrub = page.locator('.ed-scrub input[type="range"]').first();
+      if (await scrub.count()) {
+        await page.locator(panSel).first().click({ position: { x: 10, y: 10 }, timeout: 6000 }).catch(() => {});
+        await page.waitForTimeout(250);
+        const pickedNow = await page.evaluate(() => {
+          const node = document.querySelector("[data-branch-node].is-picked");
+          return node ? (node.getAttribute("data-branch-layer") === null ? null : node.getAttribute("data-node")) : null;
+        });
+        const wantLine = await page.evaluate((id) => {
+          const node = id ? document.querySelector(`[data-branch-node="${id}"]`) : null;
+          const title = node?.querySelector("title")?.textContent ?? "";
+          const matched = /^#(\d+)/.exec(title);
+          return matched ? Number(matched[1]) : null;
+        }, pickedNow);
+        await page.keyboard.press("Enter").catch(() => {});
+        await page.waitForTimeout(600);
+        const slider = Number(await scrub.inputValue().catch(() => "-1"));
+        check("浏览器 Enter = 跳到该行（定位滑杆 = 卡片首行）",
+          { picked: pickedNow, wantLine, slider },
+          wantLine !== null && slider === wantLine);
+      } else {
+        skip("浏览器 Enter → 预览跟到该行", "页面上没有 .ed-scrub 定位滑杆（非编辑器页）");
+      }
+
+      // 漫游序自洽：`data-branch-read-index` 必须与 `readOrder` 的 DOM 顺序一致
+      // （点选 / ↑↓ 都走它，跑偏了就会"跳着选"）。
+      const indexOk = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll("[data-branch-node]")]
+          .map((el) => ({ id: el.getAttribute("data-node"), at: Number(el.getAttribute("data-branch-read-index")) }))
+          .filter((row) => Number.isFinite(row.at))
+          .sort((a, b) => a.at - b.at);
+        const want = [...document.querySelectorAll("[data-branch-node]")]
+          .map((el) => ({ id: el.getAttribute("data-node"), at: Number(el.getAttribute("data-branch-read-index")), layer: Number(el.getAttribute("data-branch-layer")) }))
+          .filter((row) => Number.isFinite(row.at))
+          .sort((a, b) => (a.layer - b.layer) || (a.at - b.at));
+        return { n: rows.length, contiguous: rows.every((row, i) => row.at === i), layersSorted: want.every((row, i) => i === 0 || row.layer >= want[i - 1].layer) };
+      });
+      check("浏览器 漫游序自洽（read-index 连续 + 层号不倒退）", indexOk, indexOk.n > 0 && indexOk.contiguous && indexOk.layersSorted);
+
       const layers = await page.locator("[data-branch-layer]").count();
       check("浏览器 [data-branch-layer] 存在", layers, layers >= 1);
       const pan = await page.locator('[data-branch-pan="1"]').count();
@@ -596,17 +821,44 @@ try {
       const chromeRoot = await page.locator('[data-chrome="branch"]').count();
       check("浏览器 chrome（data-chrome=branch + .bg-chrome + .bg-fold + ⤢ 适配）",
         { chromeRoot, fold, fit: fitCount }, chromeRoot >= 1 && fold >= 1 && fitCount >= 1);
+      // 方向切换按钮：`[data-branch-action="direction"]` 点一下 → data-branch-direction=lr。
+      const dirBtn = page.locator('[data-branch-action="direction"]');
+      const dirBtnCount = await dirBtn.count();
+      check('浏览器 方向按钮 [data-branch-action="direction"] 存在', dirBtnCount, dirBtnCount >= 1);
+      if (dirBtnCount) {
+        /** 读当前口径（选中的方向按钮可能被预览 iframe 的 openPreview 重渲染挤掉，读 DOM 更稳）。 */
+        const dirNow = () => page.locator('[data-branch-pan="1"]').first().getAttribute("data-branch-direction").catch(() => null);
+        await softClick(dirBtn.first());
+        await page.waitForTimeout(500);
+        if ((await dirNow()) !== "lr") {
+          await softClick(page.locator('[data-branch-action="direction"]').first());
+          await page.waitForTimeout(700);
+        }
+        const flipped = await waitForCards(page, "LR");
+        check("浏览器 切换 → 横排（direction=lr 且卡片 200×64）",
+          { direction: flipped.dir, sizes: flipped.sizes },
+          flipped.ok === true);
+        await softClick(page.locator('[data-branch-action="direction"]').first());
+        await page.waitForTimeout(500);
+        if ((await dirNow()) !== "tb") await softClick(page.locator('[data-branch-action="direction"]').first());
+        const back = await waitForCards(page, "TB");
+        check("浏览器 再点 → 回竖排（direction=tb）", { direction: back.dir, sizes: back.sizes }, back.ok === true);
+        // 竖排截图（用户要的"竖的编排"）：单独出一张，别和横排混。
+        await page.locator(found.root).first().screenshot({ path: SHOT_VERTICAL, timeout: 10000 }).catch(() => {});
+        check("截图 branch-vertical.png（竖排）", existsSync(SHOT_VERTICAL) ? describe(SHOT_VERTICAL) : "缺失", existsSync(SHOT_VERTICAL) && statSync(SHOT_VERTICAL).size > 0);
+      }
+
       const edgeTagged = await page.locator("[data-branch-edge]").count();
       check('浏览器 [data-branch-edge="1"] 与 [data-branch-path="1"] 并存', { edgeTagged, paths }, edgeTagged >= 1 && paths >= 1);
       /** 空态文案：同一脚本去掉 Decision 后**逐字**在页面上（人话提示）。 */
-      const sample = await page.locator("textarea").first().inputValue().catch(() => "");
+      const sample = await page.locator("textarea.ed-textarea").first().inputValue().catch(() => "");
       if (sample) {
         const noDecision = sample.split("\n").filter((line) => !/\[Decision|\[Predicate/.test(line)).join("\n");
-        await page.locator("textarea").first().fill(noDecision).catch(() => {});
+        await page.locator("textarea.ed-textarea").first().fill(noDecision).catch(() => {});
         await page.waitForTimeout(700);
         const text = (await page.locator('[data-branch-empty="1"]').textContent().catch(() => "")) ?? "";
         check("浏览器 无 Decision 时 [data-branch-empty=\"1\"] 人话提示", text.trim(), text.includes("这个剧本还没有分支：插入 [Decision] 后这里会画出走向"));
-        await page.locator("textarea").first().fill(sample).catch(() => {});
+        await page.locator("textarea.ed-textarea").first().fill(sample).catch(() => {});
         await page.waitForTimeout(600);
       } else {
         const empty = await page.locator('[data-branch-empty="1"]').textContent().catch(() => null);

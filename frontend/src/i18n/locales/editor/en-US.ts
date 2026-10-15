@@ -134,12 +134,14 @@ export default {
   panel: {
     title: {
       toolpanel: "Tool panel",
+      assets: "Assets",
       stage: "Stage",
       preview: "Preview",
       branch: "Branch graph",
     },
     ariaLabel: "{{title}} panel",
     branchAriaFallback: "Branch graph",
+    assetsPlaceholder: "Asset library: preview / audition / drag / import land in this panel.",
   },
 
   diagnostics: {
@@ -417,6 +419,7 @@ export default {
     folded: "Collapsed",
     expandPanel: "Expand panel",
     collapsePanel: "Collapse panel",
+    park: "Park into the sidebar",
     dockBack: "Dock back into the workbench",
     dockWindow: "Dock the window",
     floatWindow: "Float the window",
@@ -469,8 +472,10 @@ export default {
     aria: "Sidebar",
     collapse: "Collapse sidebar",
     expand: "Expand sidebar",
-    hint: "Sidebar: click an icon to dock a window back / away; detached windows no longer leave a hole behind.",
+    hint: "Sidebar: parked windows hang here; click one to put it back. Detached windows no longer leave a hole behind.",
     groupPanels: "Windows",
+    restore: "Put back into the workbench",
+    empty: "Parked windows hang here",
   },
 
   // ── Asset library (task-B) ──────────────────────────────

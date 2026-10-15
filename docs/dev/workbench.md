@@ -14,14 +14,22 @@
 | `inspectorWindow.ts` / `PanelChrome.tsx` | `PanelChromeProps{title,ariaLabel,visible,onToggle?,onSelect?,active?}` + chrome 控件 |
 | `stageZoom.ts` | 舞台缩放纯数学：`MIN .25 / MAX 2 / DEFAULT 1 / WHEEL_STEP .1`、`clampZoom/fitZoom/zoomAt`（滚轮锚点保值） |
 | `StagePane.tsx` | 16:9 舞台：滚轮/±/适配/1:1/百分比；**缩放只改 `viewBox`**，几何 px 不变 |
-| `BranchGraph.tsx` + `src/akstage/local/branchGraph.js` | dify 风 DAG：`layoutGraph()` 分层 + 正交折线 + 零重叠；`⤢ 适配`(0)、滚轮缩放、拖空白平移 |
+| `BranchGraph.tsx` + `src/akstage/local/branchGraph.js` | 分层 DAG（**默认竖排 TB**，从上到下）：`layoutGraph()` 分层 + 正交折线 + 零重叠；`⤢ 适配`(0)、滚轮缩放、拖空白平移；**方向切换** `[data-branch-action="direction"]`（TB ⇄ LR）+ **方向键漫游**（↑/↓/`j`/`k`/Home/End/Enter） |
+
+> **竖排（TB）与横排（LR）**（2026-10-15，用户原话「工作流改成竖的编排 从上到下 方向键可以快速切换卡片预览」）
+> · `layoutGraph(graph, { direction })`：**默认 `"TB"`**（不传就是竖排）；`"LR"` = 老的 dify 横排，几何逐字节不变（只多出 `direction/layerStep/slotStep/readOrder` 与边上的 `flat`）。
+> · TB：`layer` → **y**（同层沿 x 打包 + 重心排序换轴）；卡片 **320×92**（退化 240×52）；正交折线「竖 → 横 → 竖」，起点 = **源卡底缘中点**、终点 = 目标卡顶缘中点；LR 沿用 200×64 + 「横 → 竖 → 横」。
+> · 层号 → 主轴坐标**单调**、同层卡片边到边 = `gap`（32）、矩形两两不重叠 —— 两方向都由 selftest + harness 断言。
+> · `layoutGraph` 输出 `direction`、`layerStep/slotStep`（视图"滚进视野"用）与 `readOrder`（键盘 ↑/↓ 的顺序 = 层号升序 → 层内阅读方向）。
+> · **与 rail 的分工**（本仓库自己的口径，不是"抄 vscode"）：rail（`data-ed-rail`，task-8）管**窗口的显隐/收纳**（点图标收起或放出整条面板）；flow（分支图）管**一份剧本内部的阅读序** —— 焦点在 `[data-branch-pan]` 上时 ↑/↓/`j`/`k`/Home/End 才是翻卡片，`Enter` 才落到编辑器/预览。两者互不抢键：rail 只管面板，flow 只管"读到哪一张"。
 
 ### DOM 契约（harness 锚点，只增不改）
 
 `[data-workbench]`、`[data-wb-panel="<id>"]`、`[data-wb-gutter]`、`[data-wb-overlay][data-wb-drop]`、
 `[data-win="<title>"]`、`.ed-win-bar`、`.ed-win-btn`；
 舞台：`[data-stage-pane]`、`[data-stage-svg]`、`[data-stage-status="zoom"]`、`[data-stage-action="zoom-in|zoom-out|zoom-reset|fit|zoom-1|zoom-05"]`、`[data-chrome="stage"]`；
-分支图：`[data-branch-graph]`、`[data-branch-node]`、`[data-branch-layer]`、`[data-branch-edge]`、`[data-branch-path]`、`[data-branch-pan]`、`[data-branch-action="fit"]`、`[data-branch-empty]`、`[data-chrome="branch"]`。
+分支图：`[data-branch-graph]`、`[data-branch-node]`、`[data-branch-layer]`、`[data-branch-edge]`、`[data-branch-path]`、`[data-branch-pan]`、`[data-branch-action="fit"]`、`[data-branch-empty]`、`[data-chrome="branch"]`、
+**task-10 追加**：`[data-branch-pan][data-branch-direction="tb|lr"]`（当前阅读方向）、`[data-branch-action="direction"]`（TB ⇄ LR 开关，`aria-pressed` = 是否竖排）、`[data-branch-hint-keys="1"]`（`role="status"` 读数：`已选第 N / 总数 张卡片` + 键位提示；有选中时带 `data-branch-selected="1"`）。
 
 ### 持久化键
 
@@ -53,6 +61,10 @@
 | 编辑器英文界面（`prts-language=en-US`） | ![en](images/editor-en.png) |
 | 脚本文本语法着色 + Tab 缩进（8 列） | ![hl](images/editor-highlight.png) |
 | 编辑器舞台 150%（裁剪后：16:9，素材不再成条） | ![stage150](images/stage-editor-150.png) |
+| 左侧**侧边栏 rail**（集合窗口；脱离后不留洞） | ![rail](images/rail.png) |
+| **工作流竖排**（分支图 TB + ↑/↓ 切卡片） | ![vertical](images/branch-vertical.png) |
+| **新建剧本** + 工具栏三组 / 面包屑（1024 宽） | ![create](images/layout-create.png) |
+| **素材库**（预览/试听 + 拖到舞台/正文） | ![assets](images/asset-lib.png) |
 
 ## 4. 回归
 
@@ -66,8 +78,12 @@ node build/harness/_editor-tab-hl-check.mjs            # VSCode 键位（Tab/Ent
 node build/harness/_stage-visual-check.mjs             # 编辑器舞台 100%/150% 的 16:9 观感证据
 node build/harness/_i18n-check.mjs                    # i18n 运行时（7）
 node build/harness/player-chrome.mjs                  # 播放器底栏（默认纯隐藏，10）
-node scripts/fanfic/branchGraph-selftest.mjs           # 分支图语义（73）
-node build/harness/branch-shot.mjs                     # dify 布局零重叠 + 截图
+node scripts/fanfic/branchGraph-selftest.mjs           # 分支图语义 + 竖排几何（103）
+node build/harness/branch-shot.mjs                     # 竖排/横排布局零重叠 + 方向键 + 截图（154）
+node build/harness/_rail-check.mjs                     # 侧边栏 rail（集合窗口 / 脱离不留洞 / 收起持久化，33）
+node build/harness/_layout-create-check.mjs             # 新建剧本 + 工具栏分组 + 面包屑 + 响应式（21）
+node scripts/fanfic/createPack-selftest.mjs            # 新建剧本的三套模板正文（Tab 缩进 / 幂等 / 归一化逐字节，33）
+node scripts/fanfic/assetLibrary-selftest.mjs         # 素材库数据层（合并/用量/排序/抽取/音频 URL，50）
 node build/ctx/… 见 build/harness/*.mjs
 npx tsc -b frontend                                   # 类型
 node frontend/scripts/check-i18n.mjs                  # locales 键对齐（zh-Hans 为参照）
@@ -83,6 +99,9 @@ npm run test:editor && npm run test:stage             # 编辑器 / 舞台内核
 
 | 用户原话 | 落点 |
 |---|---|
+| 窗口套窗口、脱离后**还留着位置** → 侧边栏集合窗口 | 脱离时 `Workbench` 的渲染树用 `drop()` 摘掉该叶（`tree !== state`）→ **原地不留洞、邻居占满**；`[data-wb-float-layer]`/`-item`/`data-win-state="float"` 全保留。**侧边栏 rail** = 左侧 88px 图标条（`EditorRail.tsx`，`data-ed-rail` / `[data-rail-item="<id>"]` / `[data-rail-toggle]`），点图标收起/放出**整条面板**，整条可折叠成 32px 且状态存 `stateStore(workspace, prts-editor-rail)`。口径：**rail 管面板去哪，顶部工具条管动作**。回归 `float-window.mjs`（29）+ `_rail-check.mjs`（33） |
+| **工作流改竖排（从上到下）+ 方向键切卡片** | `layoutGraph(graph, {direction:"TB"\|"LR"})`，**默认 TB**（层 → y、同层沿 x 重心排序；正交折线自上而下）；HUD `[data-branch-action="direction"]` 可切；`[data-branch-pan]` 聚焦后 `↑/↓`（`j/k`）按**阅读序**（layer → x）切卡片、`Home/End` 跳首末、`Enter` 跳该行、`role="status"` 报「第 N / 总数」。回归 `branchGraph-selftest.mjs`（103）+ `branch-shot.mjs`（153） |
+| ─ 「创建剧本」+ 布局重构 | 列表页 `[data-fanfic-action="create"]` 与编辑器 `[data-editor-action="create"]` 打开**同一个** `frontend/src/components/editor/CreatePackDialog.tsx`（三套模板正文在 `packTemplates.ts`，Node selftest `scripts/fanfic/createPack-selftest.mjs`）；Rust `create_library_pack`（`assets.rs`，`.tmp`+rename、已存在不覆盖）。工具条按 `[data-rail-group="file|view|edit"]` 分组，状态栏左侧 `[data-editor-part="breadcrumb"]`；**rail 管面板显隐、工具条管动作**。回归 `build/harness/_layout-create-check.mjs` |
 | 播放器底栏要默认自动隐藏、**不要 3 秒无操作淡出** | `uiSettings.getPlayerChrome()` 默认 `auto`；`storyPlayerBoot::installPlayerChrome` 的 `auto` = 纯隐藏（`html.ark-chrome-auto` + 指针几何命中，无定时器）。回归 `node build/harness/player-chrome.mjs` |
 | 下载并发数默认 30 | `appSettings.DEFAULT_SETTINGS.downloadConcurrency=30`、`download::DEFAULT_CONCURRENCY=30` |
 | 舞台缩放「素材扭曲」 | **viewBox 之外的内容没被裁**：`StagePane` 加 `<clipPath id="ark-stage-clip">`（rect == 当前 viewBox），画布内容整体入组。150% 实测可见盒 AR 1.7875（摘掉 clip = 2.6813）。回归 `node build/harness/_stage-clip-check.mjs`（51 断言） |
@@ -174,8 +193,38 @@ Android「清除数据」都会丢；而**排版 / 面板开关 / 语言 / 播�
 **③ 浮动层**（`FloatLayer.tsx`）：分离出来的窗挂到 `[data-wb-float-layer="1"]`
 （`.editor-page` 内的 `absolute;inset:0`，坐标 = **页面根**，层 `pointer-events:none`、
 子项 `auto`）。它**不再是** `.wb-shell` 的子节点 → 不受 `.wb-slot` / `.wb-stage` 的
-`overflow:hidden` 裁剪，可以拖到工具栏/页头任何位置。树里保留
-`[data-wb-panel="<id>"]` + 其中 `[data-wb-float-hole="<id>"]` 占位（分隔条照旧可拖）。
+`overflow:hidden` 裁剪，可以拖到工具栏/页头任何位置。
+
+⚠️ **脱离后原地不留洞**（2026-10-15，task-8；用户原话「脱离出去就不（脱离）了
+为什么还要保留位置」）：`Workbench` 的渲染树在 `useMemo` 里就把浮动叶 `drop` 掉
+（`visible` 里仍保留它，`FloatLayer` 照旧渲染）→ 邻居**立刻占满**；`[data-wb-float-hole]`
+只剩兼容锚点（虚线空区已去掉，CSS 是 0 边框 0 背景）。`float-window.mjs` 的 ④ = 
+「hole 数 = 0 且邻居 rect 变大 ≥60px」。
+
+## 侧边栏 rail + 取消"浮动留位置"（2026-10-15，task-8）
+
+用户口径四条：「窗口里套窗口…脱离出去…为什么还要保留位置」「引入侧边栏的概念
+可以快速收缩 集合窗口」「**侧边栏是用来快速隐藏选择的 而不是可视不可视**」
+「**侧边栏有东西挂到侧边栏才显示的**」。
+
+- **rail = 收起窗口的托盘**（`EditorRail.tsx`，`[data-ed-rail="1"]`）：**只有收起的
+  面板**才出现在 rail 里（`[data-rail-item="<id>"]`，`data-rail-reason=park|map`）；
+  点条目 = `restore` 回工作台。工作台里正显示的面板**不占** rail。
+  - 收起入口：常驻面板标题条的 **`⇤`**（`data-win-action="park"`）；Map 面板仍是 `✕`
+    （同一个语义，不重复造按钮）。状态走 `mapToggle`（`minimize` + `visible`；布局与
+    `prts-editor-wb:view` 都落盘）。
+  - rail 自己可整条收起（`[data-rail-toggle="1"]`，`stateStore` scope=workspace
+    key `prts-editor-rail` = `open|collapsed`）；收起态**不卸载**条目（只 22px 宽）。
+  - 文字**竖排**（`writing-mode: vertical-rl` + `text-orientation: upright`）——
+    中文标题不留"工具…"式截断；`ArrowUp/Down`、`Home/End` 在条目间移动焦点。
+  - rail 底部只留**一个**动作：`⟲ 重置布局`（`[data-layout-bar]` /
+    `[data-layout-action="reset"]`；布局本身自动落库）。
+- **一行式页头**：`返回 / 剧本名（≤50% 宽）+ 来源 / 菜单栏（面包屑：包 › 第 N 行 ›
+  命令）/ 定位（滑杆 + 行号 + 上一行 + 下一行 + 预览到此处）/ 未保存`——未保存**只在脏时**
+  出提示；动作按钮集中在下面一行（`[data-rail-group="file|view|edit"]`）。
+
+回归：`build/harness/_rail-check.mjs`（33：托盘语义 / 键盘 / 竖排文字 / 无洞+邻居变大 /
+收起态刷新保持）、`build/harness/float-window.mjs`（29）。
 
 ⚠️ **坐标换算**：`InspectorWindow.rectForFloat()` 量的是**槽位坐标系**
 （`offsetParent` 是 `[data-wb-panel]`），首次分离时页面要补 `slot → page` 偏移

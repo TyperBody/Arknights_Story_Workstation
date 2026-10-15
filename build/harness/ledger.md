@@ -34,6 +34,15 @@ node scripts/fanfic/selfcontained-check.mjs  # 原生 WebKitGTK：PASSED（在�
 node build/ctx/… tools/mirror/mirror-selftest.mjs   # 94/94
 ```
 
+## 第三轮（编辑器重构：侧边栏 / 素材库 / 竖排工作流 / 创建剧本）
+
+| # | 需求（用户原话） | 证据（命令） | 结果 |
+|---|---|---|---|
+| 13 | 「窗口里套窗口…脱离出去…为什么还要保留位置」+「引入侧边栏…快速收缩 集合窗口」 | `node build/harness/float-window.mjs`（29）、`node build/harness/_rail-check.mjs`（33） | ✅ 脱离 = 树里 `drop()` 摘叶 → **不留洞**、邻居变宽 ≥60px；rail 88px（收起 32px）+ 5 图标 + `prts-editor-rail` 记忆 |
+| 14 | 「引入素材库…快速预览…可互动（可视，播放）…拖拽（编辑器=名称、舞台=当前场景）…导入…整理」 | `node scripts/fanfic/assetLibrary-selftest.mjs`（50）、`node build/harness/_asset-lib-check.mjs`、`cargo test --release --lib`（`import_pack_asset`） | 进行中（本行在 task-9 收口后改成 ✅ + 数字） |
+| 15 | 「工作流改成竖的编排 从上到下 方向键可以快速切换卡片预览」 | `node scripts/fanfic/branchGraph-selftest.mjs`（103）、`node build/harness/branch-shot.mjs`（153） | ✅ 默认 **TB**；`↑/↓`（`j/k`）按 layer→x 阅读序切卡、`Home/End`、`Enter` 跳行；`[data-branch-action="direction"]` 可切 LR |
+| 16 | 「优化或者重构页面布局（…blender/vscode…但不要模仿）」+「创建剧本操作」 | `node build/harness/_layout-create-check.mjs`（21）、`node scripts/fanfic/createPack-selftest.mjs`（33）、`cargo test --release --lib`（73，含 `create_library_pack` 4 条） | ✅ 工具条 `file/view/edit` 三组 + `data-editor-part="breadcrumb"` + ≤1100/≤820 响应式；`CreatePackDialog` 三套模板（Tab 缩进 / 幂等 / 归一化逐字节） |
+
 ## 需要人工（非代码）动作
 - 建 `djkcyl/arkstage-mirror` 空仓 + 配 `MIRROR_TOKEN`，跑一次 `.github/workflows/publish-mirror.yml` → jsd/fastly/ghproxy 才真正可用（当前自动回退 prts）。
 - 真机验证：Windows WebView2 / Android 上的 `snapshot.json`（`include_bytes!`）与 CSP。

@@ -726,9 +726,17 @@ pub struct StarterSetInfo {
     pub dir: String,
 }
 
+/// 清单里声明的**预算**（`budgetBytes`，策展脚本写进来的；缺 → 0）。
+/// 只给测试用（`starter_summary_matches_the_shipped_manifest` 断言总量 ≤ 预算）。
+fn starter_budget_bytes() -> u64 {
+    serde_json::from_str::<serde_json::Value>(STARTER_CURATED)
+        .ok()
+        .and_then(|v| v.get("budgetBytes").and_then(|b| b.as_u64()))
+        .unwrap_or(0)
+}
+
 /// 读清单（内置的那份）：`(条目数, 字节, 每组条目数)`。坏清单 → 全 0（不抛）。
-/// （原先另有 `starter_budget_bytes()` 读 `budgetBytes` 供展示；总量现已由
-///  `StarterSetInfo.bytes` 直接给出，故并入 summary 并删除，避免 dead_code。）
+/// `StarterSetInfo.bytes` 直接给总量；预算见 `starter_budget_bytes`。
 fn starter_summary() -> (usize, u64, std::collections::BTreeMap<String, usize>) {
     let mut groups: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let Ok(value) = serde_json::from_str::<serde_json::Value>(STARTER_CURATED) else {
@@ -1128,8 +1136,252 @@ fn write_library_file_at(
     })
 }
 
-/// 删除一个已安装的剧本包目录：`<资源目录>/assets/library/<id>/`。
-/// id 必须是**单个目录名**（不含路径分隔符、不是 `.`/`..`），目录里还得有
+/// 新建剧本包的返回（task-11）：新建的包 id/目录、是否**真的**新建过、
+/// 以及 `script.txt` 落盘后的字节数。`created=false` 表示同名包已存在、
+/// 本次只补齐了缺失的文件（**不覆盖**用户已有的内容）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedPack {
+    pub id: String,
+    /// `.../assets/library/<id>` 绝对路径。
+    pub dir: String,
+    /// 本次是否新建了包目录。
+    pub created: bool,
+    /// `script.txt` 的字节数（新建 = 传入文本长度；已存在 = 磁盘上的长度）。
+    pub script_bytes: usize,
+}
+
+/// 新建一个剧本包：`<资源目录>/assets/library/<id>/{pack.json,script.txt}`。
+///
+/// 与 `write_library_file` 的分工：后者要求包**已存在**（`create_dirs` 只建
+/// 包内子目录），所以「第一次建包」需要这条命令。
+/// - `id` 走 `validate_pack_id`（单个目录名、无路径分隔符）；
+/// - 目录不存在才建；两个文件都是 `.tmp` + rename 的原子写；
+/// - **已存在**：不覆盖 `pack.json`；`script.txt` 只在非空**且缺失**时补写。
+#[tauri::command]
+pub async fn create_library_pack(
+    id: String,
+    title: Option<String>,
+    chapter: Option<String>,
+    description: Option<String>,
+    script: Option<String>,
+) -> Result<CreatedPack, String> {
+    create_library_pack_at(
+        &resolve_library_dir(&crate::data_root::data_root())?,
+        &id,
+        title.as_deref().unwrap_or(""),
+        chapter.as_deref().unwrap_or(""),
+        description.as_deref().unwrap_or(""),
+        script.as_deref().unwrap_or(""),
+    )
+}
+
+/// `create_library_pack` 的核心（可测）：`library` = `<资源目录>/assets/library/`。
+fn create_library_pack_at(
+    library: &std::path::Path,
+    id: &str,
+    title: &str,
+    chapter: &str,
+    description: &str,
+    script: &str,
+) -> Result<CreatedPack, String> {
+    let id = validate_pack_id(id)?;
+    let dir = library.join(&id);
+    let existed = dir.is_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create pack dir: {e}"))?;
+    log::info!("[library] create_library_pack {id} created={}", !existed);
+
+    // `pack.json`：只写 5 个字段（与 `library.js::toPack` 对齐）。
+    // 已存在的包不动它——用户/命令行安装的元信息更权威。
+    let pack_path = dir.join("pack.json");
+    if !pack_path.is_file() {
+        let meta = serde_json::json!({
+            "id": id,
+            "title": title,
+            "chapter": chapter,
+            "description": description,
+            "branchPoints": [],
+        });
+        let mut text = serde_json::to_string_pretty(&meta)
+            .map_err(|e| format!("Failed to serialize pack.json: {e}"))?;
+        text.push('\n');
+        write_text_atomic(&pack_path, &text)?;
+    }
+
+    // `script.txt`：`toPack` 要求它存在且是字符串（空包也至少这份）。
+    let script_path = dir.join("script.txt");
+    if !script_path.is_file() && !script.is_empty() {
+        write_text_atomic(&script_path, script)?;
+    }
+    let script_bytes = std::fs::read(&script_path).map(|b| b.len()).unwrap_or(0);
+
+    Ok(CreatedPack {
+        id,
+        dir: dir.to_string_lossy().to_string(),
+        created: !existed,
+        script_bytes,
+    })
+}
+
+/// 原子写文本：`<name>.tmp` 再 rename（与 `write_library_file` 同一手法，
+/// 但**会**建父目录——`create_library_pack` 的目录可能刚建好）。
+fn write_text_atomic(path: &std::path::Path, content: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.is_dir() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+        }
+    }
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .ok_or_else(|| format!("无效路径：{}", path.display()))?;
+    let tmp = path.with_file_name(format!("{file_name}.tmp"));
+    std::fs::write(&tmp, content.as_bytes()).map_err(|e| format!("Failed to write tmp file: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("Failed to replace {}: {e}", path.display())
+    })
+}
+
+/// 导入结果（task-9）：落盘的包内相对路径、写入字节、映射表位置与**当前条目数**。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedAsset {
+    /// 写入 `build/assets.local.json` 的 canonical key（`canonical_key` 或推导）。
+    pub key: String,
+    /// 包内相对路径（`assets/<文件名>`）——前端展示 / `asset://` 取用。
+    pub file: String,
+    /// 复制后的字节数。
+    pub bytes: usize,
+    /// `.../build/assets.local.json` 的绝对路径。
+    pub map_path: String,
+    /// 合并后映射表里的条目总数（前端据此提示）。
+    pub asset_count: usize,
+}
+
+/// 把一个**本地文件**复制进剧本包的素材目录，并登记到 `build/assets.local.json`。
+///
+/// 语义（`<资源目录>/assets/library/<id>/`）：
+/// - `id` 走 `validate_pack_id`，**包目录必须已存在**（用 `create_library_pack` 建）；
+/// - 文件名做安全化（去目录、控制字符 → `_`），重名加 `-1`/`-2` 后缀（**不覆盖**已有素材）；
+/// - `.tmp` + rename 原子落盘；
+/// - 映射表：读旧 JSON（坏 JSON → 新建）→ 合并 `key → assets/<file>` → pretty 写回。
+#[tauri::command]
+pub async fn import_pack_asset(
+    id: String,
+    source: String,
+    canonical_key: Option<String>,
+) -> Result<ImportedAsset, String> {
+    import_pack_asset_at(
+        &resolve_library_dir(&crate::data_root::data_root())?,
+        &id,
+        &source,
+        canonical_key.as_deref(),
+    )
+}
+
+/// `import_pack_asset` 的核心（可测）：`library` = `<资源目录>/assets/library/`。
+fn import_pack_asset_at(
+    library: &std::path::Path,
+    id: &str,
+    source: &str,
+    canonical_key: Option<&str>,
+) -> Result<ImportedAsset, String> {
+    let id = validate_pack_id(id)?;
+    let dir = library.join(&id);
+    if !dir.is_dir() {
+        return Err(format!("剧本包不存在：{id}"));
+    }
+    let src = std::path::Path::new(source);
+    if !src.is_file() {
+        return Err(format!("待导入的文件不存在：{source}"));
+    }
+    let assets = dir.join("assets");
+    std::fs::create_dir_all(&assets).map_err(|e| format!("Failed to create assets dir: {e}"))?;
+
+    // 目标文件名：只取原文件名 + 安全化；重名加后缀（不覆盖既有素材）。
+    let raw_name = src
+        .file_name()
+        .map(|v| v.to_string_lossy().to_string())
+        .ok_or_else(|| format!("无效路径：{source}"))?;
+    let safe: String = raw_name
+        .chars()
+        .map(|c| if c.is_control() || c == '/' || c == '\\' || c == ':' { '_' } else { c })
+        .collect();
+    let safe = if safe.trim().is_empty() { "asset.bin".to_string() } else { safe };
+    let (stem, ext) = match safe.rfind('.') {
+        Some(at) if at > 0 => (safe[..at].to_string(), safe[at..].to_string()),
+        _ => (safe.clone(), String::new()),
+    };
+    let mut name = safe.clone();
+    let mut suffix = 0;
+    while assets.join(&name).exists() {
+        suffix += 1;
+        name = format!("{stem}-{suffix}{ext}");
+        if suffix > 999 {
+            return Err(format!("同名素材太多，放弃：{safe}"));
+        }
+    }
+
+    let dest = assets.join(&name);
+    std::fs::copy(src, &dest).map_err(|e| format!("Failed to copy asset: {e}"))?;
+    let bytes = std::fs::metadata(&dest).map(|m| m.len() as usize).unwrap_or(0);
+
+    // 映射表：bad JSON → 新建（用户手改坏了也照常可用）。
+    let build = dir.join("build");
+    std::fs::create_dir_all(&build).map_err(|e| format!("Failed to create build dir: {e}"))?;
+    let map_path = build.join("assets.local.json");
+    let mut map: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(&map_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    let key = canonical_key
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        // 带 scheme 的 URL（用户从上游复制的）→ 归一成 canonical `host/path`；
+        // 归一不了（本来就没 scheme / 不是 http）→ 原样，别把用户的 key 弄丢。
+        .map(|v| crate::media::canonical_key(&v).unwrap_or(v))
+        .unwrap_or_else(|| infer_asset_key(&name));
+    map.insert(key.clone(), serde_json::Value::String(format!("assets/{name}")));
+    let text = serde_json::to_string_pretty(&serde_json::Value::Object(map.clone()))
+        .map_err(|e| format!("Failed to serialize asset map: {e}"))?;
+    write_text_atomic(&map_path, &format!("{text}\n"))?;
+
+    Ok(ImportedAsset {
+        key,
+        file: format!("assets/{name}"),
+        bytes,
+        map_path: map_path.to_string_lossy().to_string(),
+        asset_count: map.len(),
+    })
+}
+
+/// 推导 canonical key：没给 `canonical_key` 时的兜底。
+///
+/// ⚠️ 必须是 **`host/path`** 形态——`assets.local.json` 的键与 `media::canonical_key`
+/// 同域（引擎拼出来的 URL 去掉 scheme），裸 `bg_x` 在播放期对不上。
+/// 常见上游形状（`bg_*.png` / `char_*|avg_*` 贴图 / `*.mp3`）→ 官方路径；
+/// 其余落到 `imported.local/assets/<file>`（永远是两段式，`canonical_key` 认）。
+fn infer_asset_key(file_name: &str) -> String {
+    let stem = file_name.rsplit_once('.').map(|(a, _)| a).unwrap_or(file_name);
+    let lower = file_name.to_ascii_lowercase();
+    if lower.ends_with(".mp3") || lower.ends_with(".ogg") || lower.ends_with(".wav") {
+        return format!("torappu.prts.wiki/assets/audio/{file_name}");
+    }
+    if stem.to_ascii_lowercase().starts_with("bg") {
+        return format!("torappu.prts.wiki/assets/avg/background/{stem}.png");
+    }
+    if stem.to_ascii_lowercase().starts_with("char_") || stem.to_ascii_lowercase().starts_with("avg_") {
+        return format!("torappu.prts.wiki/assets/avg/characters/{stem}/{stem}.png");
+    }
+    if stem.to_ascii_lowercase().starts_with("ui_") {
+        return format!("static.prts.wiki/assets/scenario/ui/{stem}.png");
+    }
+    format!("imported.local/assets/{file_name}")
+}
+
+/// 删除一个已安装的剧本包目录：`<资源目录>/assets/library/<id>/`。/// id 必须是**单个目录名**（不含路径分隔符、不是 `.`/`..`），目录里还得有
 /// `script.txt` 或 `source/probe.txt`——避免误删用户放在 library/ 下的别的东西。
 #[derive(Debug, Serialize)]
 pub struct DeletedPack {
@@ -1226,6 +1478,278 @@ mod library_tests {
         create_dirs: bool,
     ) -> Result<WrittenLibraryFile, String> {
         write_library_file_at(&resolve_library_dir(&root.dir)?, id, name, content, create_dirs)
+    }
+
+    fn create(
+        root: &TempRoot,
+        id: &str,
+        title: &str,
+        chapter: &str,
+        description: &str,
+        script: &str,
+    ) -> Result<CreatedPack, String> {
+        create_library_pack_at(
+            &resolve_library_dir(&root.dir)?,
+            id,
+            title,
+            chapter,
+            description,
+            script,
+        )
+    }
+
+    fn import_asset(
+        root: &TempRoot,
+        id: &str,
+        source: &str,
+        key: Option<&str>,
+    ) -> Result<ImportedAsset, String> {
+        import_pack_asset_at(&resolve_library_dir(&root.dir)?, id, source, key)
+    }
+
+    fn source_file(root: &TempRoot, name: &str, bytes: &[u8]) -> String {
+        let dir = root.dir.join("sources");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    fn read_map(root: &TempRoot, id: &str) -> serde_json::Value {
+        let path = root.library().join(id).join("build").join("assets.local.json");
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// task-9：导入 → 文件进 `<pack>/assets/`、映射合并进 `build/assets.local.json`、
+    /// **已存在的表不丢条目**（两次导入 → 两条共存）。
+    #[test]
+    fn import_asset_copies_the_file_and_merges_the_map() {
+        let root = TempRoot::new("import-merge");
+        write_pack(&root.library(), "pack_a", Some("[End]\n"));
+        // 先有一份**用户手写**的旧表：合并必须保它。
+        let build = root.library().join("pack_a").join("build");
+        std::fs::create_dir_all(&build).unwrap();
+        std::fs::write(
+            build.join("assets.local.json"),
+            "{\n \"torappu.prts.wiki/assets/avg/background/bg_black.png\": \"assets/bg_black.webp\"\n}\n",
+        )
+        .unwrap();
+
+        let png = source_file(&root, "bg_forest.png", b"PNGDATA");
+        let first = import_asset(&root, "pack_a", &png, None).unwrap();
+        assert_eq!(first.file, "assets/bg_forest.png");
+        assert_eq!(first.bytes, 7);
+        assert!(first.key.starts_with("torappu.prts.wiki/assets/avg/background/bg_forest"));
+        assert!(first.asset_count >= 2);
+        let target = root.library().join("pack_a").join("assets").join("bg_forest.png");
+        assert_eq!(std::fs::read(&target).unwrap(), b"PNGDATA");
+        assert!(!root
+            .library()
+            .join("pack_a")
+            .join("assets")
+            .join("bg_forest.png.tmp")
+            .exists());
+        let table = read_map(&root, "pack_a");
+        assert!(table.get("torappu.prts.wiki/assets/avg/background/bg_black.png").is_some());
+        assert_eq!(table[&first.key], "assets/bg_forest.png");
+
+        // 显式 canonicalKey 优先（带 scheme 的 URL 也归一成 host/path）。
+        let mp3 = source_file(&root, "m_calm.mp3", b"ID3DATA");
+        let second = import_asset(
+            &root,
+            "pack_a",
+            &mp3,
+            Some("https://torappu.prts.wiki/assets/audio/Music/m_calm.mp3"),
+        )
+        .unwrap();
+        assert_eq!(second.key, "torappu.prts.wiki/assets/audio/Music/m_calm.mp3");
+        assert_eq!(read_map(&root, "pack_a").as_object().unwrap().len(), 3);
+    }
+
+    /// 同名文件 → `-1`/`-2` 后缀（**不覆盖**已有素材），映射指向新文件。
+    #[test]
+    fn import_asset_suffixes_duplicate_names() {
+        let root = TempRoot::new("import-suffix");
+        write_pack(&root.library(), "dupes", Some("[End]\n"));
+        let a = source_file(&root, "shot.png", b"one");
+        let first = import_asset(&root, "dupes", &a, Some("a.example/x/shot.png")).unwrap();
+        assert_eq!(first.file, "assets/shot.png");
+        // 同名不同内容再次导入 → `shot-1.png`。
+        let dir = root.dir.join("sources2");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("shot.png"), b"two").unwrap();
+        let second = import_asset(
+            &root,
+            "dupes",
+            &dir.join("shot.png").to_string_lossy(),
+            Some("a.example/x/shot2.png"),
+        )
+        .unwrap();
+        assert_eq!(second.file, "assets/shot-1.png");
+        assert_eq!(
+            std::fs::read(root.library().join("dupes").join("assets").join("shot.png")).unwrap(),
+            b"one"
+        );
+        assert_eq!(
+            std::fs::read(root.library().join("dupes").join("assets").join("shot-1.png")).unwrap(),
+            b"two"
+        );
+        assert_eq!(second.asset_count, 2);
+    }
+
+    /// 坏 JSON 回退成新表；`imported.local/…` 的派生 key 仍是 `host/path`。
+    #[test]
+    fn import_asset_recovers_from_a_broken_map() {
+        let root = TempRoot::new("import-badjson");
+        write_pack(&root.library(), "broken", Some("[End]\n"));
+        let build = root.library().join("broken").join("build");
+        std::fs::create_dir_all(&build).unwrap();
+        std::fs::write(build.join("assets.local.json"), "{ not json").unwrap();
+        let src = source_file(&root, "weird-name.dat", b"xyz");
+        let result = import_asset(&root, "broken", &src, None).unwrap();
+        assert_eq!(result.key, "imported.local/assets/weird-name.dat");
+        assert!(crate::media::canonical_key(&result.key).is_some());
+        let table = read_map(&root, "broken");
+        assert_eq!(table.as_object().unwrap().len(), 1);
+        assert_eq!(table[&result.key], "assets/weird-name.dat");
+    }
+
+    /// 闸门：包不存在 / id 非法 / 源不是文件 → 报错，且**不留**垃圾文件。
+    #[test]
+    fn import_asset_validates_ids_and_sources() {
+        let root = TempRoot::new("import-guard");
+        write_pack(&root.library(), "ok", Some("[End]\n"));
+        let good = source_file(&root, "ok.png", b"x");
+
+        for bad in ["", "  ", ".", "..", "a/b", r"a\b", "C:"] {
+            let error = import_asset(&root, bad, &good, None).unwrap_err();
+            assert!(error.contains("非法剧本包 id"), "id {bad:?} → {error}");
+        }
+        let error = import_asset(&root, "ghost", &good, None).unwrap_err();
+        assert!(error.contains("剧本包不存在"), "{error}");
+        for bad_source in ["", "   ", "file:///nope/never.png"] {
+            let error = import_asset(&root, "ok", bad_source, None).unwrap_err();
+            assert!(error.contains("不存在") || error.contains("不是文件"), "source {bad_source:?} → {error}");
+        }
+        // 目录不是文件（`is_file()` 为假）。
+        let error = import_asset(&root, "ok", &root.dir.to_string_lossy(), None).unwrap_err();
+        assert!(error.contains("不存在") || error.contains("不是文件"), "{error}");
+        assert!(!root.library().join("ok").join("assets").exists());
+    }
+
+    /// 派生 key 的三种常见形状（背景 / 立绘 / 音频）。
+    #[test]
+    fn derived_keys_follow_the_upstream_layout() {
+        assert_eq!(
+            infer_asset_key("bg_forest.png"),
+            "torappu.prts.wiki/assets/avg/background/bg_forest.png"
+        );
+        assert_eq!(
+            infer_asset_key("char_002_amiya_1.png"),
+            "torappu.prts.wiki/assets/avg/characters/char_002_amiya_1/char_002_amiya_1.png"
+        );
+        assert_eq!(
+            infer_asset_key("m_calm.mp3"),
+            "torappu.prts.wiki/assets/audio/m_calm.mp3"
+        );
+        assert_eq!(infer_asset_key("ui_speaker.png"), "static.prts.wiki/assets/scenario/ui/ui_speaker.png");
+        // 派生的 key 必须能被 `media::canonical_key` 认（否则播放期对不上）。
+        for name in ["bg_forest.png", "char_002_amiya_1.png", "m_calm.mp3", "weird-name.dat"] {
+            let key = infer_asset_key(name);
+            assert!(crate::media::canonical_key(&key).is_some(), "{name} → {key}");
+        }
+    }
+
+    /// task-11：新建包 → 两个文件都在、`pack.json` 字段可被 `toPack` 读出；
+    /// 再建同名包**不覆盖**用户内容（`created=false`、脚本字节数 = 磁盘值）。
+    #[test]
+    fn create_pack_writes_both_files_and_never_overwrites() {
+        let root = TempRoot::new("create-pack");
+        let script = "[HEADER(key=\"x\")]\n[endtip(block=true)]\n";
+        let first = create(&root, "my_pack", "我的剧本", "同人剧场", "一句简介", script).unwrap();
+        assert!(first.created);
+        assert_eq!(first.id, "my_pack");
+        assert_eq!(first.script_bytes, script.len());
+        assert!(first.dir.ends_with("assets/library/my_pack"));
+        let dir = root.library().join("my_pack");
+        assert!(dir.join("script.txt").is_file() && dir.join("pack.json").is_file());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("script.txt")).unwrap(),
+            script
+        );
+        // 原子写不留 `.tmp`。
+        assert!(!dir.join("script.txt.tmp").exists() && !dir.join("pack.json.tmp").exists());
+
+        // `pack.json` 的字段形状 = `library.js::toPack` 期望的那几个。
+        let meta: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("pack.json")).unwrap()).unwrap();
+        assert_eq!(meta["id"], "my_pack");
+        assert_eq!(meta["title"], "我的剧本");
+        assert_eq!(meta["chapter"], "同人剧场");
+        assert_eq!(meta["description"], "一句简介");
+        assert_eq!(meta["branchPoints"].as_array().unwrap().len(), 0);
+
+        // 已存在：`pack.json` 与 `script.txt` 都不被覆盖（用户手改的内容留着）。
+        std::fs::write(dir.join("pack.json"), "{\"id\":\"my_pack\",\"title\":\"手改\"}\n").unwrap();
+        let second = create(&root, "my_pack", "另一个标题", "", "", "[End]\n").unwrap();
+        assert!(!second.created);
+        assert_eq!(second.script_bytes, script.len());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("script.txt")).unwrap(),
+            script
+        );
+        assert!(std::fs::read_to_string(dir.join("pack.json"))
+            .unwrap()
+            .contains("手改"));
+    }
+
+    /// 目录已存在但 `script.txt` **缺失**时补写；`script` 为空则只建目录。
+    #[test]
+    fn create_pack_fills_a_missing_script_only() {
+        let root = TempRoot::new("create-fill");
+        std::fs::create_dir_all(root.library().join("half-pack")).unwrap();
+        let filled = create(&root, "half-pack", "T", "C", "D", "abc\n").unwrap();
+        assert!(!filled.created);
+        assert_eq!(filled.script_bytes, 4);
+        assert!(root.library().join("half-pack").join("script.txt").is_file());
+
+        // 空 script：目录建出来，但**不**写 script.txt（前端可后补）。
+        let empty = create(&root, "no_script", "", "", "", "").unwrap();
+        assert!(empty.created);
+        assert_eq!(empty.script_bytes, 0);
+        let dir = root.library().join("no_script");
+        assert!(dir.is_dir() && dir.join("pack.json").is_file());
+        assert!(!dir.join("script.txt").is_file());
+    }
+
+    /// 坏 id 走与 read/write/delete 同一道闸门；`.tmp` 命名不串台（`x.tmp` vs `x.part-1`）。
+    #[test]
+    fn create_pack_validates_the_id_and_ignores_bad_names() {
+        let root = TempRoot::new("create-guard");
+        for bad in ["", "  ", ".", "..", "a/b", r"a\b", "C:"] {
+            let error = create(&root, bad, "", "", "", "x").unwrap_err();
+            assert!(error.contains("非法剧本包 id"), "id {bad:?} → {error}");
+        }
+        // 两个不同 id 并发/连续建：互不影响；包计数 = 2。
+        create(&root, "one", "", "", "", "a\n").unwrap();
+        create(&root, "two", "", "", "", "b\n").unwrap();
+        assert_eq!(count_packs(&root.library()), 2);
+    }
+
+    /// 计时器之外的守门：新命令返回的 `dir` 必须是**包目录本身**，
+    /// 且 `read_library_file` 能立刻读到刚写的脚本（页面跳进编辑器就要用）。
+    #[test]
+    fn create_pack_dir_is_immediately_readable() {
+        let root = TempRoot::new("create-readback");
+        let script = "// fresh\n[HEADER(key=\"r\")]\n[endtip(block=true)]\n";
+        let made = create(&root, "readback", "", "", "", script).unwrap();
+        assert!(made.dir.ends_with("library/readback"));
+        assert_eq!(
+            read_file(&root, "readback", "script.txt").unwrap().as_deref(),
+            Some(script)
+        );
+        // 建完就能被 write_library_file 继续编辑（说明目录/校验都对得上）。
+        assert_eq!(write_file(&root, "readback", "pack.json", "{}", false).unwrap().bytes, 2);
     }
 
     #[test]

@@ -19,6 +19,9 @@ const zhHans = {
     language: "语言",
     languageHint: "界面与编辑器文案的语言；立即生效，保存在本机。",
   },
+  fanfic: {
+    count: "已安装 {{count}} 个剧本包",
+  },
   editor,
 };
 

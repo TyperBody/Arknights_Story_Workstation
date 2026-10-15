@@ -63,7 +63,7 @@ export const WB_DRAG_THRESHOLD = 4;
  * 视觉上要细（用户："划区边太宽了"），但**命中区**靠 `::after` 外扩到
  * `WB_GUTTER_HIT`（抓起来不费劲）。
  */
-export const WB_GUTTER_SIZE = 4;
+export const WB_GUTTER_SIZE = 3;
 /** 分隔条命中区总宽（px）：`padding` 之外再外扩 `(HIT-SIZE)/2`，保证好抓。 */
 export const WB_GUTTER_HIT = 18;
 /** 面板块的缺省最小尺寸（树里第一个面板推不出来时兜底）。 */

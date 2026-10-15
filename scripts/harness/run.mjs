@@ -46,7 +46,7 @@ const GROUPS = {
     ["live-download.mjs", "⑦ 设置页换源 → 落盘 + 预览 URL"],
   ],
   shell: [
-    ["float-window.mjs", "⓪ 划区/浮动窗 11 契约（细分隔条/全面板可分离/浮动层+占位/拖出即分离/可缩放/双击回树/刷新记忆/预览 iframe 不丢）"],
+    ["float-window.mjs", "⓪ 划区/浮动窗 11 契约（细分隔条/全面板可分离/**脱离后不留洞、邻居占满**/拖出即分离/可缩放/双击回树/刷新记忆/预览 iframe 不丢）"],
     ["p4-shell-unit.mjs", "窗口壳纯逻辑（兜底表/注册表/resolveChrome）"],
     ["p4-shell-probe.mjs", "窗口壳交互（折叠/⧉/拖动/缩放/✕）"],
     ["preview-bar-oneline.mjs", "② 预览条恒单行（拖窄 + 多行报错都不撑高）"],
@@ -63,6 +63,9 @@ const GROUPS = {
     ["_stage-clip-check.mjs", "⑧ 舞台裁剪恒 16:9（50~170%）+ 舞台可调大小"],
     ["_indent-ui-check.mjs", "⑧ 区域缩进 UI（按钮/快捷键/Tab/撤销/提示）"],
     ["_editor-tab-hl-check.mjs", "⑧ Tab/Enter/Backspace 的 VSCode 语义 + 语法着色逐像素对齐"],
+    ["_layout-create-check.mjs", "⑪ 新建剧本对话框 + 工具栏三组 + 面包屑 + 响应式"],
+    ["_rail-check.mjs", "⑫ 侧边栏 rail：集合窗口（5 图标）+ 脱离不留洞 + 收起态持久化"],
+    ["_asset-lib-check.mjs", "⑬ 素材库：预览/试听/拖拽（正文=key、舞台=当前场景）/导入/整理"],
     ["_stage-visual-check.mjs", "⑧ 编辑器舞台 100%/150% 的 16:9 观感（截图 + clip 对齐）"],
     ["_i18n-check.mjs", "⑧ i18n 运行时（zh-Hans/en-US 查找与语言持久化）"],
     ["_i18n-ui-check.mjs", "⑧ 语言切换后编辑器页文案变英文"],

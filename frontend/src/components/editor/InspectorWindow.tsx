@@ -40,6 +40,10 @@ export interface InspectorWindowProps {
   state: WindowState;
   onChange: (next: WindowState) => void;
   onClose?: () => void;
+  /** 「收进侧边栏」（`⇤`）：把这条面板挂到左侧 rail 上（用户口径：「侧边栏是
+   *  用来快速隐藏选择的」）。给了才画这个按钮 —— dock 面板用它，Map 面板的
+   *  `✕` 已经是同一个语义。 */
+  onPark?: () => void;
   /** 浮动时的最小宽/高（默认 240 / 140）。 */
   minW?: number;
   minH?: number;
@@ -130,6 +134,7 @@ export default function InspectorWindow({
   state,
   onChange,
   onClose,
+  onPark,
   minW = 240,
   minH = 140,
   bounds,
@@ -453,6 +458,18 @@ export default function InspectorWindow({
         <span className="ed-win-title">{title}</span>
         {folded && <span className="ed-win-fold-hint">{tr("editor.window.folded", undefined, "已收起")}</span>}
         <span className="ed-win-grow" />
+        {onPark ? (
+          <button
+            type="button"
+            className="ed-win-btn ed-win-park"
+            data-win-action="park"
+            onClick={onPark}
+            title={tr("editor.window.park", undefined, "收进侧边栏")}
+            aria-label={tr("editor.window.park", undefined, "收进侧边栏")}
+          >
+            ⇤
+          </button>
+        ) : null}
         {foldHandler ? (
           <button
             type="button"

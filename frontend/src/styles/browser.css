@@ -1242,6 +1242,20 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* 标头宽度 = 原来的 50%（用户口径）：标题/来源长了就省略号。 */
+  flex: 0 1 50%;
+  max-width: 50%;
+  overflow: hidden;
+}
+
+.ed-title h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 标头右侧只报「未保存」；保存态不占位（`data-editor-dirty` 只在脏时渲染）。 */
+.ed-header .ed-dirty {
+  flex: none;
 }
 
 .ed-title h1 {
@@ -1925,7 +1939,207 @@
 
 .ed-viewtabs {
   display: flex;
+  align-items: center;
   gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* 工具栏**分组**（task-11）：文件 / 视图 / 编辑。组内一个浅底胶囊、组间一条
+   细竖线——信息层级一眼可读；「像 blender/vscode 但不要模仿」= 只借**分组**的
+   组织方式，不做第二套 chrome。 */
+.ed-toolgroup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.ed-toolgroup + .ed-toolgroup {
+  margin-left: 2px;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+}
+
+.ed-toolgroup .ed-btn {
+  white-space: nowrap;
+}
+
+/* 面包屑（`[data-editor-part="breadcrumb"]`）：包 ID › 第 N 行 › 命令名。 */
+.ed-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 42ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ed-crumb b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.ed-crumb i {
+  color: var(--text-secondary);
+  font-style: normal;
+  opacity: 0.7;
+}
+
+.ed-crumb code {
+  color: var(--accent);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* 新建剧本对话框（`CreatePackDialog`）。 */
+.create-pack-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.create-pack {
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 18px 20px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+.create-pack-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.create-pack-head h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.create-pack-x {
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.create-pack-row {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.create-pack-row > span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.create-pack-row > small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.create-pack-row input,
+.create-pack-row textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.create-pack-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.create-pack-tpl {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.create-pack-tpl.on {
+  border-color: var(--accent);
+  background: rgba(244, 196, 48, 0.16);
+}
+
+.create-pack-error {
+  margin: 6px 0 10px;
+  padding: 6px 8px;
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  border-radius: 6px;
+  background: rgba(244, 67, 54, 0.1);
+  color: #ff8a80;
+  font-size: 12px;
+}
+
+.create-pack-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 响应式（task-11）：≤1100px 顶栏换行 + 面包屑收窄（rail 由 task-8 收起）；
+   ≤820px 工具面板默认收起（`.ed-split` 改纵向堆叠）、组间竖线去掉。
+   两者都只改**布局**，不动 DOM 契约（harness 仍点到每个按钮）。 */
+@media (max-width: 1100px) {
+  .ed-viewtabs {
+    flex-wrap: wrap;
+  }
+
+  .ed-toolgroup .ed-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .ed-crumb {
+    max-width: 26ch;
+  }
+}
+
+/* ≤820px：工具面板默认**收起**的口径由 rail（task-8）的收起态决定；这里只把
+   工具条压成两行、去掉组间竖线——DOM 与状态都不动，rail 随时可召回。 */
+@media (max-width: 820px) {
+  .ed-toolgroup + .ed-toolgroup {
+    border-left: 0;
+    padding-left: 6px;
+  }
+
+  .ed-toolgroup .ed-btn {
+    padding: 3px 7px;
+    font-size: 11px;
+  }
+
+  .ed-crumb {
+    max-width: 18ch;
+  }
 }
 
 /* ── 预览：填满宿主（工作台槽位 / 浮动窗）的演出面板 ───────────────── */
@@ -2318,6 +2532,281 @@
      `shellKind="dock"` 决定），Map 面板（preview / branch）有 ✕ ← 工具栏开关。
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* 左侧 rail + 工作台的主体行：rail = **收起面板的托盘**，工作台吃掉剩余宽度。
+   语义（用户口径）：点 rail 条目 = 放回工作台；面板标题条的 `⇤` = 收进侧边栏。
+   —— 同一个动作只有一处入口，rail 不是"可视性开关"。 */
+.ed-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+/*
+  侧边栏（`EditorRail.tsx`）：**只有挂上来的（收起的）面板**才在这里。
+  文字**竖排**（`writing-mode: vertical-rl`）——中文标题不用横排挤成"工具…"，
+  行高天然撑满，宽度只需 30px；整条还能再收成 22px 窄条。
+  收起态**不卸载**任何节点（`[data-rail-item]` 仍在 DOM 里）。
+*/
+.ed-rail {
+  flex: 0 0 auto;
+  width: 30px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0 6px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  overflow: hidden auto;
+}
+
+.ed-rail--collapsed {
+  width: 22px;
+}
+
+.ed-rail--empty {
+  width: 22px;
+}
+
+/* 整条收起 / 展开：与竖排文字同宽的一条窄把手。 */
+.ed-rail-toggle {
+  flex: none;
+  width: 100%;
+  padding: 4px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ed-rail-toggle:hover {
+  color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.ed-rail-tray {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 0;
+  padding-top: 4px;
+}
+
+/* 托盘条目：图标在上、标题竖排在下的**一整条**（点哪里都能召回） */
+.ed-rail-item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 5px 0 7px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ed-rail-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-left-color: var(--border);
+}
+
+.ed-rail-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ed-rail--collapsed .ed-rail-label,
+.ed-rail--collapsed .ed-rail-hint {
+  display: none;
+}
+
+.ed-rail-glyph {
+  flex: none;
+  font-size: 13px;
+}
+
+/* 中文标题竖排：reading 方向自上而下（`vertical-rl` + `text-orientation: upright`
+   对 CJK 就是"一个字一行"，不需要手动插 `<br>`）。 */
+.ed-rail-label {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 1px;
+  font-size: 11px;
+  color: inherit;
+}
+
+.ed-rail-hint {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  margin-top: 6px;
+  padding-left: 1px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.55;
+}
+
+/* rail 底部：唯一的布局动作（重置）。文字用 SR-only，harness 仍能读到 innerText。 */
+.ed-rail-layout {
+  flex: none;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.ed-rail-reset {
+  width: 100%;
+  padding: 5px 0;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ed-rail-reset:hover {
+  color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+/* SR-only（**离屏**而不是 `clip-path`：`innerText` 要保持读得到「重置布局」，
+   `layout-named.mjs` 用它断言按钮文案）。 */
+.ed-rail-sr {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ed-rail--collapsed .ed-rail-sr {
+  display: none;
+}
+
+/* 窄屏：托盘自动只留图标。 */
+@media (max-width: 1100px) {
+  .ed-rail .ed-rail-label,
+  .ed-rail .ed-rail-hint {
+    display: none;
+  }
+}
+
+/* ── 菜单栏（面包屑）+ 定位控件：**一行**（用户口径：左边腾给菜单，
+      上一行/下一行/预览到此处放右边；原来单独一条 `.ed-scrub` 行撤掉）。 ── */
+.ed-menurow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px 16px 5px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ed-menurow-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.ed-scrub-inline {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ed-scrub-inline input[type="range"] {
+  width: 180px;
+  accent-color: var(--accent);
+}
+
+.ed-scrub-inline input[type="number"] {
+  width: 56px;
+  padding: 2px 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.ed-scrub-label,
+.ed-scrub-total,
+.ed-scrub-cut {
+  white-space: nowrap;
+}
+
+/* 头部右侧的 inline 定位控件：贴着工具栏，不再单独占行。 */
+.ed-header .ed-scrub-inline {
+  margin-left: 4px;
+}
+
+/* 窄屏：菜单行换成两段（面包屑可缩，定位控件不挤）。 */
+@media (max-width: 1100px) {
+  .ed-menurow {
+    flex-wrap: wrap;
+    padding: 3px 12px 5px;
+  }
+  .ed-scrub-inline input[type="range"] {
+    width: 120px;
+  }
+}
+
+/* ── 一行式页头（`ed-header`）：返回 / 标题 / 面包屑（菜单栏）/ 定位控件 / 未保存 ── */
+.ed-header {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.ed-header .ed-crumb {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 页头右侧的定位控件：滑杆随宽度伸缩，按钮不换行。 */
+.ed-header .ed-scrub-inline {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.ed-header .ed-scrub-inline input[type="range"] {
+  flex: 0 1 160px;
+  min-width: 60px;
+  max-width: 200px;
+}
+
+/* 动作按钮行（`ed-toolbar-row`）：紧贴页头，可换行但不再和标题抢宽度。 */
+.ed-toolbar-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 16px 6px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
 /* 工作台 + 状态栏的纵向排布：工作台吃掉整页剩余高度。 */
 .wb-stage {
   flex: 1 1 auto;
@@ -2420,4 +2909,250 @@
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: 4px;
+}
+
+/* ── 素材库（task-9）：类型栏 + 搜索 + 网格 + 预览/试听条 ──────────────── */
+
+.ed-assets {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  gap: 6px;
+}
+
+.ed-assets-bar,
+.ed-assets-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.ed-assets-search {
+  flex: 1 1 120px;
+  min-width: 90px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.ed-assets-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ed-assets-btn.on {
+  border-color: var(--accent);
+  background: rgba(244, 196, 48, 0.16);
+}
+
+.ed-assets-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ed-assets-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.ed-assets-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ed-assets-kind.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ed-assets-kind small {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.ed-assets-notice {
+  flex: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(244, 196, 48, 0.12);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.ed-assets-empty,
+.ed-assets-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ed-assets-groups,
+.ed-assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  align-content: start;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.ed-assets-groups {
+  display: block;
+  overflow-y: auto;
+}
+
+.ed-assets-group h4 {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ed-assets-group .ed-assets-grid {
+  overflow: visible;
+  flex: none;
+}
+
+.ed-asset-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: grab;
+  text-align: left;
+}
+
+.ed-asset-cell.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(244, 196, 48, 0.35) inset;
+}
+
+.ed-asset-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #10141a;
+}
+
+.ed-asset-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ed-asset-glyph {
+  color: var(--text-secondary);
+  font-size: 20px;
+}
+
+.ed-asset-label {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ed-asset-uses {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.ed-asset-mark {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  color: var(--accent);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.ed-asset-star {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.45;
+}
+
+.ed-asset-star.on {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.ed-assets-preview {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.ed-assets-preview-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.ed-assets-preview-main b {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ed-assets-preview-main span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.ed-assets-audio {
+  height: 28px;
+  flex: 1 1 200px;
+}
+
+.ed-assets-preview-actions {
+  display: flex;
+  gap: 6px;
 }

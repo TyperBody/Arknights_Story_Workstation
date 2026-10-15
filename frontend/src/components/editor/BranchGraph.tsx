@@ -239,7 +239,13 @@ export default function BranchGraph({
 
   /** 手动点选（优先于光标行）；文本一变视为未点选（避免悬空 id）。 */
   const [picked, setPicked] = useState<{ text: string; id: string } | null>(null);
+  /** 键盘漫游的读数（`role="status"`）：`{text, index, total}`；文本变了就失效。 */
+  const [announce, setAnnounce] = useState<{ text: string; index: number; total: number } | null>(null);
   const selectedId = (picked && picked.text === text ? picked.id : null) ?? caretNodeId;
+  /** 读数文案（文本变了自动失效；`role="status"` 只在有选中时显示）。 */
+  const announceRow = announce && announce.text === text ? announce : null;
+  const announceIndex = announceRow?.index ?? (selectedId ? readOrder.indexOf(selectedId) : -1);
+  const announceTotal = announceRow?.total ?? readOrder.length;
   const selectedNode = useMemo(
     () => (selectedId ? layout.nodes.find((node) => node.id === selectedId) ?? null : null),
     [layout, selectedId],
@@ -282,7 +288,11 @@ export default function BranchGraph({
     () => (size.w > 0 && size.h > 0 ? fitView(layout, size.w, size.h) : { key: "", zoom: 1, x: 0, y: 0 }),
     [layout, size.w, size.h],
   );
-  const current: ViewState = view.key === boxKey ? view : { ...fitted, key: boxKey };
+  /** 当前视图 = 用户交互（`view.key` 与画布一致）否则 = 新算出的「适配」。 */
+  const current: ViewState = useMemo(
+    () => (view.key === boxKey ? view : { ...fitted, key: boxKey }),
+    [boxKey, fitted, view],
+  );
   const applyView = useCallback((next: ViewState) => {
     setView({ ...next, key: boxKey });
   }, [boxKey]);
@@ -334,6 +344,79 @@ export default function BranchGraph({
   }, [fit, zoomBy]);
   // 最新 handler 进 ref（render 期只**读**它 → 不触发 `react-hooks/refs` 的写入规则）。
   useEffect(() => { keyRef.current = handleKey; });
+
+  /**
+   * 选中的卡片**滚进视野**：按当前缩放解出平移量，把卡片带回可视区
+   * （够得着就只换选中）。在**事件处理**里调用（不在 effect 里 setState →
+   * 不触发 `react-hooks/set-state-in-effect`）。
+   */
+  const scrollIntoView = useCallback((node: LayoutNode) => {
+    const host = panFocusRef.current;
+    const width = host?.clientWidth || size.w || 320;
+    const height = host?.clientHeight || size.h || 200;
+    const zoom = current.zoom || 1;
+    const margin = 18;
+    const top = current.y + node.y * zoom;
+    const left = current.x + node.x * zoom;
+    let dx = 0;
+    let dy = 0;
+    const right = left + node.w * zoom;
+    const bottom = top + node.h * zoom;
+    if (right > width - margin) dx = width - margin - right;
+    if (left + dx < margin) dx = margin - left;
+    if (bottom > height - margin) dy = height - margin - bottom;
+    if (top + dy < margin) dy = margin - top;
+    if (dx || dy) applyView({ ...current, key: boxKey, x: r(current.x + dx), y: r(current.y + dy) });
+  }, [applyView, boxKey, current, size.h, size.w]);
+
+  /** 方向键 / `j`·`k` / Home·End：在**阅读序**里选上一张 / 下一张卡片。
+   *  `step = 1` 往阅读序后方（↓/j/End）、`-1` 往前（↑/k/Home）；`edge` 直接跳首/末。 */
+  const moveSelection = useCallback((step: 1 | -1, edge?: "first" | "last") => {
+    const order = readOrder;
+    if (!order.length) return;
+    const at = selectedId ? order.indexOf(selectedId) : -1;
+    let next = 0;
+    if (edge === "first") next = 0;
+    else if (edge === "last") next = order.length - 1;
+    else if (at < 0) next = step > 0 ? 0 : order.length - 1;
+    else next = clamp(at + step, 0, order.length - 1);
+    const id = order[next];
+    const node = layout.nodes.find((candidate) => candidate.id === id);
+    setPicked({ text, id });
+    setAnnounce({ text, index: next, total: order.length });
+    if (node) scrollIntoView(node);
+  }, [layout.nodes, readOrder, scrollIntoView, selectedId, text]);
+
+  /** 方向键处理（`onKeyDown`，挂在 `[data-branch-pan]` 上 —— 面板已聚焦才收键）。 */
+  const onPanKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const tag = (event.target as HTMLElement | null)?.tagName ?? "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const key = event.key;
+    const down = key === "ArrowDown" || key === "j" || key === "J";
+    const up = key === "ArrowUp" || key === "k" || key === "K";
+    if (down || up) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveSelection(down ? 1 : -1);
+      return;
+    }
+    if (key === "Home" || key === "End") {
+      event.preventDefault();
+      event.stopPropagation();
+      moveSelection(1, key === "Home" ? "first" : "last");
+      return;
+    }
+    if (key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      const node = selectedId ? layout.nodes.find((candidate) => candidate.id === selectedId) : layout.nodes[0];
+      if (!node) return;
+      // 编辑器光标 / 舞台跟随（老通路）+ 预览跟到该行（`onFocusLine`，可选）。
+      onJumpToLine(node.line);
+      onFocusLine?.(node.line);
+    }
+  }, [layout.nodes, moveSelection, onFocusLine, onJumpToLine, selectedId]);
 
   /**
    * 滚轮 = 以指针为锚缩放（`LAYOUT_ZOOM_MIN..MAX`）。
@@ -497,6 +580,17 @@ export default function BranchGraph({
           {layout.lanes.length > 6 ? <span className="ed-graph-legend-more">{`+${layout.lanes.length - 6}`}</span> : null}
         </span>
         <span className="bg-chrome-grow" />
+        {/* 阅读方向（task-10）：竖排（默认，层往下走）/ 横排（老的 dify 风）。 */}
+        <button
+          type="button"
+          className="bg-fit bg-direction"
+          data-branch-action="direction"
+          aria-pressed={direction === "TB"}
+          title={`${tr("editor.flow.direction", undefined, "方向")}：${tr("editor.flow.vertical", undefined, "竖排")} ↔ ${tr("editor.flow.horizontal", undefined, "横排")}`}
+          onClick={() => setDirection((value) => (value === "TB" ? "LR" : "TB"))}
+        >
+          {direction === "TB" ? `⇅ ${tr("editor.flow.vertical", undefined, "竖排")}` : `⇄ ${tr("editor.flow.horizontal", undefined, "横排")}`}
+        </button>
         {/* 缩放控件：`−` / 百分比（点按 = 适配） / `+` / 适配 —— 拖拽之外的第二条路。 */}
         <span className="bg-zoombar" data-branch-zoom-bar="1">
           <button
@@ -565,8 +659,17 @@ export default function BranchGraph({
       <div className="ed-graph-body" style={{ height: bodyHeight }} hidden={hidden}>        <div
           className="ed-graph-pan"
           data-branch-pan="1"
+          data-branch-direction={direction.toLowerCase()}
           ref={attachPan}
-          onPointerDown={onPointerDown}
+          role="group"
+          tabIndex={0}
+          aria-label={`${tr("editor.panel.branchAriaFallback", undefined, "分支图")}：${tr("editor.flow.keysHint", undefined, "↑／↓ 切换卡片，Enter 跳到该行")}`}
+          onKeyDown={onPanKeyDown}
+          onPointerDown={(event) => {
+            // 点空白 = 平移；点一下面板本身 = 把**键盘焦点**交给它（方向键才收键）。
+            onPointerDown(event);
+            if (!(event.target as Element | null)?.closest("[data-branch-node],button")) panFocusRef.current?.focus();
+          }}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
@@ -639,6 +742,8 @@ export default function BranchGraph({
                       data-branch-node={node.id}
                       data-branch-layer={node.layer}
                       data-branch-role={node.role}
+                      data-branch-line={node.line}
+                      data-branch-read-index={readOrder.indexOf(node.id)}
                       transform={`translate(${r(node.x)} ${r(node.y)})`}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -685,6 +790,13 @@ export default function BranchGraph({
             </g>
           </svg>
 
+          {/* 键盘漫游的读数（`role="status"`）：第 N / 总数 + 键位提示。 */}
+          <p className="bg-keys" data-branch-hint-keys="1" data-branch-selected={announceIndex >= 0 ? "1" : undefined} role="status">
+            {announceIndex >= 0
+              ? tr("editor.flow.selected", { n: announceIndex + 1, total: announceTotal }, `已选第 ${announceIndex + 1} / ${announceTotal} 张卡片`)
+              : tr("editor.flow.focusHint", undefined, "点一下工作流，方向键即可切换卡片")}
+            <span className="bg-keys-hint">{` · ${tr("editor.flow.keysHint", undefined, "↑／↓ 切换卡片，Enter 跳到该行")}`}</span>
+          </p>
           {!hasChoice ? (
             <p className="ed-graph-empty bg-empty" data-branch-empty="1" role="status">{tr("editor.branch.emptyHint", undefined, EMPTY_HINT_DEFAULT)}</p>
           ) : null}

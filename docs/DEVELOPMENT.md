@@ -196,16 +196,29 @@ Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust �
 
 > ⚠️ 已知限制：Linux 的 WebKitGTK 可能缺少 mp3/ogg 编解码器导致**音频不出声**，画面正常；Windows / macOS 自带编解码器无此问题。
 
-### 随包素材：起步素材集（P9）
+### 随包素材与补丁包（`starter` 四档）
 
-`src-tauri/resources/assets/starter/`（287 个文件 / 14.6 MB）是**策展**过的常用素材：
-7 张 UI 小图（PNG）+ 120 张高频背景 + 160 张主要角色立绘（PNG → WebP q78/q85）。
-它让自创剧情不再「每次打开都联网拉资料」。
+`src-tauri/resources/assets/starter/`（约 **230 MB**）是**策展**过的起步素材：
+7 张 UI 小图（PNG）+ **全量**背景 893 + 主要角色**主差分** 1747（PNG → WebP q88/90，不缩放）。
+音频（占全量素材约 77%）与其余差分做成**补丁包**，与应用**同版本号**发布。
 
-- 生成/校验：`node scripts/fanfic/fetch-starter-assets.mjs`（`--check` 离线、`--budget=25MB`、
-  `--only=core|background|portrait`、`--force`）。选择规则**确定性**：按剧情语料的
-  `[Background(image=…)]` / `[Character|charslot(name=…)]` 频次降序；语料目录同
-  `scripts/fanfic/stage-selftest.mjs`（`AKSTAGE_CORPUS_DIR` 可覆盖）。
+| `--pack` | 内容 | 体积 | 产物 |
+|---|---|---|---|
+| `starters` | UI + 背景全量 + 每 base 主差分（**无音频**） | ≈230 MB | `resources/assets/starter/`（随包） |
+| `patch-assets` | UI + 背景全量 + 立绘**全差分**（= `full` 去音频） | ≈220 MB | `build/artifacts/Arkstage-<ver>-assets-assets.zip` |
+| `patch-audio` | **只有音频**（`story_variables` → mp3） | ≈770 MB | `build/artifacts/Arkstage-<ver>-assets-audio.zip` |
+| `full` | 全部（历史行为） | ≈1000 MB | 目录（`--archive` 才打 zip） |
+
+补丁 zip 条目名**扁平**，解到 `<资源目录>/assets/starter/` 即生效（`prts-cdn://` 覆盖层按
+canonical key 命中）。
+
+- 命令：`npm run assets:starter` / `assets:patch:assets` / `assets:patch:audio`；
+  离线校验 `assets:check`，只出清单 `assets:plan`，`--dir=` 换产出目录，
+  `--budget=`/`--concurrency=` 调预算与并发，`--archive` 给非补丁档也打 zip。
+- 选择规则**确定性**：按剧情语料 `[Background(image=…)]` / `[Character|charslot(name=…)]`
+  / `$变量` 频次降序；语料目录同 `scripts/fanfic/stage-selftest.mjs`（`AKSTAGE_CORPUS_DIR` 覆盖）。
+- 已知缺失（404 / PRTS 图床中转页）缓存 `build/starter-missing.json`，重跑不再打网络
+  （图床补齐后删缓存即可增量补收）。
 - 清单：`curated.json`（key/group/bytes/sha256）+ `bundles.json`（canonical key → 文件名）。
   三者（含 `SOURCES.md` 出处）由脚本一次生成，`build/harness/starter-assets.mjs` 全量回归。
 - **随包**：`tauri.conf.json` 的 `bundle.resources` 带上 `resources/assets/starter`（**只加这一条**，

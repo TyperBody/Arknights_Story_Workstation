@@ -19,6 +19,8 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
+/** 仓库根（harness 真身在 `build/harness/`）：`/@fs` 回退路径用。 */
+const REPO = resolve(import.meta.dirname, "..", "..");
 // 截图前 Playwright 会等 `document.fonts.ready`（所有 frame）；编辑器页里有个
 // 常驻的引擎 iframe，偶发**永挂**（30s → 截图超时）。正文测量全是 DOM 断言，
 // 字体本机 monospace 已 loaded，跳过这个等待即可（可用环境变量覆盖回默认）。
@@ -147,8 +149,9 @@ const setCaret = (from, to = from) =>
 await openWith(SCRIPT);
 // 截图：**正文区**（`.ed-code`）特写 —— 人眼可辨「指令名/参数/字符串/数字/说话人/
 // 正文/注释」的明暗差异；整体页另一张（`editor-hl-shot.png`）。
-await page.locator(".ed-code").screenshot({ path: `${OUT}/editor-hl.png` });
-await page.screenshot({ path: `${OUT}/editor-hl-page.png` });
+// 截图只是**证据**：GPU/zygote 偶发崩页时别让 harness 自己挂（重来一次即可）。
+await page.locator(".ed-code").screenshot({ path: `${OUT}/editor-hl.png` }).catch(() => {});
+await page.screenshot({ path: `${OUT}/editor-hl-page.png` }).catch(() => {});
 
 const geo = await page.evaluate(() => {
   const ta = document.querySelector(".ed-textarea");
@@ -513,15 +516,16 @@ await openWith(SCRIPT);
     return { readonly: hl.dataset.hlReadonly, n: hl.querySelectorAll("[data-hl-line]").length };
   });
   ok("(f) 着色层挂载且非只读（Tauri/dev 语义）", kernelAlive.n === SCRIPT.split("\n").length, JSON.stringify(kernelAlive));
-  const kernel = await page.evaluate(async ([lines]) => {
+  const kernel = await page.evaluate(async ([lines, root]) => {
     // 页面里模型是动态 import 的；这里从同一路径取（alias 或相对路径）。
+    // `REPO` 是 Node 侧常量 → 必须当参数传进来（浏览器里读不到）。
     let mod = null;
-    for (const spec of ["/src/akstage/local/editorModel.js", "/@fs" + "/home/typer/桌面/galArkn/arkstage/src/akstage/local/editorModel.js"]) {
+    for (const spec of ["/src/akstage/local/editorModel.js", "/@fs" + root + "/src/akstage/local/editorModel.js"]) {
       try { mod = await import(/* @vite-ignore */ spec); break; } catch { /* 试下一个 */ }
     }
     if (!mod || typeof mod.tokenizeLine !== "function") return { ok: false, reason: mod ? "no tokenizeLine" : "module load failed" };
     return { ok: true, KINDS: mod.HIGHLIGHT_KINDS ?? null, spans: lines.map((raw) => mod.tokenizeLine(raw)) };
-  }, [SCRIPT.split("\n")]);
+  }, [SCRIPT.split("\n"), REPO]);
   if (!kernel.ok) {
     console.log(`skip (f) 逐 span 对拍 — ${kernel.reason}（task-6 的 tokenizeLine 还没落盘；DOM 走同契约的降级 tokenizer）`);
   } else {

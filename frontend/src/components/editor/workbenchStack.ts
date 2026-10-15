@@ -139,8 +139,7 @@ export function normalize(state: WorkbenchState, visible?: PanelId[]): Workbench
       if (!isPanelId(id) || !allow.has(id) || taken.has(id)) return null;
       taken.add(id);
       return { t: "panel", id };
-    }
-    const dir: Dir = node.dir === "col" ? "col" : "row";
+    }    const dir: Dir = node.dir === "col" ? "col" : "row";
     const a = clean(node.a);
     const b = clean(node.b);
     if (!a && !b) return null;

@@ -439,6 +439,10 @@ pub fn run() {
             assets::list_library,
             assets::seed_library,
             assets::delete_library_pack,
+            // 新建剧本包（task-11）：`library/<id>/{pack.json,script.txt}`（.tmp + rename）
+            assets::create_library_pack,
+            // 素材库导入（task-9）：本地文件 → `<pack>/assets/` + `build/assets.local.json`
+            assets::import_pack_asset,
             // In-app story editor: 读/写剧本包内的文本文件（script.txt / pack.json）
             assets::read_library_file,
             assets::write_library_file,

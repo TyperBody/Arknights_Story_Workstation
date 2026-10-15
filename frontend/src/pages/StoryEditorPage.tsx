@@ -16,6 +16,7 @@ import InspectorWindow, { type WindowState } from "../components/editor/Inspecto
 import { registerWindowSpecs, type PanelChromeProps } from "../components/editor/inspectorWindow";
 import Workbench from "../components/editor/Workbench";
 import FloatLayer from "../components/editor/FloatLayer";
+import EditorRail from "../components/editor/EditorRail";
 import {
   defaultState,
   has,
@@ -33,24 +34,30 @@ import {
   INSPECTOR_DEFAULT_H,
   INSPECTOR_MAX_H,
   INSPECTOR_MIN_H,
-  PANELS,
   WINDOW_SPECS,
   activeLayout,
   consumeLegacy,
-  isDockPanel,
+  defaultVisible,
   isMapPanel,
   isPanelId,
   loadLayout,
   migrateLegacy,
+  panelsInOrder,
   readLayout,
+  readRail,
   readView,
   saveLayoutNamed,
+  saveRail,
   saveView,
   specOf,
 } from "../components/editor/workbenchLayout";
 import { createHistory, diffOf, type HistoryEntry } from "../components/editor/history";
 import ScriptHighlight from "../components/editor/ScriptHighlight";
-import { autoIndentOnEnter, outdentOnBackspace } from "../components/editor/vscodeKeys";
+import { autoIndentOnEnter, lineHeadCommand, outdentOnBackspace } from "../components/editor/vscodeKeys";
+import type { CreatePackDialogProps, CreatedPack } from "../components/editor/CreatePackDialog";
+import type { AssetLibraryProps, AssetTable } from "../components/editor/AssetLibrary";
+import { pickAssetTables } from "../lib/assetTables";
+import { BUNDLED_STAGE_KEYS } from "../lib/stageCatalog";
 import { disposeEngineFrame } from "../lib/storyPlayerBoot";
 // engineBoot / localStories 在别处已是**静态**依赖（predownload.ts 等），页面这里
 // 改成静态 import 后，Rollup 的 "INEFFECTIVE_DYNAMIC_IMPORT"（同一模块既静态
@@ -64,6 +71,7 @@ import { listLocalStories } from "../lib/localStories";
 // 同样消除 "INEFFECTIVE_DYNAMIC_IMPORT"。
 import { buildPackBundle, localPacks, localUpstream, stripControls } from "../../../src/akstage/local/library.js";
 import { loadStoryRuntime } from "../lib/predownload";
+import { loadBundledEngine } from "../lib/enginePack";
 import { pushLog } from "../lib/debugLog";
 
 /**
@@ -526,6 +534,8 @@ interface StagePaneProps {
   className?: string;
   model?: unknown;
   resolveUrl?: (key: string, kind?: string) => string;
+  /** 素材库拖到舞台（task-9）：`kind` 决定改背景/立绘/音频的哪一行。 */
+  onDropAsset?: (key: string, kind?: string) => void;
 }
 
 interface BranchGraphProps {
@@ -533,6 +543,8 @@ interface BranchGraphProps {
   caretLine: number;
   onJumpToLine: (line: number) => void;
   onPatch?: (nextText: string, caretLine?: number) => void;
+  /** 可选（task-10）：图上 Enter = 预览也跟到该行（`previewUpto` 通路）。 */
+  onFocusLine?: (line: number) => void;
   height?: number;
   onClose?: () => void;
 }
@@ -578,7 +590,10 @@ function workbenchBoot(): WorkbenchBoot {
   //    顺序很关键：若先 `normalize(state, [dock…])`，树里的 Map 面板会被当成
   //    "不该在树里"而被移出 → 分隔条份额被重排（用户看到的"宽度也回默认了"）。
   const view = readView();
-  const visible: PanelId[] = PANELS.filter(isDockPanel);
+  // 默认可见 = `defaultVisible()`（常驻 dock **且默认放好**）：`assets`（素材库）
+  // 是 dock 但**不在默认布局**里，所以它要从 rail 放出才进 visible —— 否则
+  // 「visible 里有、树里没有」会让 rail 的第一次点击变成一次空收起。
+  const visible: PanelId[] = defaultVisible();
   for (const raw of view?.visible ?? []) {
     const id = raw as PanelId;
     if (isPanelId(id) && !visible.includes(id)) visible.push(id);
@@ -590,8 +605,9 @@ function workbenchBoot(): WorkbenchBoot {
   const raw = readLayout(activeLayout()) ?? readLayout(DEFAULT_LAYOUT_NAME);
   let state = normalize((raw ? parse(raw) : null) ?? defaultState(), visible);
   for (const id of visible) {
-    // 视图状态说"开着"，但树里没有（例如手动清过键）→ 补回右侧。
-    if (isMapPanel(id) && !has(state, id)) state = restore(state, id, "root", "right");
+    // 视图状态说"开着"，但树里没有（例如手动清过键 / 布局串里丢了）→ 补回右侧。
+    // 常驻 dock（toolpanel / stage / assets）同理：说了开着就得在树里。
+    if (!has(state, id)) state = restore(state, id, "root", "right");
   }
   for (const item of legacy) {
     if (!item.panel || !isMapPanel(item.panel)) continue;
@@ -737,6 +753,10 @@ const StagePanePart = optionalPart<StagePaneProps>("StagePane.tsx");
 const BranchGraphPart = optionalPart<BranchGraphProps>("BranchGraph.tsx");
 const ControllerInspectorPart = optionalPart<ControllerInspectorProps>("ControllerInspector.tsx");
 const ControllerWizardPart = optionalPart<ControllerWizardProps>("ControllerWizard.tsx");
+/** 新建剧本对话框（task-11）：列表页与编辑器空态共用**同一个**组件。 */
+const CreatePackDialogPart = optionalPart<CreatePackDialogProps>("CreatePackDialog.tsx");
+/** 素材库面板（task-9）：懒加载，缺文件 → 占位不白屏。 */
+const AssetLibraryPart = optionalPart<AssetLibraryProps>("AssetLibrary.tsx");
 
 
 // ─── 舞台/检视器的数据装配（纯函数） ───────────────────────────────────────
@@ -1233,6 +1253,15 @@ export default function StoryEditorPage() {
     window.addEventListener("pointerup", up);
   }, []);
   const [wizardOpen, setWizardOpen] = useState(false);
+  /** 「新建剧本…」对话框（task-11）；纯 Vite 时按钮禁用 + title。 */
+  const [createOpen, setCreateOpen] = useState(false);
+  /** 素材库（task-9）：引擎表（快照优先）+ 当前包自带映射；懒加载、失败留空。 */
+  const [assetTables, setAssetTables] = useState<{ backgrounds: AssetTable; characters: AssetTable; variables: Record<string, unknown> | null }>({
+    backgrounds: null,
+    characters: null,
+    variables: null,
+  });
+  const [packAssetMap, setPackAssetMap] = useState<Record<string, string> | null>(null);
   const [stageMoves, setStageMoves] = useState<Array<{ slot: Slot; x: number; y: number }>>([]);
 
   // 模型（editcore 并行交付）：加载完成前先用降级 lint，页面不会白屏。
@@ -1731,6 +1760,46 @@ export default function StoryEditorPage() {
     setHover(null);
   }, [text]);
 
+  /** 素材表：首帧后台取一次（内置快照 → runtime）；失败静默（面板显示"没就绪"）。 */
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const pack = await loadBundledEngine();
+        const picked = pack?.snapshot
+          ? pickAssetTables(pack.snapshot.data as Record<string, unknown>)
+          : await Promise.resolve(pickAssetTables(null));
+        if (alive) setAssetTables(picked);
+      } catch {
+        // 快照缺失：资产表保持 null（面板给「素材表还没就绪」）。
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /** 包自带素材映射（`build/assets.local.json`）：切包时重读；无 Tauri → null。 */
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const raw = await tauriInvoke<string | null>("read_library_file", { id, name: "build/assets.local.json" });
+        const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+        const map: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed ?? {})) {
+          if (typeof value === "string") map[key] = value;
+        }
+        if (alive) setPackAssetMap(Object.keys(map).length ? map : null);
+      } catch {
+        if (alive) setPackAssetMap(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
   const acceptCompletion = useCallback(() => {
     if (!popup) return;
     const item = popup.items[popup.index];
@@ -2212,6 +2281,12 @@ export default function StoryEditorPage() {
     window.setTimeout(() => setIndentHint(""), 2400);
   }, [tr]);
 
+  /** 素材库动作的一行提示（复用状态栏同一条 `[data-indent-hint]` 通道）。 */
+  const showAssetHint = useCallback((key: string) => {
+    setIndentHint(tr("editor.assets.applied", { key }, `已应用到当前场景：${key}`));
+    window.setTimeout(() => setIndentHint(""), 2400);
+  }, [tr]);
+
   /** 找光标所在（或最近的）`[Decision]` 起点行号（1 基）；没有就返回 0。 */
   const decisionLineAt = useCallback((offset: number): number => {
     const full = textRef.current;
@@ -2438,6 +2513,22 @@ export default function StoryEditorPage() {
     return text.slice(start, end);
   }, [lineStarts, text, caretLineIndex]);
 
+  /** 面包屑里的「命令名」：当前行的 controller（`tokenizeLine` 优先，降级走
+   *  `lineHeadCommand` —— 两者都只看行首的 `[Cmd`）。 */
+  const breadcrumbCommand = useMemo(() => {
+    const m = modelRef.current;
+    if (m?.tokenizeLine) {
+      try {
+        const spans = m.tokenizeLine(caretLineText) ?? [];
+        const hit = spans.find((span) => span.kind === "controller" || span.kind === "speaker");
+        if (hit) return caretLineText.slice(hit.from, hit.to);
+      } catch {
+        // 落到轻量解析。
+      }
+    }
+    return lineHeadCommand(caretLineText) ?? "";
+  }, [caretLineText]);
+
   /** 检视器改完一行：整行替换（保留当前光标 → 行首）。 */
   const onInspectorApply = useCallback(
     (next: string) => {
@@ -2495,20 +2586,54 @@ export default function StoryEditorPage() {
    * 「关掉/打开的分支图，重开页面又变回去」。
    */
   const mapToggle = useCallback((id: PanelId, force = false) => {
-    setVisible((prev) => {
-      const on = prev.includes(id);
-      const want = force ? true : !on;
-      if (want === on) return prev;
-      const nextVisible = want ? [...prev, id] : prev.filter((value) => value !== id);
-      setWb((state) => {
-        const nextState = want ? (has(state, id) ? state : restore(state, id, "root", "right")) : minimize(state, id);
-        saveLayoutNamed(activeLayoutRef.current, stringify(nextState));
-        return nextState;
-      });
-      persistView(nextVisible, floatsRef.current, foldedRef.current);
-      return nextVisible;
+    // ⚠️ 用 `visibleRef`（每次渲染同步的镜像）算，**别**在 `setVisible` 的 updater
+    // 里调 `setWb` —— updater 在渲染期跑（StrictMode 还会跑两遍），那里的
+    // `setWb` 要等**下一轮**才生效（实测：rail 点 assets → 面板要再点一次才进树）。
+    // `on` = **在工作台里**（visible 且树里有）：rail 图标 / 开关按钮的语义都是
+    // 「收起 / 放出这条面板」，所以在树里才算"已放出"（visible 与树短暂不一致时
+    // 也不会出现"点了没反应"）。
+    const on = visibleRef.current.includes(id) && has(wbRef.current, id);
+    const want = force ? true : !on;
+    if (want === on) return;
+    const nextVisible = want ? [...visibleRef.current, id] : visibleRef.current.filter((value) => value !== id);
+    visibleRef.current = nextVisible; // 同一 tick 里连点两次也能拿到新值
+    setVisible(nextVisible);
+    setWb((state) => {
+      const nextState = want ? (has(state, id) ? state : restore(state, id, "root", "right")) : minimize(state, id);
+      saveLayoutNamed(activeLayoutRef.current, stringify(nextState));
+      return nextState;
     });
+    persistView(nextVisible, floatsRef.current, foldedRef.current);
   }, []);
+
+  /** 侧边栏（rail）：整条收起 / 展开（`prts-editor-rail`；DOM 上图标不卸载）。 */
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => readRail() === "collapsed");
+
+  /**
+   * rail 图标 = **收起 / 放出整条面板**（含常驻 dock；用户原话「引入侧边栏的概念
+   * 可以快速收缩 集合窗口」）。与 `mapToggle` 完全同一条语义 + 同一条持久化路径：
+   * - 「放出」= `restore`（放回工作台右侧）+ `visible` 加回 → 内容重建，状态由
+   *   组件自己的 `folded` 记忆（`persistView` 保留 `folded`，不销毁编辑态）；
+   * - 「收起」= `minimize`（从树里摘掉）+ `visible` 摘掉 → 邻居占满。
+   */
+  const railRestorePanel = useCallback((id: PanelId) => mapToggle(id, true), [mapToggle]);
+
+  /**
+   * rail 的**托盘**清单：只有**收起（挂上来）**的面板才在这里 ——
+   * 用户口径「侧边栏有东西挂到侧边栏才显示的」「侧边栏是用来快速隐藏选择的
+   * 而不是可视不可视」。工作台里正显示的面板**不占** rail。
+   */
+  const railItems = useMemo(
+    () =>
+      panelsInOrder()
+        .filter((id) => !inTree(id))
+        .map((id) => ({
+          id,
+          title: tr(`editor.panel.title.${id}`, undefined, specOf(id).title),
+          reason: isMapPanel(id) ? ("map" as const) : ("park" as const),
+        })),
+    [inTree, tr]
+  );
 
   /**
    * **布局 = 自动记忆**（`prts-editor-wb:default`，改动即落库）。
@@ -2631,6 +2756,40 @@ export default function StoryEditorPage() {
             onScroll={syncCaret}
             onMouseMove={(event) => hoverAt(event.clientX, event.clientY)}
             onMouseLeave={() => setHover(null)}
+            // 素材库拖进来的 key → 插到**落点**（量不到就插光标处），走 `applyEdit`
+            //（一条历史，`Ctrl+Z` 可撤）。
+            onDragOver={(event) => {
+              if (!event.dataTransfer) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+            }}
+            onDrop={(event) => {
+              const raw = (() => {
+                try {
+                  return event.dataTransfer?.getData("text/plain") ?? "";
+                } catch {
+                  return "";
+                }
+              })();
+              const key = raw.trim();
+              if (!key) return;
+              event.preventDefault();
+              let offset = event.currentTarget.selectionStart ?? caret.offset;
+              try {
+                const hit = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+                if (hit) {
+                  const before = document.createRange();
+                  before.selectNodeContents(event.currentTarget);
+                  before.setEnd(hit.startContainer, hit.startOffset);
+                  offset = before.toString().length;
+                }
+              } catch {
+                // 量不到落点：插到当前光标。
+              }
+              applyEdit(offset, offset, key);
+              event.currentTarget.focus();
+              requestAnimationFrame(syncCaret);
+            }}
             onKeyDown={(event) => {
               const mod = event.ctrlKey || event.metaKey;
               if (mod && event.key.toLowerCase() === "s") {
@@ -2777,6 +2936,21 @@ export default function StoryEditorPage() {
           )}
         </div>
       </div>
+
+      {loadState === "empty" && (
+        <div className="ed-code-empty" data-create-empty="1" data-editor-part="create-empty">
+          <p>{tr("editor.create.emptyHint", undefined, "还没有打开剧本包：新建一个，或从「同人剧本」页进入。")}</p>
+          <button
+            className="btn-primary"
+            data-editor-action="create"
+            onClick={() => setCreateOpen(true)}
+            disabled={!inTauri()}
+            title={inTauri() ? undefined : tr("editor.create.needDesktop", undefined, "新建剧本需要桌面版（Tauri）。")}
+          >
+            {tr("editor.create.button", undefined, "新建剧本…")}
+          </button>
+        </div>
+      )}
 
       {loadState === "ready" && !text.trim() && (
         <div className="ed-code-empty">
@@ -2975,6 +3149,8 @@ export default function StoryEditorPage() {
               onMove={onStageMove}
               onSelect={onStageSelect}
               selected={stageSelected}
+              /* 素材库拖到舞台 = 应用到当前场景（task-9）。 */
+              onDropAsset={(key: string, kind?: string) => applyAssetToStage({ key, kind })}
             />
           </Suspense>
         ) : (
@@ -2986,6 +3162,108 @@ export default function StoryEditorPage() {
       </div>
     </div>
   );
+
+  /**
+   * 「插入 key」：把素材 key 插到**光标处**（走 `applyEdit` → 进撤销栈、
+   * `Ctrl+Z` 可撤）。多行 selection 时替换选区（与普通输入一致）。
+   */
+  const insertAssetKey = useCallback(
+    (key: string) => {
+      const el = taRef.current;
+      const from = el?.selectionStart ?? caret.offset;
+      const to = el?.selectionEnd ?? from;
+      applyEdit(from, to, key);
+      el?.focus();
+    },
+    [applyEdit, caret.offset]
+  );
+
+  /**
+   * 「应用到舞台 / 当前场景」：按素材类型改**当前光标行**（找不到就改整篇第一处）：
+   * - `background` → `[Background(image="<key>")]` 行的 `image=`；
+   * - `character` → 当前槽位行（`[charslot]/[Character]/[nameslot]`）的 `name=`；
+   * - `music`/`sound` → `[PlayMusic(key=)]` / `[PlaySound(key=)]` 的 `key=`。
+   *
+   * 走 `withArg`（既有就地补丁），一次 `applyEdit` = 一条撤销。
+   */
+  const applyAssetToStage = useCallback(
+    (asset: { key: string; kind?: string }) => {
+      const command = asset.kind === "background"
+        ? "background"
+        : asset.kind === "character"
+          ? "character"
+          : asset.kind === "music"
+            ? "playmusic"
+            : asset.kind === "sound"
+              ? "playsound"
+              : "";
+      const argKey = asset.kind === "music" || asset.kind === "sound" ? "key" : asset.kind === "background" ? "image" : "name";
+      const wanted = command ? new RegExp(`^\\[\\s*(@\\w+\\s+)?${command}\\b`, "i") : null;
+      const full = textRef.current;
+      const rows = full.split("\n");
+      let index = caretLineIndex;
+      const starts = lineStartsRef.current;
+      const rowOf = (offset: number) => Math.max(0, starts.filter((start) => start <= offset).length - 1);
+      if (wanted) {
+        const matches = (row: number) => wanted.test(rows[row] ?? "");
+        if (!matches(index)) {
+          const forward = rows.findIndex((_, row) => row >= index && matches(row));
+          const found = forward !== -1 ? forward : rows.findIndex((_, row) => matches(row));
+          if (found === -1) {
+            // 没有对应指令：在光标行插一条（模板给全参数，保证可播）。
+            const line = asset.kind === "background"
+              ? `[Background(image="${asset.key}", fadetime=0.5, block=true)]`
+              : asset.kind === "character"
+                ? `[charslot(slot="m", name="${asset.key}", duration=0.5)]`
+                : asset.kind === "music"
+                  ? `[PlayMusic(key="${asset.key}", volume=1)]`
+                  : `[PlaySound(key="${asset.key}")]`;
+            const start = starts[index] ?? 0;
+            const end = (starts[index + 1] ?? full.length + 1) - 1;
+            applyEdit(start, end, `${line}`, start + line.length);
+            jumpToLine(index + 1);
+            showAssetHint(asset.key);
+            return;
+          }
+          index = found;
+        }
+      }
+      const start = starts[index] ?? 0;
+      const line = rows[index] ?? "";
+      const next = withArg(line, argKey, asset.key);
+      if (next === line) {
+        showAssetHint(asset.key);
+        return;
+      }
+      applyEdit(start, start + line.length, next, start + next.length);
+      jumpToLine(rowOf(start) + 1);
+      showAssetHint(asset.key);
+    },
+    [applyEdit, caretLineIndex, jumpToLine, showAssetHint]
+  );
+
+  /** 素材库面板（task-9）：懒加载部件；缺文件 → 一行占位（页面不白屏）。 */
+  const renderAssetPane = () => {
+    if (!AssetLibraryPart) {
+      return <div className="ed-inspector-empty">{tr("editor.panel.assetsPlaceholder", undefined, "素材库：预览 / 试听 / 拖拽 / 导入。")}</div>;
+    }
+    return (
+      <Suspense fallback={<div className="ed-inspector-empty">{tr("editor.assets.loading", undefined, "正在读素材表…")}</div>}>
+        <AssetLibraryPart
+          backgrounds={assetTables.backgrounds}
+          characters={assetTables.characters}
+          variables={assetTables.variables}
+          script={text}
+          packKeys={packAssetMap}
+          bundledKeys={BUNDLED_STAGE_KEYS}
+          packId={id}
+          onInsertKey={insertAssetKey}
+          onApplyToStage={applyAssetToStage}
+          onImported={() => setPackAssetMap((prev) => prev)}
+        />
+      </Suspense>
+    );
+  };
 
   /** 预览（Map）：iframe 宿主 + 重载 / 放大 / 关闭。
    *  面板**填满壳**（工作台槽位 / 浮动窗）：高度归工作台的 split `share` 或浮动
@@ -3031,6 +3309,10 @@ export default function StoryEditorPage() {
           text={text}
           caretLine={caret.line}
           onJumpToLine={(line: number) => jumpToLine(line)}
+          /* 图上按 Enter：编辑器跳行之外，**预览也跟到该行** —— 复用底部
+             「▶ 预览到此处」的同一条通路（`previewUpto`），harness 读定位滑杆的
+             `value` 即可验收「键盘漫游 → 预览跟随」。 */
+          onFocusLine={(line: number) => void openPreview(line)}
           onPatch={(nextText: string, line?: number) => {
             // 图上改分支 = 一次"整体替换"（撤销可回到改前）。
             const before: HistoryEntry = { text: textRef.current, sel: [0, 0] };
@@ -3146,7 +3428,15 @@ export default function StoryEditorPage() {
    */
   /** 面板内容（与窗口壳分离：浮动时壳要挂到 `[data-wb-float-layer]`）。 */
   const panelBodyFor = (id: PanelId) =>
-    id === "toolpanel" ? renderToolpanel() : id === "stage" ? renderStagePane() : id === "preview" ? renderPreviewPane() : renderBranchPane();
+    id === "toolpanel"
+      ? renderToolpanel()
+      : id === "stage"
+        ? renderStagePane()
+        : id === "preview"
+          ? renderPreviewPane()
+          : id === "assets"
+            ? renderAssetPane()
+            : renderBranchPane();
 
   /**
    * 窗口壳（**由页面**渲染 —— 浮动窗在层里、块在树里，都是同一个 `InspectorWindow`）。
@@ -3163,7 +3453,10 @@ export default function StoryEditorPage() {
       minH={specOf(id).minH}
       chrome={chromeFor(id)}
       absoluteRect
+      // Map 面板：`✕` = 从工作台收起（同一语义的另一处入口，见 rail 的口径）。
       onClose={isMapPanel(id) ? () => mapToggle(id) : undefined}
+      // 常驻面板（toolpanel / stage / assets）：`⇤` = **收进侧边栏**。
+      onPark={isMapPanel(id) ? undefined : () => mapToggle(id)}
       active={selected === id}
       onSelect={() => setSelected((prev) => (prev === id ? null : id))}
       data-wb-detached={opts.detached ? "1" : undefined}
@@ -3191,156 +3484,188 @@ export default function StoryEditorPage() {
 
   return (
     <div className={`editor-page${readOnly ? " readonly" : ""}`} ref={rootRef}>
+      {/*
+        一行式页头：`◀ 返回` / `剧本名（+来源）` / **菜单栏**（面包屑：包 › 第 N 行 ›
+        命令）/ `定位控件`（滑杆 + 行号 + 「▶ 预览到此处」）/ `未保存`。
+        用户口径：「demo 标头的宽度减到原来的 50%，只进行为未保存提示」「引入
+        菜单栏，上一行 / 下一行 / 预览到此处放到右边，左边腾给菜单，共占一行」。
+        动作按钮（新建 / 重新载入 / 保存 / 校验 / 预览 / 分支图 / 布局…）仍在
+        下方工具栏（`[data-rail-group]`）。
+      */}
       <div className="browser-header ed-header">
         <button className="back-icon" onClick={() => navigate(-1)} aria-label={tr("editor.toolbar.back", undefined, "返回")}>
           ◀
         </button>
-        <div className="ed-title">
-          <h1>{title}</h1>
-          <span className="ed-sub">
+        <div className="ed-title" data-editor-part="title">
+          <h1 title={title}>{title}</h1>
+          <span className="ed-sub" title={`${id || ""} · ${sourceName}`}>
             {id || tr("editor.stage.noPackId", undefined, "（无包 ID）")} · <code>{sourceName}</code>
             {loadState === "loading" ? tr("editor.toolbar.loading", undefined, " · 载入中…") : ""}
           </span>
         </div>
+        {/* 菜单栏（左边）：包 › 第 N 行 › 当前命令名。 */}
+        <span className="ed-crumb" data-editor-part="breadcrumb" title={caretLineText}>
+          <b>{id || tr("editor.stage.noPackId", undefined, "（无包 ID）")}</b>
+          <i>›</i>
+          {tr("editor.status.line", { line: caret.line }, `第 ${caret.line} 行`)}
+          <i>›</i>
+          <code>{breadcrumbCommand || tr("editor.diagnostics.emptyLine", undefined, "（空行）")}</code>
+        </span>
         <span className="ed-spacer" />
-        <div className="ed-viewtabs">
-          <button className="ed-btn" onClick={runLint} title={tr("editor.toolbar.lintTitle", undefined, "重新运行校验（实时诊断也会自动刷新）")}>
-            {tr("editor.toolbar.lint", undefined, "校验")}
+        {/* 右边：定位控件（滑杆 + 行号）+ 上一行 / 下一行 / 预览到此处。 */}
+        <div className="ed-scrub-inline ed-scrub" data-editor-part="scrub-inline">
+          <span className="ed-scrub-label">{tr("editor.scrub.label", undefined, "定位")}</span>
+          <input
+            type="range"
+            min={1}
+            max={Math.max(1, lineStarts.length)}
+            value={Math.min(lineStarts.length, Math.max(1, scrubLine))}
+            aria-label={tr("editor.scrub.aria", undefined, "剧本行定位")}
+            onChange={(event) => jumpToLine(Number(event.target.value))}
+          />
+          <input
+            type="number"
+            min={1}
+            max={Math.max(1, lineStarts.length)}
+            value={Math.min(lineStarts.length, Math.max(1, scrubLine))}
+            aria-label={tr("editor.scrub.gutterAria", undefined, "行号")}
+            onChange={(event) => jumpToLine(Number(event.target.value) || 1)}
+          />
+          <span className="ed-scrub-total">/ {lineStarts.length}</span>
+          {previewUpto > 0 && <span className="ed-scrub-cut">{tr("editor.scrub.cutNotice", { line: previewUpto }, `预览截到第 ${previewUpto} 行`)}</span>}
+          <button
+            className="ed-scrub-btn"
+            data-editor-action="line-prev"
+            onClick={() => jumpToLine(Math.max(1, caret.line - 1))}
+            disabled={caret.line <= 1}
+            title={tr("editor.scrub.upTitle", undefined, "光标上移一行")}
+          >
+            {tr("editor.scrub.up", undefined, "▲ 上一行")}
           </button>
           <button
-            className="ed-btn"
-            onClick={() => {
-              mapToggle("preview", true);
-              void openPreview();
-            }}
-            title={tr("editor.toolbar.previewTitle", undefined, "用当前编辑内容直接开演整篇（不必先保存；预览 = Map，开演时自动放进工作台）")}
+            className="ed-scrub-btn"
+            data-editor-action="line-next"
+            onClick={() => jumpToLine(Math.min(lineStarts.length, caret.line + 1))}
+            disabled={caret.line >= lineStarts.length}
+            title={tr("editor.scrub.downTitle", undefined, "光标下移一行")}
           >
-            {tr("editor.toolbar.preview", undefined, "预览")}
+            {tr("editor.scrub.down", undefined, "▼ 下一行")}
           </button>
           <button
-            className="ed-btn"
-            data-editor-action="indent-region"
-            onClick={() => indentRegion("region")}
-            title={tr("editor.indent.title", undefined, "给选中的分支线路加两格缩进；只为可读，送引擎前会自动去掉行首空白")}
+            className="ed-scrub-btn"
+            data-editor-action="preview-here"
+            onClick={() => void openPreview(caret.line)}
+            title={tr("editor.scrub.cutHereTitle", undefined, "按当前光标行截断剧本，从第一行开演到此处（不必先保存）")}
           >
-            {tr("editor.indent.button", undefined, "缩进区域")}
+            {tr("editor.scrub.cutHere", undefined, "▶ 预览到此处")}
           </button>
-          <button
-            className="ed-btn"
-            onClick={() => toggleInspector()}
-            title={tr("editor.toolbar.inspectorTitle", undefined, "显示/隐藏控制器检视器")}
-          >
-            {showInspector ? tr("editor.toolbar.inspectorShow", undefined, "收起检视器") : tr("editor.toolbar.inspectorHide", undefined, "检视器")}
-          </button>
-          <button
-            className={`ed-btn${inTree("branch") ? " on" : ""}`}
-            onClick={() => mapToggle("branch")}
-            disabled={!BranchGraphPart}
-            title={
-              BranchGraphPart
-                ? tr("editor.toolbar.branchTitleReady", undefined, "分支图 = Map：按 Decision/Predicate 画剧情走向；开/关都在工作台里（拖标题条可拼接）")
-                : tr("editor.toolbar.branchTitleTodo", undefined, "分支图由并行任务交付；文件落盘后自动可用")
-            }
-          >
-            {tr("editor.toolbar.branch", undefined, "⌥ 分支图")}
-          </button>
-          <button
-            className={`ed-btn${inTree("preview") ? " on" : ""}`}
-            onClick={() => mapToggle("preview")}
-            title={tr("editor.toolbar.previewPanelTitle", undefined, "预览 = Map：把它放进 / 移出工作台（开演用左边的「预览」按钮）")}
-          >
-            {tr("editor.toolbar.previewPanel", undefined, "预览面板")}
-          </button>
-          <button
-            className="ed-btn"
-            onClick={() => setWizardOpen(true)}
-            disabled={!ControllerWizardPart}
-            title={
-              ControllerWizardPart
-                ? tr("editor.toolbar.wizardTitleReady", undefined, "图形化插入一个控制器（分类 → 指令 → 参数 → 预览 → 插入）")
-                : tr("editor.toolbar.wizardTitleTodo", undefined, "插入向导由并行任务交付；文件落盘后自动可用")
-            }
-          >
-            {tr("editor.toolbar.wizardOpen", undefined, "插入控制器…")}
-          </button>
-          {/* 布局：**自动**落库（改变即记住），这里只留「重置」——用户原话
-              「不需要保存布局…直接复用上一次修改的布局」。命名布局的存储层
-              （`prts-editor-wb:<name>`）保留，供迁移 / 老数据复用。 */}
-          <span className="ed-layout" data-layout-bar="1">
-            <button
-              className="ed-btn"
-              data-layout-action="reset"
-              onClick={resetLayout}
-              title={tr("editor.layout.resetTitle", undefined, "把当前布局恢复成默认（工具面板左 / 编辑区上 / 舞台下）")}
-            >
-              {tr("editor.layout.reset", undefined, "重置布局")}
+          {previewUpto > 0 && (
+            <button className="ed-scrub-btn" onClick={() => void openPreview()} title={tr("editor.scrub.playAllTitle", undefined, "预览整篇")}>
+              {tr("editor.scrub.playAll", undefined, "预览全篇")}
             </button>
-          </span>
-          <button className="ed-btn" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
-            {tr("editor.toolbar.reload", undefined, "重新载入")}
-          </button>
-          <button
-            className="ed-btn primary"
-            onClick={() => void doSave()}
-            disabled={busy === "save"}
-            title="Ctrl+S"
-          >
-            {busy === "save" ? tr("editor.toolbar.saving", undefined, "保存中…") : tr("editor.toolbar.save", undefined, "保存")}
-          </button>
+          )}
         </div>
-        <span className={`ed-dirty${isDirty ? " on" : ""}`}>{isDirty ? tr("editor.status.dirty", undefined, "未保存") : tr("editor.status.saved", undefined, "已保存")}</span>
+        {/* 只有**未保存**才出提示（不再常驻「已保存」占一行）。 */}
+        {isDirty && (
+          <span className="ed-dirty on" data-editor-dirty="1">
+            {busy === "save" ? tr("editor.toolbar.saving", undefined, "保存中…") : tr("editor.status.dirty", undefined, "未保存")}
+          </span>
+        )}
       </div>
 
-      {/* 行定位条：上一行/下一行 + 滑杆 + 「预览到此处」（截到该行、不必保存）。 */}
-      <div className="ed-scrub">
-        <button
-          className="ed-scrub-btn"
-          onClick={() => jumpToLine(Math.max(1, caret.line - 1))}
-          disabled={caret.line <= 1}
-          title={tr("editor.scrub.upTitle", undefined, "光标上移一行")}
-        >
-          {tr("editor.scrub.up", undefined, "▲ 上一行")}
-        </button>
-        <button
-          className="ed-scrub-btn"
-          onClick={() => jumpToLine(Math.min(lineStarts.length, caret.line + 1))}
-          disabled={caret.line >= lineStarts.length}
-          title={tr("editor.scrub.downTitle", undefined, "光标下移一行")}
-        >
-          {tr("editor.scrub.down", undefined, "▼ 下一行")}
-        </button>
-        <span>{tr("editor.scrub.label", undefined, "定位")}</span>
-        <input
-          type="range"
-          min={1}
-          max={Math.max(1, lineStarts.length)}
-          value={Math.min(lineStarts.length, Math.max(1, scrubLine))}
-          aria-label={tr("editor.scrub.aria", undefined, "剧本行定位")}
-          onChange={(event) => jumpToLine(Number(event.target.value))}
-        />
-        <input
-          type="number"
-          min={1}
-          max={Math.max(1, lineStarts.length)}
-          value={Math.min(lineStarts.length, Math.max(1, scrubLine))}
-          aria-label={tr("editor.scrub.gutterAria", undefined, "行号")}
-          onChange={(event) => jumpToLine(Number(event.target.value) || 1)}
-        />
-        <span>/ {lineStarts.length}</span>
-        <span className="grow" />
-        {previewUpto > 0 && <span>{tr("editor.scrub.cutNotice", { line: previewUpto }, `预览截到第 ${previewUpto} 行`)}</span>}
-        <button
-          className="ed-scrub-btn"
-          onClick={() => void openPreview(caret.line)}
-          title={tr("editor.scrub.cutHereTitle", undefined, "按当前光标行截断剧本，从第一行开演到此处（不必先保存）")}
-        >
-          {tr("editor.scrub.cutHere", undefined, "▶ 预览到此处")}
-        </button>
-        {previewUpto > 0 && (
-          <button className="ed-scrub-btn" onClick={() => void openPreview()} title={tr("editor.scrub.playAllTitle", undefined, "预览整篇")}>
-            {tr("editor.scrub.playAll", undefined, "预览全篇")}
-          </button>
-        )}
+      {/* 工具栏（`data-rail-group`：file / view / edit）：**动作**按钮的归组。
+          口径：rail（`data-ed-rail`）只管「收起的窗口挂哪里」，这里只管动作。 */}
+      <div className="ed-toolbar-row">
+        <div className="ed-viewtabs">
+          <div className="ed-toolgroup" data-rail-group="file">
+            <button
+              className="ed-btn"
+              data-editor-action="create"
+              onClick={() => setCreateOpen(true)}
+              title={tr("editor.create.button", undefined, "新建剧本…")}
+            >
+              {tr("editor.create.button", undefined, "新建剧本…")}
+            </button>
+            <button className="ed-btn" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
+              {tr("editor.toolbar.reload", undefined, "重新载入")}
+            </button>
+            <button
+              className="ed-btn primary"
+              onClick={() => void doSave()}
+              disabled={busy === "save"}
+              title="Ctrl+S"
+            >
+              {busy === "save" ? tr("editor.toolbar.saving", undefined, "保存中…") : tr("editor.toolbar.save", undefined, "保存")}
+            </button>
+          </div>
+          <div className="ed-toolgroup" data-rail-group="view">
+            <button className="ed-btn" onClick={runLint} title={tr("editor.toolbar.lintTitle", undefined, "重新运行校验（实时诊断也会自动刷新）")}>
+              {tr("editor.toolbar.lint", undefined, "校验")}
+            </button>
+            <button
+              className="ed-btn"
+              onClick={() => {
+                mapToggle("preview", true);
+                void openPreview();
+              }}
+              title={tr("editor.toolbar.previewTitle", undefined, "用当前编辑内容直接开演整篇（不必先保存；预览 = Map，开演时自动放进工作台）")}
+            >
+              {tr("editor.toolbar.preview", undefined, "预览")}
+            </button>
+            <button
+              className={`ed-btn${inTree("branch") ? " on" : ""}`}
+              onClick={() => mapToggle("branch")}
+              disabled={!BranchGraphPart}
+              title={
+                BranchGraphPart
+                  ? tr("editor.toolbar.branchTitleReady", undefined, "分支图 = Map：按 Decision/Predicate 画剧情走向；开/关都在工作台里（拖标题条可拼接）")
+                  : tr("editor.toolbar.branchTitleTodo", undefined, "分支图由并行任务交付；文件落盘后自动可用")
+              }
+            >
+              {tr("editor.toolbar.branch", undefined, "⌥ 分支图")}
+            </button>
+            {/* 「预览面板」= 只把 Map 面板放进 / 移出工作台（开演用左边的「预览」）。
+                保留它是因为三条预览类 harness 按**文案**点它（`.ed-viewtabs` 里
+                找「预览面板」）；语义与「预览」互补，不是第三个开关。 */}
+            <button
+              className={`ed-btn${inTree("preview") ? " on" : ""}`}
+              data-editor-action="preview-panel"
+              onClick={() => mapToggle("preview")}
+              title={tr("editor.toolbar.previewPanelTitle", undefined, "预览 = Map：把它放进 / 移出工作台（开演用左边的「预览」按钮）")}
+            >
+              {tr("editor.toolbar.previewPanel", undefined, "预览面板")}
+            </button>
+            <button
+              className="ed-btn"
+              onClick={() => toggleInspector()}
+              title={tr("editor.toolbar.inspectorTitle", undefined, "显示/隐藏控制器检视器")}
+            >
+              {showInspector ? tr("editor.toolbar.inspectorShow", undefined, "收起检视器") : tr("editor.toolbar.inspectorHide", undefined, "检视器")}
+            </button>
+          </div>
+          <div className="ed-toolgroup" data-rail-group="edit">
+            <button
+              className="ed-btn"
+              data-editor-action="indent-region"
+              onClick={() => indentRegion("region")}
+              title={tr("editor.indent.title", undefined, "给选中的分支线路加两格缩进；只为可读，送引擎前会自动去掉行首空白")}
+            >
+              {tr("editor.indent.button", undefined, "缩进区域")}
+            </button>
+            <button
+              className="ed-btn"
+              onClick={() => setWizardOpen(true)}
+              disabled={!ControllerWizardPart}
+              title={
+                ControllerWizardPart
+                  ? tr("editor.toolbar.wizardTitleReady", undefined, "图形化插入一个控制器（分类 → 指令 → 参数 → 预览 → 插入）")
+                  : tr("editor.toolbar.wizardTitleTodo", undefined, "插入向导由并行任务交付；文件落盘后自动可用")
+              }
+            >
+              {tr("editor.toolbar.wizardOpen", undefined, "插入控制器…")}
+            </button>
+          </div>
+        </div>
       </div>
 
       {!inTauri() && (
@@ -3358,7 +3683,18 @@ export default function StoryEditorPage() {
         </div>
       )}
 
-      <div className="wb-stage">
+      {/* 主体：左 rail = **收起窗口的托盘**（点条目放回工作台）+ 工作台。
+          挂上来的入口是面板标题条的 `⇤`；动作按钮仍在上面那一行工具栏。 */}
+      <div className="ed-main" data-ed-main="1">
+        <EditorRail
+          items={railItems}
+          collapsed={railCollapsed}
+          onRestorePanel={(id) => railRestorePanel(id)}
+          onToggleRail={() => setRailCollapsed((prev) => { const next = !prev; saveRail(next ? "collapsed" : "open"); return next; })}
+          /* 布局：**自动**落库（改变即记住）→ 这里只留「重置」这一个动作。 */
+          onResetLayout={resetLayout}
+        />
+        <div className="wb-stage">
         <Workbench
           state={wb}
           visible={visible}
@@ -3370,6 +3706,7 @@ export default function StoryEditorPage() {
           renderHolder={() => renderEditorPane()}
           renderPanel={(panel: PanelId) => renderPanelFor(panel)}
         />
+        </div>
       </div>
 
       {/*
@@ -3412,6 +3749,21 @@ export default function StoryEditorPage() {
             </Suspense>
           </div>
         </div>
+      )}
+
+      {/* 新建剧本（task-11）：与列表页**同一个**组件（`CreatePackDialog`）。
+          纯 Vite 时提交按钮 disabled + title（`editor.create.needDesktop`）。 */}
+      {createOpen && CreatePackDialogPart && (
+        <Suspense fallback={null}>
+          <CreatePackDialogPart
+            defaultId={id}
+            onCancel={() => setCreateOpen(false)}
+            onCreated={(pack: CreatedPack) => {
+              setCreateOpen(false);
+              navigate(`/editor/${encodeURIComponent(pack.id)}`);
+            }}
+          />
+        </Suspense>
       )}
 
       <div className="ed-status">

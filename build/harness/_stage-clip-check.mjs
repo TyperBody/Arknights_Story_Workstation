@@ -285,7 +285,16 @@ if (!alive) {
 const { chromium } = await import("playwright-core");
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || "/snap/bin/chromium",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  // 全套 harness 连跑时同机有多个 chromium 在起落：显存/zygote 竞争会让
+  // 页面在最后一屏前被关掉（实测 "Target page … has been closed"）。这里
+  // 关 GPU + 限渲染进程 + 压堆，和 `float-window.mjs` 同一套稳健参数。
+  args: [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--renderer-process-limit=1",
+    "--js-flags=--max-old-space-size=512",
+  ],
 });
 
 /** 五档缩放：怎么点到目标百分比（HUD 按钮语义见 `stageZoom.ts`）。 */

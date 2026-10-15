@@ -472,3 +472,40 @@
 .ed-graph-forkgap {
   flex: 1 1 auto;
 }
+
+/* ── 阅读方向 + 键盘漫游（task-10）───────────────────────────────
+   用户原话「工作流改成竖的编排 从上到下，方向键可以快速切换卡片预览」。
+   方向按钮与「⤢ 适配」同排（`.bg-fit` 已给按钮样式，这里只标"当前档"）；
+   读数条贴画布左下角，`role="status"` 给读屏。 */
+.bg-direction[aria-pressed="true"] {
+  border-color: rgba(244, 196, 48, 0.55);
+  color: #ffd75e;
+}
+
+.bg-keys {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  color: #b9c2d0;
+  background: rgba(12, 15, 20, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  pointer-events: none;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bg-keys-hint {
+  color: #7f8899;
+}
+
+/* 键盘焦点环：`.ed-graph-pan` 收方向键，必须看得见焦点在哪。 */
+.ed-graph-pan:focus-visible {
+  outline: 1px solid rgba(244, 196, 48, 0.55);
+  outline-offset: -1px;
+}

@@ -15,7 +15,8 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
-const OUT = resolve("build/harness/shots");
+const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
+const OUT = resolve(REPO_ROOT, "build/harness/shots");
 mkdirSync(OUT, { recursive: true });
 
 let pass = 0;
@@ -128,10 +129,13 @@ await page.locator(".ed-textarea").press("Control+z");
 await page.waitForTimeout(200);
 
 // (f) 送引擎前归一化：indented 版与顶格版逐字节相等
-const normalized = await page.evaluate(async ([expr, flat]) => {
-  const m = await import("/src/akstage/local/storyPack.js").catch(() => import("/@fs" + "/home/typer/桌面/galArkn/arkstage/src/akstage/local/storyPack.js"));
+const normalized = await page.evaluate(async ([expr, flat, root]) => {
+  // `REPO_ROOT` 是 **Node 侧**的常量：浏览器里读不到 → 必须当参数传进来（否则
+  // `page.evaluate` 里 ReferenceError）。`@fs` 前缀只在 vite 认的绝对路径上生效。
+  const m = await import("/src/akstage/local/storyPack.js")
+    .catch(() => import("/@fs" + root + "/src/akstage/local/storyPack.js"));
   return { strip: m.stripIndentForEngine(expr), flat };
-}, [EXPECTED, EXPECTED.split("\n").map((l) => l.replace(/^[ \t]+/, "")).join("\n")]);
+}, [EXPECTED, EXPECTED.split("\n").map((l) => l.replace(/^[ \t]+/, "")).join("\n"), REPO_ROOT]);
 ok("(f) stripIndentForEngine(缩进版) = 顶格版", () => assert.equal(normalized.strip, normalized.flat));
 // 页面里另有一条**既有**的引擎/Tauri 桩噪音（`transformCallback`，与缩进无关，
 // 编辑器页在 dev server 上一直有）；按前缀白名单过滤后断言「零新报错」。

@@ -45,17 +45,24 @@ const argOf = (name, fallback) => {
   return hit === name ? "" : hit.slice(name.length + 1);
 };
 /**
- * 打包档：
- * - `full`     —— 历史行为：背景全量 + 立绘全差分 + 音频（≈1000 MB，全部随包）。
- * - `starters` —— **随包预素材**：背景全量 + 立绘每 base **主差分**，**不含音频**（≈230 MB）。
- * - `patch`    —— **补丁包**：立绘**其余差分** + 全部音频（≈2.5 GB）；用户下载后解到
- *                 `<资源目录>/assets/starter/` 即生效（覆盖层按 canonical key 命中）。
+ * 打包档（用户口径，四档）：
+ * - `starters`（**随包预素材**，≈230 MB）—— UI + 背景全量 + 立绘每 base **主差分**，**不含音频**。
+ * - `patch-assets`（**素材补丁**，≈220 MB）—— **除音频外的全部素材**：UI + 背景全量 + 立绘**全差分**
+ *   （= `full` 去掉音频）。与 `starters` 合起来 = 无音频的完整集。
+ * - `patch-audio`（**音频补丁**，≈770 MB）—— **只有音频**（`story_variables` 的 mp3）。
+ * - `full` —— 历史行为（全部，≈1000 MB）。
+ *
+ * 产物目录：`starters` → `src-tauri/resources/assets/starter`（随包）；
+ * `patch-*` → `build/starter-<后缀>`（发布为 Release 附件，不进安装包）。
+ * 覆盖层按 canonical key 命中：用户把补丁解到 `<资源目录>/assets/starter/` 即生效。
  */
 const PACK = (argOf("--pack", "") || "full").toLowerCase();
-/** 产出目录：`--dir` 优先；`patch` 默认落 `build/starter-patch`（不进安装包）。 */
+/** `patch` = `patch-assets` 的别名（早期写法）。 */
+const PATCH_PACK = PACK === "patch" || PACK.startsWith("patch-");
+/** 产出目录：`--dir` 优先；补丁档默认落 `build/starter-<后缀>`。 */
 const STARTER_DIR = argOf("--dir", "")
   ? resolve(ROOT, argOf("--dir", ""))
-  : resolve(ROOT, PACK === "patch" ? "build/starter-patch" : "src-tauri/resources/assets/starter");
+  : resolve(ROOT, PATCH_PACK ? `build/${PACK.replace(/^patch$/, "patch-assets")}` : "src-tauri/resources/assets/starter");
 const CATALOG = join(ROOT, "src/akstage/catalog-data.json");
 const UPSTREAM = join(ROOT, "build/fanfic/upstream.json");
 const CURATED = join(STARTER_DIR, "curated.json");
@@ -158,10 +165,15 @@ function corpusRanking() {
 }
 
 // ── 策展 ────────────────────────────────────────────────────────────────
-/** 该 pack 是否需要音频组（`PACK` 见文件顶部）。 */
-const wantsAudio = () => PACK !== "starters";
+/** 是否需要音频组：`patch-audio` 只要它；`starters` / `patch-assets` 不要。 */
+const wantsAudio = () => PACK === "patch-audio" || PACK === "full";
+/** 是否需要图片组：`patch-audio` 只发音频。 */
+const wantsImages = () => PACK !== "patch-audio";
 /** 立绘差分取哪一段（`first` = 每 base 主差分；`rest` = 其余差分/表情）。 */
-const wantsPortrait = (part) => (PACK === "starters" ? part === "first" : PACK === "patch" ? part === "rest" : true);
+const wantsPortrait = (part) =>
+  !wantsImages() ? false
+    : PACK === "starters" ? part === "first"
+      : true; // `patch-assets` / `patch` / `full`：全差分（含主差分）
 
 function fileNameFor(key, extension) {
   // `torappu.prts.wiki/assets/avg/black.../bg_corridor.png` → `bg_corridor.webp`
@@ -194,8 +206,8 @@ function curate() {
     entries.push(entry);
   };
 
-  // 1) core：UI 小图（`patch` 是**增量**包 —— starters 已含 UI，跳过）。
-  if (PACK !== "patch") {
+  // 1) core：UI 小图（`patch-audio` 只发音频 → 跳过；其余档都要）。
+  if (wantsImages()) {
     for (const item of catalog.external ?? []) {
       if (item.kind !== "src") continue;
       if (!/\/assets\/scenario\/ui\/|widgets\/production\/(slide_mask|back_shadow)\./.test(item.url)) continue;
@@ -204,8 +216,8 @@ function curate() {
     }
   }
 
-  // 2) background：**全量**，语料频次降序（缺语料 → 按 catalog 排序）。`patch` 跳过。
-  if (PACK !== "patch") {
+  // 2) background：**全量**，语料频次降序（缺语料 → 按 catalog 排序）。`patch-audio` 跳过。
+  if (wantsImages()) {
     const bgRanked = corpus.backgrounds.length
       ? corpus.backgrounds.map(([name, uses]) => [`${ORIGIN}/assets/avg/background/${name}.png`, uses])
       : catalog.backgroundPaths.map((key) => [key, 0]);
@@ -367,18 +379,31 @@ async function ensure(entry) {
 
 const human = (n) => `${(n / 1024 / 1024).toFixed(2)} MB`;
 
-/** 归档文件名（安装包 `bundle.resources` 里**只**放它 + 三个清单）。 */
-const ARCHIVE = join(STARTER_DIR, "starter.zip");
+/**
+ * 归档文件名：
+ * - `starters` → `<目录>/starter.zip`（安装包 `bundle.resources` 里放它 + 三个清单）。
+ * - `patch-*`  → **`build/artifacts/Arkstage-<ver>-assets-<suffix>.zip`**（Release 附件；
+ *                 条目名扁平，用户解到 `<资源目录>/assets/starter/` 即生效）。
+ */
+const ARCHIVE = (() => {
+  if (!PATCH_PACK) return join(STARTER_DIR, "starter.zip");
+  const version = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version ?? "0.0.0";
+  const suffix = PACK.replace(/^patch-?/, "") || "assets";
+  const out = argOf("--pkg", "");
+  return out
+    ? resolve(ROOT, out, `Arkstage-${version}-assets-${suffix}.zip`)
+    : join(ROOT, "build/artifacts", `Arkstage-${version}-assets-${suffix}.zip`);
+})();
 
 /**
- * 把 `files` 打进 `starter.zip`（deflate）。
- * 为什么归档：NSIS/deb 逐文件收起几百 MB 的小 PNG 会产生大量条目（安装慢、增量更新差），
- * zip 内条目名 = 文件名（扁平），Rust 侧 `unzip` 到 `<资源目录>/assets/starter/`。
+ * 把 `files` 打进归档（deflate）。补丁档**总是**打（用户拿一个 zip 即可解包使用）。
+ * 为什么归档：NSIS/deb 逐文件收起几百 MB 的小文件会产生大量条目（安装慢、增量更新差）；
+ * zip 条目名扁平（`-j`），Rust seed 与用户手工解包都简单。
  */
 function writeArchive(files) {
+  mkdirSync(dirname(ARCHIVE), { recursive: true });
   rmSync(ARCHIVE, { force: true });
   if (!files.length) return { bytes: 0 };
-  // `zip -X`（去 extra field）→ 可复现；`-@` 从 stdin 读文件清单（几百 MB 不必进 argv）。
   const list = files.map((name) => join(STARTER_DIR, name));
   execFileSync("zip", ["-q", "-X", "-9", "-j", ARCHIVE, ...list], { cwd: STARTER_DIR, maxBuffer: 64 * 1024 * 1024 });
   return { bytes: statSync(ARCHIVE).size };
@@ -602,9 +627,12 @@ async function fetchAll() {
     mkdirSync(join(ROOT, "build"), { recursive: true });
     writeFileSync(MISS_FILE, `${JSON.stringify([...missing].sort(), null, 0)}\n`);
   }
-  // 归档（`--archive` 才写）：安装包本身已压缩（NSIS/deb），zip 只对绿色版有意义。
-  const archive = useArchive ? writeArchive(selected.map((e) => e.file)) : { bytes: 0 };
-  if (useArchive) process.stderr.write(`[starter] 归档 starter.zip ${human(archive.bytes)}（源文件 ${human(bytes)}）\n`);
+  // 归档：`starters` 只在 `--archive` 时打（NSIS/deb 已压缩，逐文件即可）；
+  // **补丁档总是打**（用户拿一个 zip 解到资源目录就生效）。
+  const archive = (useArchive || PATCH_PACK) ? writeArchive(selected.map((e) => e.file)) : { bytes: 0 };
+  if (useArchive || PATCH_PACK) {
+    process.stderr.write(`[starter] 归档 ${relative(ROOT, ARCHIVE)} ${human(archive.bytes)}（源文件 ${human(bytes)}）\n`);
+  }
   const bases = new Set(selected.filter((e) => e.group === "portrait").map((e) => e.base)).size;
   writeManifests(selected, {
     budgetBytes: budget,

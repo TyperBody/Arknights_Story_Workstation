@@ -14,6 +14,9 @@ const enUS = {
     language: "Language",
     languageHint: "Language of the UI and editor text; applied immediately and stored on this device.",
   },
+  fanfic: {
+    count: "{{count}} packs installed",
+  },
   editor,
 };
 

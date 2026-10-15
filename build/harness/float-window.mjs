@@ -10,7 +10,9 @@
  *   2. 四个面板标题条都能「分离」（`[data-win-action="float"]`）；`close` 只在 preview / branch；
  *   3. 点 toolpanel 的 `float` → `[data-wb-float-layer]` 里出现 `[data-win-state="float"]`，
  *      且**不在** `[data-wb-panel]` 内（`closest('[data-wb-panel]') === null`）；
- *   4. 分离后树里仍有 `[data-wb-panel="toolpanel"]`，其中含 `[data-wb-float-hole="toolpanel"]` 占位；
+ *   4. 分离后树里**没有** `[data-wb-panel="toolpanel"]`、`[data-wb-float-hole]` 数量 = 0
+ *      （**原地不留洞**，用户原话「脱离出去…为什么还要保留位置」），且**邻居占满**
+ *      （同一 split 里剩下的面板 rect 宽或高增大 ≥60px）；
  *   5. 浮动窗拖到工作台上方后：`rect.top < [data-workbench].top` 且 `elementFromPoint(中心)` 命中它
  *      （**不被裁剪**）；
  *   6. 双击浮动窗标题条 → 回到树里（`[data-wb-panel]` 内又有 `.ed-win`，浮动层里没有该 id）；
@@ -18,7 +20,9 @@
  *      （`localStorage` 的 `prts-editor-wb:view` / 旧键，`floats.<id>` 有值）。
  *
  * 约定同其它 harness：无头 chromium（`CHROMIUM_PATH` 可覆盖）、注入 CSS 隐藏
- * `.bookshelf-sync-warning` / `.dl-bar`、ok/FAIL 逐条打印、任一 FAIL → 退出码 1。
+ * `.bookshelf-sync-warning` / `.dl-bar` / `[data-asset-banner]`（引擎横幅，`z-index:100000`，
+ * 会盖住浮到页面顶部的浮动窗标题条 → `elementFromPoint` 命中的是横幅而**不是**标题条，
+ * 双击就落不到窗上）、ok/FAIL 逐条打印、任一 FAIL → 退出码 1。
  * **只读断言**：harness 只点 UI（标题条按钮 / 拖拽），不改任何源码。
  */
 import { spawn } from "node:child_process";
@@ -81,18 +85,18 @@ const browser = await chromium.launch({
 try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
   page.on("pageerror", (error) => info("pageerror", String(error).split("\n")[0]));
-  await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(SCRIPT)}`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
-  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none !important}" });
+  await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent(SCRIPT)}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.waitForSelector("textarea.ed-textarea", { timeout: 60_000 });
+  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar,[data-asset-banner]{display:none !important}" });
   // 之前的跑批可能留下浮动状态 / 布局 → 清一次，保证从默认树开始（本 harness 自己写回自己的）。
   await page.evaluate(() => {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith("prts-editor-wb:") || key.startsWith("prts-editor-windows:")) localStorage.removeItem(key);
     }
   });
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
-  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none !important}" });
+  await page.reload({ waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.waitForSelector("textarea.ed-textarea", { timeout: 60_000 });
+  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar,[data-asset-banner]{display:none !important}" });
   await page.waitForTimeout(900);
 
   const clickAction = (id, action) =>
@@ -187,7 +191,17 @@ try {
     JSON.stringify(Object.fromEntries(Object.entries(actionMap).map(([id, v]) => [id, v.close])))
   );
 
-  // ── 契约 3 / 4：分离（点 `float`）→ 浮动层 + 树里留占位 ────────────────
+  // ── 契约 3 / 4：分离（点 `float`）→ 浮动层 + 树里**不留洞**，邻居占满 ────
+  // 先量「分离前」的邻居尺寸（④ 的增大判据要用）。
+  const beforeSep = await page.evaluate(() => {
+    const box = (selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    };
+    return { stage: box('[data-wb-panel="stage"]'), holder: box(".wb-holder") };
+  });
   const clicked = await clickAction("toolpanel", "float");
   check("③ 找到 toolpanel 的「分离」按钮并可点击", clicked);
   await page.waitForTimeout(500);
@@ -196,19 +210,37 @@ try {
     const layer = document.querySelector("[data-wb-float-layer]");
     const floats = layer ? [...layer.querySelectorAll('[data-win-state="float"]')] : [];
     const inTreeFloats = [...document.querySelectorAll('[data-wb-panel] [data-win-state="float"]')];
+    const box = (selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    };
     return {
       layerPresent: Boolean(layer),
       layerFloatCount: floats.length,
       detached: floats.length > 0 && floats.every((el) => el.closest("[data-wb-panel]") === null),
       stillFloatingInTree: inTreeFloats.length,
       panelStillThere: Boolean(document.querySelector('[data-wb-panel="toolpanel"]')),
-      hole: Boolean(document.querySelector('[data-wb-panel="toolpanel"] [data-wb-float-hole="toolpanel"], [data-wb-float-hole="toolpanel"]')),
+      panels: [...document.querySelectorAll("[data-wb-panel]")].map((el) => el.getAttribute("data-wb-panel")),
+      holes: document.querySelectorAll("[data-wb-float-hole]").length,
+      // 「邻居占满」的判据：同一 split 里活下来的面板（这里取 stage / holder 所在列）。
+      stage: box('[data-wb-panel="stage"]'),
+      holder: box(".wb-holder"),
     };
   });
   check("③ 分离后浮动层里有浮动窗", sep.layerPresent && sep.layerFloatCount >= 1, `layer=${sep.layerPresent} float=${sep.layerFloatCount}`);
   check("③ 浮动窗**不在** `[data-wb-panel]` 里（`closest` 为 null）", sep.detached, `inTreeFloats=${sep.stillFloatingInTree}`);
-  check("④ 树里仍有 `[data-wb-panel=toolpanel]`", sep.panelStillThere);
-  check("④ 树里含 `[data-wb-float-hole=toolpanel]` 占位", sep.hole);
+  check("④ 分离后树里**没有** `[data-wb-panel=toolpanel]`（位置让给邻居）", !sep.panelStillThere, `panels=${JSON.stringify(sep.panels)}`);
+  check("④ `[data-wb-float-hole]` 数量 = 0（原地不留洞）", sep.holes === 0, `holes=${sep.holes}`);
+  // 邻居（同一 split 的 stage / holder）在前一步（separate 前）量过：`beforeSep`。
+  const growW = sep.stage && beforeSep.stage ? sep.stage.w - beforeSep.stage.w : 0;
+  const growH = sep.holder && beforeSep.holder ? sep.holder.h - beforeSep.holder.h : 0;
+  check(
+    "④ 邻居占满（stage 变宽 / holder 变高 ≥60px）",
+    growW >= 60 || growH >= 60,
+    `Δstage.w=${growW} Δholder.h=${growH}（before=${JSON.stringify(beforeSep)} after={stage:${JSON.stringify(sep.stage)},holder:${JSON.stringify(sep.holder)}}）`
+  );
 
   // ── 契约 5：拖到工作台上方 —— 不被裁剪 ─────────────────────────────────
   // `snapshot` 里锚定"当前这个浮动窗"（层里的优先）与工作台；拖动后再量一次。
@@ -273,7 +305,27 @@ try {
     return { rect: { l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }, total: hits.length, bar: hits.filter((i) => i.bar).length, pick: barHit ?? hits[0] ?? null };
   });
   info("⑥ 浮动窗可命中区", JSON.stringify(dblScan));
-  const dblBox = dblScan?.pick ?? null;
+  // **首选**：量浮动窗自己的 `.ed-win-bar` 中心（双击标题条的语义 = 双击它）；
+  // 只有当那里被别的浮层盖住（`elementFromPoint` 解析不回本窗）才回落到扫描结果。
+  const barPick = await page.evaluate(() => {
+    const layer = document.querySelector("[data-wb-float-layer]");
+    const win = layer?.querySelector('[data-win-state="float"]') ?? document.querySelector('[data-win-state="float"]');
+    const bar = win?.querySelector(".ed-win-bar");
+    if (!bar) return null;
+    const r = bar.getBoundingClientRect();
+    const points = [
+      { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) },
+      { x: Math.round(r.left + 12), y: Math.round(r.top + r.height / 2) },
+      { x: Math.round(r.left + 24), y: Math.round(r.top + 8) },
+    ];
+    for (const point of points) {
+      const el = document.elementFromPoint(point.x, point.y);
+      if (el?.closest?.('[data-win-state="float"]') === win) return point;
+    }
+    return null;
+  });
+  const dblBox = barPick ?? dblScan?.pick ?? null;
+  info("⑥ 双击点", JSON.stringify(dblBox));
   if (dblBox) {
     await page.mouse.dblclick(dblBox.x, dblBox.y);
   } else {
@@ -292,6 +344,10 @@ try {
   });
   check("⑥ 双击 → `[data-wb-panel=toolpanel]` 里又出现 `.ed-win`", back.inTree);
   check("⑥ 不再是「脱离的浮动窗」（浮动层里没有它）", !back.detached, `layerWins=${back.inLayer} detached=${back.detached} hole=${back.hole}`);
+  check("⑥ 回停靠后 toolpanel 的 rect 由树决定（不再是 0 宽洞）", await page.evaluate(() => {
+    const el = document.querySelector('[data-wb-panel="toolpanel"]');
+    return Boolean(el) && el.getBoundingClientRect().width >= 200;
+  }));
 
   // ── 契约 7：刷新后仍在浮动（DOM 恢复优先，记忆键兜底）──────────────────
   const reclick = await clickAction("toolpanel", "float");
@@ -329,9 +385,9 @@ try {
     `layerFloat=${beforeReload.floatingLayerCount} holes=${JSON.stringify(beforeReload.holes)} markers=${JSON.stringify(beforeReload.markers)} memory=${memoryHit}`
   );
 
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
-  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none !important}" });
+  await page.reload({ waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.waitForSelector("textarea.ed-textarea", { timeout: 60_000 });
+  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar,[data-asset-banner]{display:none !important}" });
   await page.waitForTimeout(1000);
   const afterReload = await page.evaluate(() => {
     const layer = document.querySelector("[data-wb-float-layer]");
@@ -385,12 +441,17 @@ try {
       return {
         detached: Boolean(f),
         closest: f ? Boolean(f.closest("[data-wb-panel]")) : null,
+        inTreePanel: Boolean(document.querySelector('[data-wb-panel="branch"]')),
+        holes: document.querySelectorAll("[data-wb-float-hole]").length,
         top: r ? Math.round(r.top) : null,
         wbTop: Math.round(document.querySelector("[data-workbench]").getBoundingClientRect().top),
       };
     });
     check("⑧ 松手 → 变成浮动层里的独立窗口（closest 为 null）",
       Boolean(dragOut?.detached) && dragOut?.closest === false, JSON.stringify(dragOut));
+    check("⑧ 拖出去的窗原地不留洞（`[data-wb-panel=branch]` 没了、`[data-wb-float-hole]` = 0）",
+      dragOut?.inTreePanel === false && dragOut?.holes === 0,
+      `panel=${dragOut?.inTreePanel} holes=${dragOut?.holes}`);
     check("⑧ 拖出去的窗落在工作台**之上**（任意位置）",
       typeof dragOut?.top === "number" && dragOut.top < dragOut.wbTop, `top=${dragOut?.top} < wbTop=${dragOut?.wbTop}`);
   } else {

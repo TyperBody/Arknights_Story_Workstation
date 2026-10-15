@@ -35,7 +35,7 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSy
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildGraph, forkPatch, graphAt, routeAtLine, suggestForkOptions } from "../../src/akstage/local/branchGraph.js";
+import { buildGraph, forkPatch, graphAt, layoutGraph, routeAtLine, suggestForkOptions } from "../../src/akstage/local/branchGraph.js";
 import { lintDocument } from "../../src/akstage/local/editorModel.js";
 import { arg, parseScript } from "../../src/akstage/local/storyPack.js";
 
@@ -529,6 +529,134 @@ function testDegenerate() {
   ok("stats.degradedReasons 是字符串数组", Array.isArray(graphBig?.stats.degradedReasons));
 }
 
+/** (6) 排布几何：竖排（TB）是**主口径**，横排（LR）保留老行为。
+ *  `layoutGraph` 是纯函数 —— 这里只喂真实 / 手造图，不看浏览器。 */
+function testGeometry() {
+  group("(6) 排布几何：TB 竖排主口径 + LR 兼容");
+  const text = [
+    '[HEADER(key="geom")]',
+    '[Decision(options="A;B", values="1;2")]',
+    '[Predicate(references="1")]',
+    '[name="A"]  a',
+    '[Predicate(references="2")]',
+    '[name="B"]  b',
+    '[Predicate(references="1;2")]',
+    '[name="A"]  m',
+    '[endtip(block=true)]',
+  ].join("\n");
+  const graph = buildGraph(text);
+  const tb = layoutGraph(graph);
+  const lr = layoutGraph(graph, { direction: "LR" });
+
+  eq("默认 direction = TB", [tb.direction, tb.stats.direction], ["TB", "TB"]);
+  eq("direction=LR 生效", [lr.direction, lr.stats.direction], ["LR", "LR"]);
+  eq("未知 direction 回落 TB", layoutGraph(graph, { direction: "XX" }).direction, "TB");
+  eq("TB 卡片 = 320×92", [tb.nodes[0].w, tb.nodes[0].h], [320, 92]);
+  eq("LR 卡片 = 200×64（老尺寸）", [lr.nodes[0].w, lr.nodes[0].h], [200, 64]);
+
+  // TB：层 → y 单调（任意两层之间、任意节点对）
+  const layers = [...new Set(tb.nodes.map((node) => node.layer))].sort((a, b) => a - b);
+  let monotone = true;
+  for (const low of layers) {
+    for (const high of layers) {
+      if (low >= high) continue;
+      for (const a of tb.nodes.filter((node) => node.layer === low)) {
+        for (const b of tb.nodes.filter((node) => node.layer === high)) if (!(b.y > a.y)) monotone = false;
+      }
+    }
+  }
+  ok("TB：层 → y 单调（低层在上）", monotone);
+
+  // TB：同层沿 x 打包，边到边 = gapX（32）；层间边到边 = gapY（32）
+  const slotGaps = [];
+  for (const layer of layers) {
+    const row = tb.nodes.filter((node) => node.layer === layer).sort((a, b) => a.x - b.x);
+    for (let at = 1; at < row.length; at += 1) slotGaps.push(Number((row[at].x - (row[at - 1].x + row[at - 1].w)).toFixed(2)));
+  }
+  eq("TB：同层卡片边到边 = 32（零重叠）", [...new Set(slotGaps)], slotGaps.length ? [32] : []);
+  const layerGaps = [];
+  for (let at = 1; at < layers.length; at += 1) {
+    const above = Math.max(...tb.nodes.filter((node) => node.layer === layers[at - 1]).map((node) => node.y + node.h));
+    const below = Math.min(...tb.nodes.filter((node) => node.layer === layers[at]).map((node) => node.y));
+    layerGaps.push(Number((below - above).toFixed(2)));
+  }
+  eq("TB：层间边到边 = 32", [...new Set(layerGaps)], [32]);
+
+  /** 矩形两两重叠对数。 */
+  const overlapCount = (out) => {
+    const rows = out.nodes;
+    let bad = 0;
+    for (let i = 0; i < rows.length; i += 1) {
+      for (let j = i + 1; j < rows.length; j += 1) {
+        const a = rows[i];
+        const b = rows[j];
+        if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) bad += 1;
+      }
+    }
+    return bad;
+  };
+  eq("TB：矩形两两不重叠", overlapCount(tb), 0);
+  eq("LR：矩形两两不重叠", overlapCount(lr), 0);
+
+  // 边：正交（每段要么水平要么垂直）+ 拐点 ≤ 3 + TB 至少一条竖段
+  const orthBad = [];
+  let withVertical = 0;
+  for (const edge of tb.edges) {
+    const points = edge.points;
+    for (let at = 1; at < points.length; at += 1) {
+      const [ax, ay] = points[at - 1];
+      const [bx, by] = points[at];
+      if (Math.abs(ax - bx) > 1e-6 && Math.abs(ay - by) > 1e-6) orthBad.push(`${edge.id}@${at}`);
+    }
+    if (points.some((point, at) => at > 0 && Math.abs(point[0] - points[at - 1][0]) < 0.5 && Math.abs(point[1] - points[at - 1][1]) > 0.5)) withVertical += 1;
+  }
+  ok("TB：边是正交折线（每段水平或垂直）", orthBad.length === 0);
+  ok("TB：拐点数 ≤ 3（points ≤ 4）", tb.edges.every((edge) => edge.points.length <= 4));
+  ok("TB：至少一条边有竖段（从上往下）", withVertical > 0);
+  ok("TB：边从源卡底缘中点出发", tb.edges.every((edge) => {
+    const from = tb.nodes.find((node) => node.id === edge.from);
+    return !from || (Math.abs(edge.points[0][1] - (from.y + from.h)) < 0.5 && Math.abs(edge.points[0][0] - (from.x + from.w / 2)) < 0.5);
+  }));
+
+  // reading order：layer 升序 → 同层沿阅读方向（TB 看 x、LR 看 y）
+  const byRead = [...tb.nodes].sort((a, b) => (a.layer - b.layer) || (a.x - b.x) || (a.line - b.line)).map((node) => node.id);
+  eq("TB：readOrder = layer → x 升序", tb.readOrder, byRead);
+  eq("readOrder 覆盖全部节点且无重复", [tb.readOrder.length, new Set(tb.readOrder).size, tb.nodes.length], [tb.nodes.length, tb.nodes.length, tb.nodes.length]);
+  const lrOrder = [...lr.nodes].sort((a, b) => (a.layer - b.layer) || (a.y - b.y) || (a.line - b.line)).map((node) => node.id);
+  eq("LR：readOrder = layer → y 升序", lr.readOrder, lrOrder);
+
+  // 确定性（新轴也要逐字节可复现）
+  eq("TB 确定性（两次调用 JSON 全等）", JSON.stringify(layoutGraph(buildGraph(text))), JSON.stringify(tb));
+  eq("LR 确定性（两次调用 JSON 全等）", JSON.stringify(layoutGraph(buildGraph(text), { direction: "LR" })), JSON.stringify(lr));
+
+  // 画布尺寸按新轴算
+  const maxX = Math.max(...tb.nodes.map((node) => node.x + node.w));
+  const maxY = Math.max(...tb.nodes.map((node) => node.y + node.h));
+  ok("TB：width ≥ 最右卡片右缘", tb.width >= maxX);
+  ok("TB：height ≥ 最下卡片下缘（长龙往下长）", tb.height >= maxY);
+  eq("step 字段 = 卡片 + 间距", [tb.layerStep, tb.slotStep], [92 + 32, 320 + 32]);
+  eq("LR 的 step 字段换轴", [lr.layerStep, lr.slotStep], [200 + 32, 64 + 32]);
+
+  // 手造 / 畸形输入不抛（`layoutGraph` 的老承诺）
+  notThrow("layoutGraph({nodes:[],edges:[]}) 不抛", () => layoutGraph({ nodes: [], edges: [] }), "");
+  notThrow("layoutGraph(null) 不抛", () => layoutGraph(null), "");
+  eq("空图的 direction 也回填", layoutGraph(null).direction, "TB");
+}
+
+/** (7) 退化：> CAP_NODES 的图挤成一列长龙（TB 下仍然是一列**竖**龙）。 */
+function testDegenerateGeometry() {
+  group("(7) 退化：超量节点 → TB 仍是一列（零重叠）");
+  const nodes = [];
+  for (let at = 0; at < 401; at += 1) nodes.push({ id: `n${at + 1}`, lines: [at + 1], text: `x${at}`, speaker: "" });
+  const edges = nodes.slice(1).map((node, at) => ({ from: nodes[at].id, to: node.id, label: "", value: null, routes: [] }));
+  const out = layoutGraph({ nodes, edges });
+  ok("degenerate = true（> 400 节点）", out.degenerate);
+  eq("退化后卡片缩到 240×52（TB）", [out.nodes[0].w, out.nodes[0].h], [240, 52]);
+  eq("退化后仍然零重叠", new Set(out.nodes.map((node) => `${node.x},${node.y}`)).size, out.nodes.length);
+  const ys = out.nodes.map((node) => node.y);
+  eq("退化后 y 严格递增（一条竖龙）", ys.every((y, at) => at === 0 || y > ys[at - 1]), true);
+}
+
 // ── main ─────────────────────────────────────────────────────────
 
 const corpusRoot = CORPUS_CANDIDATES.find((path) => path && existsSync(path)) ?? null;
@@ -541,6 +669,8 @@ const corpus = testCorpus(corpusRoot);
 testNested(corpus.nested);
 testFork();
 testDegenerate();
+testGeometry();
+testDegenerateGeometry();
 
 const summary = {
   passed,

@@ -23,9 +23,11 @@
     "test:workbench": "node build/harness/demo-check.mjs && node build/harness/persist-check.mjs && node build/harness/layout-named.mjs && node build/harness/stage-zoom.mjs && node build/harness/window-chrome.mjs && node build/harness/workbench-drag.mjs && node build/harness/branch-shot.mjs && node build/harness/engine-failure.mjs && node build/harness/live-download.mjs",
     "test:mirror": "node tools/mirror/mirror-selftest.mjs && node build/harness/rust-mirror-live.mjs && node build/harness/live-download.mjs",
     "test:starter": "node scripts/fanfic/fetch-starter-assets.mjs --check && node build/harness/starter-assets.mjs",
-    "assets:starter": "node scripts/fanfic/fetch-starter-assets.mjs",
+    "assets:starter": "node scripts/fanfic/fetch-starter-assets.mjs --pack=starters",
     "assets:check": "node scripts/fanfic/fetch-starter-assets.mjs --check",
-    "assets:plan": "node scripts/fanfic/fetch-starter-assets.mjs --plan",
+    "assets:plan": "node scripts/fanfic/fetch-starter-assets.mjs --pack=starters --plan",
+    "assets:patch:assets": "node scripts/fanfic/fetch-starter-assets.mjs --pack=patch-assets",
+    "assets:patch:audio": "node scripts/fanfic/fetch-starter-assets.mjs --pack=patch-audio",
     "test:workbench:model": "node build/harness/wb-selftest.mjs",
     "test:harness": "node scripts/harness/run.mjs"
   },
@@ -43,6 +45,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "playwright-core": "1.63.0",
     "@tauri-apps/cli": "~2.10.1",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",

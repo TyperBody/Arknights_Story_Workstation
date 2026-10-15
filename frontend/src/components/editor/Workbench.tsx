@@ -43,6 +43,7 @@ import {
 } from "./workbenchLayout.ts";
 import {
   clampShareValue,
+  drop as dropLeaf,
   move,
   normalize,
   pathTo,
@@ -150,8 +151,25 @@ export default function Workbench({
   /** 拖拽中指针在工作台**外**（松手 = 分离）。 */
   const [outside, setOutside] = useState(false);
 
-  /** 渲染用的规范化树：`visible` 之外的面板不渲染（Map 关掉即从工作台移除）。 */
-  const tree = useMemo(() => normalize(state, visible), [state, visible]);
+  /**
+   * 渲染用的规范化树：`visible` 之外的面板不渲染（Map 关掉即从工作台移除）。
+   *
+   * **浮动（detached）面板也在这里摘掉** —— 用户原话「脱离出去就不（脱离）了
+   * 为什么还要保留位置」：分离出去的窗在树里**不留洞**，邻居立刻占满（既不画
+   * `.wb-float-hole` 虚线框，也不占 `flex` 份额）。`visible` 里仍保留它
+   * （"开着"的事实不变、`FloatLayer` 照旧渲染），只是树里让位。 */
+  const tree = useMemo(() => {
+    const detached = visible.filter((id) => floats?.[id]);
+    if (!detached.length) return normalize(state, visible);
+    // `state.root` 先用 `visible` 收口（免得夹带别的脏数据），再逐片摘掉浮动叶；
+    // `drop` 会让幸存的孩子顶上 → share 的自然结果就是「邻居占满」。
+    let root = normalize(state, visible).root;
+    for (const id of detached) {
+      const path = pathTo({ root, minimized: [] }, id);
+      if (path) root = dropLeaf(root, path) ?? { t: "min" };
+    }
+    return normalize({ root, minimized: state.minimized }, visible.filter((id) => !detached.includes(id)));
+  }, [state, visible, floats]);
 
   // ── 指针：拖拽会话 ─────────────────────────────────
   const endSession = useCallback(() => {
@@ -377,18 +395,18 @@ export default function Workbench({
     const spec = specOf(id);
     const nodePath = pathTo(tree, id) ?? path;
     void dir;
-    // 已分离（浮动）的面板：树里留**洞**（占位），内容渲染在 `[data-wb-float-layer]`。
+    // 已分离（浮动）的面板：正常情况下 `tree` 里已经没有它（见上面的 `useMemo`），
+    // 所以**不再有虚线占位**。这一支只是兜底：万一调用方给的 `floats` 与 `visible`
+    // 组合让叶子漏了进来，也只画一个**零占位**的透明块（不再"撑着一块空区"）。
     if (floats?.[id]) {
       return (
         <div
           className="wb-panel wb-panel--detached"
           data-wb-panel={id}
           data-wb-order={spec.order}
-          style={{ minWidth: spec.minW, minHeight: spec.minH, position: "relative" }}
+          style={{ minWidth: 0, minHeight: 0, position: "relative", flex: "1 1 auto" }}
         >
-          <div className="wb-float-hole" data-wb-float-hole={id} aria-hidden="true">
-            <span className="wb-float-hole-label">{titleOf(id)}</span>
-          </div>
+          <span className="wb-float-hole" data-wb-float-hole={id} aria-hidden="true" />
           <span className="wb-panel-path" data-wb-path={nodePath.join(",")} hidden />
         </div>
       );

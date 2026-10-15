@@ -123,6 +123,13 @@ export interface StagePaneProps {
   /** 每次拖拽结束的补丁（供编辑器记录/回写）。 */
   onPatch?: (patch: MovePatch) => void;
   /**
+   * 素材库拖进来的投放（task-9）：`key` = 素材 key、`kind` = 素材类型
+   * （`background` / `character` / `music` / `sound` / `other`）。
+   * 页面据此改当前场景（背景行 `image=` / 立绘行 `name=`）；**可选**，
+   * 不给时舞台照样工作、只是不接受投放。
+   */
+  onDropAsset?: (key: string, kind?: string) => void;
+  /**
    * 窗口壳 chrome（BRIEF §2.2；P4 的 `inspectorWindow.ts`）。
    * **可选**：不给时内容照常渲染（只少一条 `.sp-chrome`）。
    */
@@ -144,6 +151,35 @@ const ZOOM_FAST = 0.25;
 
 /** `data-stage-clip` 的四条数字（整数 px；只给 harness 读数，不参与几何）。 */
 const rounded = (value: number): number => (Number.isFinite(value) ? Math.round(value) : 0);
+
+/**
+ * 读素材库的拖拽载荷：优先私有 MIME `application/x-arkstage-asset`
+ * （`{kind,key}` JSON），回落 `text/plain`（= key；纯 Vite/部分 WebView 只给这个）。
+ */
+function readAssetDrop(transfer: DataTransfer | null): { key: string; kind: string } {
+  if (!transfer) return { key: "", kind: "" };
+  const raw = (() => {
+    try {
+      return transfer.getData("application/x-arkstage-asset");
+    } catch {
+      return "";
+    }
+  })();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as { key?: unknown; kind?: unknown };
+      return { key: String(parsed.key ?? "").trim(), kind: String(parsed.kind ?? "").trim() };
+    } catch {
+      // 坏 JSON：当 key 用（宽松）。
+      return { key: raw.trim(), kind: "" };
+    }
+  }
+  try {
+    return { key: (transfer.getData("text/plain") ?? "").trim(), kind: "" };
+  } catch {
+    return { key: "", kind: "" };
+  }
+}
 
 function defaultResolveUrl(key: string, kind: "background" | "character" = "background"): string {
   const value = String(key ?? "").trim();
@@ -223,6 +259,7 @@ export function StagePane(props: StagePaneProps) {
     showGuides,
     line,
     onPatch,
+    onDropAsset,
     chrome,
     className,
   } = props;
@@ -573,6 +610,19 @@ export function StagePane(props: StagePaneProps) {
               setPending(null);
               onSelect?.(null);
             }
+          }}
+          // 素材库的 HTML5 投放（task-9）：`data-stage-svg` 是契约锚点，
+          // 拖到画布任意处 = 「应用到当前场景」（页面决定改哪一行）。
+          onDragOver={(event) => {
+            if (!onDropAsset) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(event) => {
+            if (!onDropAsset) return;
+            event.preventDefault();
+            const payload = readAssetDrop(event.dataTransfer);
+            if (payload.key) onDropAsset(payload.key, payload.kind);
           }}
         >
           <defs>

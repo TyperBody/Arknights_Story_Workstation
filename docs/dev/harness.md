@@ -22,7 +22,7 @@
 | ③ | **命名布局**（重置 + 刷新保持） | `layout-named.mjs`（10） | workbench |
 | ⑩ | **划区/浮动窗**（10 契约）：分隔条视觉 4px（命中 18px）、全面板可分离、浮动层不被裁剪 + 占位、**拖出工作台即分离**、浮动窗可缩放、双击回树、✕ 移除后重开仍浮动、刷新记忆、**预览 iframe 换壳不丢**、**预览 iframe 换壳不丢** | `float-window.mjs`（26） | shell |
 | ③ | **排版落 SQLite**（hydrate 先于首帧 → 拖 → 刷新仍在；旧 localStorage 一次性迁移） | `state-db-frontend.mjs`（7） | workbench |
-| ④ | dify 风 DAG（零重叠/分层/适配）+ 截图 | `branch-shot.mjs`（59）、`t6-visual-check.mjs` | branch |
+| ④ | 分层 DAG **默认竖排 TB**（320×92 / 层→y）+ 横排 LR（200×64）——零重叠 / 边正交拐点≤3 / 主轴单调 / `readOrder`；浏览器：`direction=tb` + 方向切换 + 方向键漫游 + Enter 跳行 + 截图 | `branch-shot.mjs`（154）、`t6-visual-check.mjs` | branch |
 | ⑤ | 单条横幅（URL+HTTP 状态）+ 不白屏 | `engine-failure.mjs`（2）、`engine-failure-min.mjs`（4） | engine |
 | ⑥ | 随包起步素材集（287 张/14.6 MB） | `starter-assets.mjs`（17；`--native` 18） | assets |
 | ⑦ | 下载源真正生效（Rust 源链 + 镜像 URL 形状 + 设置推送） | `rust-mirror-live.mjs`（13）、`live-download.mjs`（3） | assets |
@@ -33,9 +33,13 @@
 | ⑨ | **舞台比例 = cover**（铺满 + 裁切，绝不拉伸） | `stage-aspect.mjs`（11）、`stage-fit.mjs`（8）、`stage-cover-live.mjs`（8） | shell |
 | ⑩ | **编辑器键位 = VSCode**（Tab 插 `\t`、Enter 自动缩进、Backspace 跳 tab stop）+ 脚本文本**语法着色层**与 textarea 逐像素对齐（`tab-size: 8`、Tab 宽 = 8 字符格、行 top 误差 0px、光标像素误差 ≤ 1px、DOM span ↔ 内核 `tokenizeLine` 逐 span 对拍） | `_editor-tab-hl-check.mjs`（31） | editor |
 | ⑪ | **Tab = 8 列 / `tokenizeLine` 内核**（VSCode 键位语义、plan 幂等、span 不变量；全语料 200,372 行抽样 bad=0） | `indentTokens-selftest.mjs`（165）、`editorIndent-selftest.mjs`（124） | `npm run test:editor` |
+| ⑫ | **侧边栏 rail**（88px→32px 可收；5 个面板图标；点图标收/放整条面板）+ **脱离不留洞**（树里 `drop()` 摘叶 → 邻居变宽 ≥60px） | `_rail-check.mjs`（33）、`float-window.mjs`（29） | shell / editor |
+| ⑬ | **素材库**（预览/试听/拖拽：正文=插 key 可撤、舞台=应用到当前场景；导入进包 + 收藏/分组落 `stateStore`） | `_asset-lib-check.mjs`、`assetLibrary-selftest.mjs`（50） | editor |
+| ⑭ | **工作流竖排**（默认 TB：层→y、正交折线自上而下、方向键按阅读序切卡片、`Enter` 跳行+预览跟随） | `branch-shot.mjs`（154）、`branchGraph-selftest.mjs`（103） | branch |
+| ⑮ | **新建剧本**（三套模板已 Tab 缩进 + 幂等 + 归一化逐字节）+ 工具栏 `file/view/edit` 分组 / 面包屑 / 响应式 | `_layout-create-check.mjs`（21）、`createPack-selftest.mjs`（33） | editor |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
-`npm run test:harness` 当前 = **28 个 harness**（workbench 8 / branch 1 / engine 2 / assets 3 / shell 6 / player 2 / editor 6）。
+`npm run test:harness` 当前 = **34 个 harness**（workbench 9 / branch 1 / engine 2 / assets 3 / shell 8 / player 2 / editor 9）。
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
 

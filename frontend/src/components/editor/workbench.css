@@ -51,15 +51,16 @@
 
 /* ── 分隔条 ─────────────────────────────────────────────────── */
 
-/* 视觉 4px、命中 14px（`WB_GUTTER_SIZE` / `WB_GUTTER_HIT`）：细线好看，但
-   抓起来仍是 14px 宽的一条（`::after` 向两侧外扩 5px）。 */
+/* 视觉 **3px**、命中 18px（`WB_GUTTER_SIZE` / `WB_GUTTER_HIT`）：细线好看
+   （用户原话「那个边跟城墙一样厚」→ 再收 1px、并把颜色压到 --border 的 70%），
+   抓起来仍是 18px 宽的一条（`::after` 向两侧外扩 7.5px）。 */
 .wb-gutter {
   flex: 0 0 var(--wb-gutter-size, 4px);
   position: relative;
   /* ⚠️ 必须**高于**正文的行号槽（`.ed-gutter` 是 `z-index:3` 的 sticky）：
      否则命中区右半边被它盖住，指针贴着分隔条右侧就抓不到（实测 dx=+2…+9）。 */
   z-index: 6;
-  background: var(--border, #2c2c2c);
+  background: color-mix(in srgb, var(--border, #2c2c2c) 72%, transparent);
   touch-action: none;
   transition: background 120ms ease;
 }
@@ -269,24 +270,22 @@
   position: absolute;
 }
 
-/* 树里的占位（`data-wb-float-hole`）：虚线框 + 面板名，提示"这块在别处"。 */
+/* 树里的占位（`data-wb-float-hole`）——**兼容锚点**，不再是虚线空区：
+   浮动面板在 `Workbench` 的 `tree` 里就被摘掉（`drop`），邻居直接占满
+   （用户原话「脱离出去…为什么还要保留位置」）。这一支只在"叶子漏进来"时出现，
+   所以它 0 边框、0 背景、不吃空间观感。 */
 .wb-float-hole {
   flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   min-width: 0;
   min-height: 0;
-  margin: 4px;
-  border: 1px dashed color-mix(in srgb, var(--accent, #4c8dff) 55%, var(--border, #333));
-  border-radius: 6px;
-  background: repeating-linear-gradient(
-    45deg,
-    transparent 0 6px,
-    color-mix(in srgb, var(--accent, #4c8dff) 6%, transparent) 6px 12px
-  );
-  color: var(--text-secondary, #aaa);
-  font-size: 11px;
+  pointer-events: none;
+  border: 0;
+  background: transparent;
+}
+
+.wb-float-hole-label {
+  display: none;
 }
 
 .wb-panel--detached {

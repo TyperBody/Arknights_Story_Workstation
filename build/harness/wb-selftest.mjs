@@ -94,20 +94,25 @@ const arg = (name, fallback) => {
 const ROUNDS = Number(arg("rounds", "300"));
 
 // ══ (a) 常量 / 规格表 ══════════════════════════════════
-t("PANELS 顺序 = [toolpanel, stage, preview, branch]", () => {
-  assert.deepEqual(layout.PANELS, ["toolpanel", "stage", "preview", "branch"]);
+t("PANELS 顺序 = [toolpanel, assets, stage, preview, branch]（task-8 新增 assets）", () => {
+  assert.deepEqual(layout.PANELS, ["toolpanel", "assets", "stage", "preview", "branch"]);
 });
-t("WINDOW_SPECS: 标题 / kind / minW / minH / order（契约 §2.1）", () => {
+t("WINDOW_SPECS: 标题 / kind / minW / minH / order（契约 §2.1 + task-8 的 assets）", () => {
   assert.deepEqual(layout.WINDOW_SPECS.toolpanel, { title: "工具面板", map: false, minW: 240, minH: 160, order: 10, kind: "dock" });
+  assert.deepEqual(layout.WINDOW_SPECS.assets, { title: "素材库", map: false, minW: 280, minH: 180, order: 15, kind: "dock", defaultPlaced: false });
   assert.deepEqual(layout.WINDOW_SPECS.stage, { title: "舞台", map: false, minW: 280, minH: 160, order: 20, kind: "dock" });
   assert.deepEqual(layout.WINDOW_SPECS.preview, { title: "预览", map: true, minW: 320, minH: 200, order: 30, kind: "map" });
   assert.deepEqual(layout.WINDOW_SPECS.branch, { title: "分支图", map: true, minW: 320, minH: 200, order: 40, kind: "map" });
 });
-t("dock/map 语义：toolpanel·stage 常驻、preview·branch = Map", () => {
+t("dock/map 语义：toolpanel·stage 常驻、preview·branch = Map、assets = 常驻但默认收起", () => {
+  // `assets`（素材库）是 dock，但**默认不在布局里**（rail 放出才进树）→ defaultVisible 不变。
   assert.deepEqual(layout.defaultVisible(), ["toolpanel", "stage"]);
   assert.equal(layout.isMapPanel("branch"), true);
   assert.equal(layout.isDockPanel("stage"), true);
-  assert.deepEqual(layout.panelsInOrder(), ["toolpanel", "stage", "preview", "branch"]);
+  assert.equal(layout.isDockPanel("assets"), true);
+  assert.equal(layout.isDefaultPlaced("assets"), false);
+  assert.equal(layout.isDefaultPlaced("stage"), true);
+  assert.deepEqual(layout.panelsInOrder(), ["toolpanel", "assets", "stage", "preview", "branch"]);
 });
 t("share clamp 区间 = 0.12 / 0.88", () => {
   assert.equal(layout.SHARE_MIN, 0.12);
@@ -603,6 +608,23 @@ t("随机 + 落盘往返：把 fuzz 产物存进 localStorage 再读回来等价
   const back = parse(layout.readLayout("default"));
   assert.ok(back);
   assert.equal(stringify(back), stringify(result.state));
+});
+
+// ══ (h-2) rail（task-8）：整条收起 / 展开发，样式走 stateStore ══
+t("readRail：没存过 → open；saveRail 往返 collapsed/open（stateStore workspace）", () => {
+  installStorage({});
+  assert.equal(layout.readRail(), "open");
+  layout.saveRail("collapsed");
+  assert.equal(layout.readRail(), "collapsed");
+  assert.equal(store.getItem("workspace", "prts-editor-rail"), "collapsed");
+  layout.saveRail("open");
+  assert.equal(layout.readRail(), "open");
+});
+t("readRail：坏值 → open（记忆坏了不锁死 UI）", () => {
+  installStorage({ "prts-editor-rail": "banana" });
+  // 直接写内存镜像（stateStore 的 workspace scope）。
+  store.setItem("workspace", "prts-editor-rail", "banana");
+  assert.equal(layout.readRail(), "open");
 });
 
 // ── 结果 ──────────────────────────────────────────────
