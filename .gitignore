@@ -14,7 +14,7 @@ dist-ssr
 .env*.local
 
 # ============ Unified build output ============
-# Frontend bundle + installers/APK. Supersedes build/ctx & build/fanfic.
+# Frontend bundle + installers/APK + 编译缓存/日志。Supersedes build/ctx & build/fanfic。
 # 例外：`build/harness/**` 是**手工维护的验收入口**（每项自带断言 + 退出码），
 # 与 `scripts/harness/run.mjs` 一起对外、需要进版本库。
 # 注意：`/build/` 会**连目录一起**排除，导致后面的 `!/build/harness/` 无效
@@ -22,6 +22,16 @@ dist-ssr
 /build/*
 !/build/harness/
 !/build/harness/**
+# harness 的**截图 / 快照**（每次跑都重写）不入库；`.mjs` / `.md` 入库。
+build/harness/shots/
+build/harness/*.png
+# 项目内工具链（rustup/cargo + 交叉编译 target ≈5 GB）：拉取后自动装。
+build/toolchain/
+# 中间产物 / 探针输出 / 安装包（`build/` 里除 harness 外的全部）。
+build/*.json
+build/probe-fb/
+build/artifacts/
+build/fanfic/
 
 # ============ Tauri ============
 src-tauri/target/
