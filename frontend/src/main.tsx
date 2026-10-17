@@ -5,6 +5,8 @@ import { installGlobalCapture } from "./lib/debugLog";
 import { flush, hydrate } from "./lib/stateStore";
 import "./styles/global.css";
 import "./styles/browser.css";
+// 皮肤层：**最后**加载（同名规则以它为准），只改观感、不动 DOM 契约。
+import "./styles/theme-arknights.css";
 
 // Capture main-window errors/warnings before anything else runs.
 installGlobalCapture();

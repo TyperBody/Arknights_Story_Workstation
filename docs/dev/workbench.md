@@ -48,6 +48,24 @@
 - `src/akstage/engineCatalog.js` + `catalog-data.json`：引擎 25 条（css/js/font/src/data）、素材 19,861 条；`frontend/src/lib/engineCatalog.ts` 是 TS 包装。
 - Rust：`download::DEFAULT_CONCURRENCY = 30`、`MAX_CONCURRENCY = 32`；`setDownloadSettings` 由设置页写入。
 
+## 3.4 UI 皮肤（明日方舟风，2026-10-17）
+
+主题层 = `frontend/src/styles/theme-arknights.css`（入口，`@import` 两个分片）：
+
+| 文件 | 职责 |
+|---|---|
+| `theme-arknights.tokens.css` | 全部 token（`--ak-*`）+ **旧名重绑**（`--bg-primary`/`--accent`/`--border`/`--text-*`）→ 全仓数百处旧 CSS 一行不改就换肤；`--hl-*`（编辑器语法着色）在深蓝底上重挑 |
+| `theme-arknights.pages.css` | 首页 / 书架 / 详情 / 设置 / 播放器 / 下载条 / 调试台 |
+| `theme-arknights.editor.css` | 编辑器工作台（页头 / rail / 面板 / 正文 / 状态栏 / HUD / 素材库 / 竖排工作流） |
+
+风格要点（**按自己的口径做，不照抄素材**）：近黑蓝底 + 亮度分层（不用阴影）；金色主色 `#f4c430`
++ 高光 `#ffe08a`；4px 圆角 + **45° 左上切角**（`--ak-notch`）；中文标题**拉字距** +0.02…0.14em；
+6px 网格 / 45° 斜条纹（极低对比）；120ms `cubic-bezier(.2,.8,.2,1)`，并**尊重
+`prefers-reduced-motion`**。**DOM 契约零改动**（`data-*` 与类名都不动，harness 因此照跑）。
+
+回归：`node build/harness/ui-skin.mjs`（10 断言：加载顺序 / token 实测 / 五页截图 /
+契约数量 / reduced-motion / 零报错）；截图 `build/harness/shots/ui-*.png`。
+
 ## 3.5 观感证据（截图）
 
 | | |
@@ -59,6 +77,10 @@
 | 区域缩进（`[Decision]` 线路层级） | ![indent](images/indent-region.png) |
 | 舞台裁剪（150% 摘掉 clip = 素材带，对照见 `images/stage-clip-150-unclipped.png`） | ![clip](images/stage-clip-150.png) |
 | 编辑器英文界面（`prts-language=en-US`） | ![en](images/editor-en.png) |
+| **UI 皮肤**：首页 | ![ui-home](images/ui-home.png) |
+| **UI 皮肤**：同人剧本 / 新建 | ![ui-fanfic](images/ui-fanfic.png) |
+| **UI 皮肤**：编辑器（rail + 素材库 + 语法着色） | ![ui-editor](images/ui-editor.png) |
+| **UI 皮肤**：设置 | ![ui-settings](images/ui-settings.png) |
 | 脚本文本语法着色 + Tab 缩进（8 列） | ![hl](images/editor-highlight.png) |
 | 编辑器舞台 150%（裁剪后：16:9，素材不再成条） | ![stage150](images/stage-editor-150.png) |
 | 左侧**侧边栏 rail**（集合窗口；脱离后不留洞） | ![rail](images/rail.png) |
@@ -76,6 +98,7 @@ node build/harness/demo-check.mjs                      # 编辑器/舞台/分支
 node build/harness/_stage-clip-check.mjs               # 舞台裁剪（16:9）+ 舞台/日志可调大小（51）
 node build/harness/_indent-ui-check.mjs                # 区域缩进 UI（11）
 node build/harness/_editor-tab-hl-check.mjs            # VSCode 键位（Tab/Enter/Backspace）+ 着色层逐像素对齐（31）
+node build/harness/ui-skin.mjs                         # UI 皮肤（明日方舟风）：token/截图/契约/reduced-motion（10）
 node build/harness/_stage-visual-check.mjs             # 编辑器舞台 100%/150% 的 16:9 观感证据
 node build/harness/_i18n-check.mjs                    # i18n 运行时（7）
 node build/harness/player-chrome.mjs                  # 播放器底栏（默认纯隐藏，10）

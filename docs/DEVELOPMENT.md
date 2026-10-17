@@ -202,12 +202,18 @@ Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust �
 7 张 UI 小图（PNG）+ **全量**背景 893 + 主要角色**主差分** 1747（PNG → WebP q88/90，不缩放）。
 音频（占全量素材约 77%）与其余差分做成**补丁包**，与应用**同版本号**发布。
 
-| `--pack` | 内容 | 体积 | 产物 |
+| `--pack` | 内容 | 体积（解压） | 产物 |
 |---|---|---|---|
-| `starters` | UI + 背景全量 + 每 base 主差分（**无音频**） | ≈230 MB | `resources/assets/starter/`（随包） |
-| `patch-assets` | UI + 背景全量 + 立绘**全差分**（= `full` 去音频） | ≈220 MB | `build/artifacts/Arkstage-<ver>-assets-assets.zip` |
-| `patch-audio` | **只有音频**（`story_variables` → mp3） | ≈770 MB | `build/artifacts/Arkstage-<ver>-assets-audio.zip` |
-| `full` | 全部（历史行为） | ≈1000 MB | 目录（`--archive` 才打 zip） |
+| `starters` | UI + 背景全量 + 每 base **主差分**立绘（**无音频 / CG**） | ≈250 MB | `src-tauri/resources/assets/starter/`（随包） |
+| `patch-assets` | UI + 背景全量 + 立绘**全差分** + **CG / 插图全量** | ≈3 GB | `build/artifacts/Arkstage-<ver>-assets-assets.zip` |
+| `patch-audio` | **只有音频**（`story_variables` → mp3） | ≈1 GB | `build/artifacts/Arkstage-<ver>-assets-audio.zip` |
+| `full` | 全部 | ≈4.5 GB | 目录（`--archive` 才打 zip） |
+
+默认预算**按档给**（`starters` 250 MB / `patch-assets` 3.2 GB / `patch-audio` 1.2 GB / `full` 5 GB），
+`--budget=` 覆盖。候选**顺序即预算优先级**：`core → background → portrait 主差分 → cg → portrait 其余差分 → audio`
+（CG 放在差分前面是实测结论：放后面时 1.6 万张差分先把额度吃满、CG 一张都进不来）。
+PRTS 在批量并发下会对**正常存在**的图回 200 + 57 B 中转页（`document.location.reload()`），
+取数侧因此有 **5 次指数退避重试**（0.4/0.9/1.6/2.5s）；CG 全量 1,589 张、实测能拿到 ≈1,550 张。
 
 补丁 zip 条目名**扁平**，解到 `<资源目录>/assets/starter/` 即生效（`prts-cdn://` 覆盖层按
 canonical key 命中）。

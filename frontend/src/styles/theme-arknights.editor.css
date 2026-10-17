@@ -1,0 +1,179 @@
+/**
+ * `theme-arknights.editor.css` —— **编辑器工作台**的明日方舟风皮肤。
+ *
+ * 范围：`.editor-page` `.ed-*`（页头/rail/面板/正文/状态栏/HUD/素材库）`.wb-*`
+ *       `.bg-*`（竖排工作流）`.create-pack*`（新建剧本）。
+ * 只改观感；`data-*` 契约与类名不动。token 见 `theme-arknights.tokens.css`。
+ */
+
+/* ── 4. 编辑器工作台 ───────────────────────────────────────── */
+
+/* 4.1 页头 + 工具条：网格底 + 细描边；分组之间一条竖分隔。 */
+.editor-page {
+  background: var(--ak-bg-0);
+}
+.ed-header {
+  background: var(--ak-grid) var(--ak-bg-1);
+}
+.ed-title h1 {
+  letter-spacing: 0.08em;
+}
+.ed-crumb,
+.ed-sub {
+  color: var(--ak-text-3);
+  letter-spacing: 0.02em;
+}
+.ed-rail-group,
+.ed-toolgroup {
+  gap: 4px;
+}
+.ed-rail-group + .ed-rail-group,
+.ed-toolgroup + .ed-toolgroup {
+  border-left: 1px solid var(--ak-line-1);
+  padding-left: 8px;
+  margin-left: 4px;
+}
+
+/* 4.2 rail（收起窗口的托盘）：竖排文字 + 金色选中条。 */
+.ed-rail {
+  background: var(--ak-bg-1);
+  border-right: 1px solid var(--ak-line-1);
+}
+.ed-rail-btn.on {
+  color: var(--ak-accent-hi);
+  border-color: var(--ak-line-accent);
+  background: color-mix(in srgb, var(--ak-accent) 12%, transparent);
+}
+
+/* 4.3 面板窗口壳：标题条一条 1px 底线 + 面板底色。 */
+.ed-win {
+  background: var(--ak-bg-2);
+  border: 1px solid var(--ak-line-1);
+  border-radius: var(--ak-radius);
+}
+.ed-win-bar {
+  background: var(--ak-grid) var(--ak-bg-3);
+  border-bottom: 1px solid var(--ak-line-1);
+}
+.ed-win-title {
+  letter-spacing: 0.06em;
+  color: var(--ak-text-1);
+}
+
+/* 4.4 正文（编辑器）：等宽 + tabular 数字；当前行用金色细线不用整行高亮块。 */
+.ed-textarea,
+.ed-hl,
+.ed-anchor {
+  font-variant-numeric: tabular-nums;
+}
+.ed-gutter {
+  background: var(--ak-bg-1);
+  border-right: 1px solid var(--ak-line-1);
+}
+.ed-gutter-line.current {
+  color: var(--ak-accent-hi);
+}
+.ed-linebar {
+  background: color-mix(in srgb, var(--ak-accent) 10%, transparent);
+  border-top: 1px solid var(--ak-line-accent);
+  border-bottom: 1px solid var(--ak-line-accent);
+}
+
+/* 4.5 HUD（舞台 / 分支图）：小圆角按钮 + 金色激活；`1:1`、百分比用等宽数字。 */
+[data-stage-hud],
+.bg-zoom-bar {
+  background: color-mix(in srgb, var(--ak-bg-1) 82%, transparent);
+  border: 1px solid var(--ak-line-1);
+  border-radius: var(--ak-radius);
+  backdrop-filter: blur(4px);
+}
+[data-stage-hud] button,
+.bg-zoom-bar button {
+  border-radius: 3px;
+}
+[data-stage-hud] button.on,
+[data-stage-hud] button[aria-pressed="true"],
+[data-branch-action="direction"][aria-pressed="true"] {
+  background: color-mix(in srgb, var(--ak-accent) 18%, transparent);
+  border-color: var(--ak-line-accent);
+  color: var(--ak-accent-hi);
+}
+
+/* 4.6 工作流（竖排）：卡片切角 + 线路色条；选中卡片金色描边。 */
+.bg-node rect {
+  rx: 3;
+}
+.bg-node.is-picked rect {
+  stroke: var(--ak-accent);
+  stroke-width: 2;
+}
+.bg-keys {
+  color: var(--ak-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 4.7 素材库：格子 hover 提亮、选中金色描边、★ 用金色。 */
+.ed-asset-cell {
+  background: var(--ak-bg-2);
+  border: 1px solid var(--ak-line-1);
+  border-radius: 3px;
+  transition: border-color var(--ak-dur) var(--ak-ease), background var(--ak-dur) var(--ak-ease);
+}
+.ed-asset-cell:hover {
+  background: var(--ak-bg-3);
+  border-color: var(--ak-line-2);
+}
+.ed-asset-cell[data-asset-selected="1"] {
+  border-color: var(--ak-accent);
+  background: color-mix(in srgb, var(--ak-accent) 8%, transparent);
+}
+.ed-assets-bar {
+  background: var(--ak-bg-1);
+  border-bottom: 1px solid var(--ak-line-1);
+}
+.ed-asset-mark {
+  color: var(--ak-accent);
+}
+
+/* 4.8 状态栏：等宽数字 + 脏标记金色。 */
+.ed-status {
+  background: var(--ak-bg-1);
+  border-top: 1px solid var(--ak-line-1);
+  font-variant-numeric: tabular-nums;
+}
+.ed-status .dirty {
+  color: var(--ak-accent);
+}
+.ed-status .saved {
+  color: var(--ak-ok);
+}
+
+/* ── 5. 通用：下载条 / 调试台 / 弹层 ───────────────────────── */
+
+.dl-bar {
+  background: color-mix(in srgb, var(--ak-bg-1) 94%, transparent);
+  border-top: 1px solid var(--ak-line-1);
+}
+.dl-progress-fill,
+.dl-fill {
+  background: linear-gradient(90deg, var(--ak-accent), var(--ak-accent-hi)) var(--ak-stripes);
+}
+
+.dbg-panel {
+  background: color-mix(in srgb, var(--ak-bg-1) 96%, transparent);
+  border: 1px solid var(--ak-line-1);
+  border-radius: var(--ak-radius);
+}
+
+.ed-popup,
+.ed-wizard-card,
+.create-pack {
+  background: var(--ak-bg-2);
+  border: 1px solid var(--ak-line-2);
+  border-radius: var(--ak-radius-lg);
+}
+.ed-popup-item.on,
+.ed-popup-item:hover {
+  background: color-mix(in srgb, var(--ak-accent) 14%, transparent);
+  color: var(--ak-accent-hi);
+}

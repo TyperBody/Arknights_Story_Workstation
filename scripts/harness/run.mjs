@@ -60,6 +60,7 @@ const GROUPS = {
     ["_playersettings-check.mjs", "底栏默认 auto + 去掉 3 秒定时器（源码/CSS/运行时三查）"],
   ],
   editor: [
+    ["ui-skin.mjs", "⑯ UI 皮肤：明日方舟风主题层（token 生效 / 五页截图 / DOM 契约不变）"],
     ["_stage-clip-check.mjs", "⑧ 舞台裁剪恒 16:9（50~170%）+ 舞台可调大小"],
     ["_indent-ui-check.mjs", "⑧ 区域缩进 UI（按钮/快捷键/Tab/撤销/提示）"],
     ["_editor-tab-hl-check.mjs", "⑧ Tab/Enter/Backspace 的 VSCode 语义 + 语法着色逐像素对齐"],

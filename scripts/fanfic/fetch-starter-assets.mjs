@@ -68,8 +68,21 @@ const UPSTREAM = join(ROOT, "build/fanfic/upstream.json");
 const CURATED = join(STARTER_DIR, "curated.json");
 const BUNDLES = join(STARTER_DIR, "bundles.json");
 const SOURCES = join(STARTER_DIR, "SOURCES.md");
-/** 默认预算 1000 MiB（用户要求"起码 500MB 起步"，后追加"可以扩到 1000MB"）。 */
-const DEFAULT_BUDGET = 1000 * 1024 * 1024;
+/**
+ * 默认预算 —— **按档给**（用户口径：主程序带 ~200 MB 基础素材；两个补丁包合计 5–6 GB）：
+ * - `starters`（随包）    250 MB：UI + 背景全量 + 每个 base 一张主差分（**不含**音频 / CG）
+ * - `patch-assets`（补丁）3.2 GB：背景全量 + 立绘**全差分**（≈1.5 GB）+ CG 全量（≈1.3 GB）
+ * - `patch-audio`（补丁） 1.2 GB：`story_variables` 里全部 mp3（≈2.8k 条）
+ * - `full`                5.0 GB：历史行为（全部）
+ * `--budget=` 仍可覆盖。
+ */
+const DEFAULT_BUDGET = (() => {
+  const MiB = 1024 * 1024;
+  if (PACK === "starters") return 250 * MiB;
+  if (PACK === "patch-audio") return 1200 * MiB;
+  if (PACK.startsWith("patch")) return 3200 * MiB;
+  return 5000 * MiB;
+})();
 /** 并发（抓取 + 转码同一池；默认 min(12, CPU)）。 */
 const DEFAULT_CONCURRENCY = Math.max(4, Math.min(12, cpus().length || 4));
 /** 立绘至少覆盖多少个 base（保证"每个角色十几张差分"至少有一批角色做到）。 */
@@ -138,6 +151,8 @@ function corpusRanking() {
   const bg = new Map();
   const chr = new Map();
   const snd = new Map();
+  /** CG / 插图（`[Image(image=…)]` → `assets/avg/images/<key>.png`；`[ImageTween]` 同池）。 */
+  const cg = new Map();
   let files = 0;
   for (const file of walk(root)) {
     files += 1;
@@ -145,6 +160,12 @@ function corpusRanking() {
     for (const m of text.matchAll(/\[Background\(([^\]]*)\)/g)) {
       const image = /image\s*=\s*"([^"]+)"/.exec(m[1]);
       if (image) bg.set(image[1], (bg.get(image[1]) ?? 0) + 1);
+    }
+    // CG / 插图：`[Image(image="x")]` 与 `[ImageTween(image="x")]` —— 引擎把两者
+    // 都解析成 `assets/avg/images/<key>.png`（快照里 `Xt={background,image,cutin}`）。
+    for (const m of text.matchAll(/\[(?:Image|ImageTween)\(([^\]]*)\)/g)) {
+      const hit = /image\s*=\s*"([^"]+)"/.exec(m[1]);
+      if (hit) cg.set(hit[1], (cg.get(hit[1]) ?? 0) + 1);
     }
     // 音频变量引用：`$name` → 变量名（小写，与 `story_variables.json` 的键同域）。
     for (const m of text.matchAll(/\$([A-Za-z][A-Za-z0-9_]*)/g)) {
@@ -161,7 +182,7 @@ function corpusRanking() {
     }
   }
   const rank = (map) => [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  return { root, files, backgrounds: rank(bg), characters: rank(chr), sounds: rank(snd) };
+  return { root, files, backgrounds: rank(bg), characters: rank(chr), sounds: rank(snd), cgs: rank(cg) };
 }
 
 // ── 策展 ────────────────────────────────────────────────────────────────
@@ -290,7 +311,20 @@ function curate() {
     first.push({ ...entryOf(body), primary: true });
     for (const key of styles.slice(1)) rest.push(entryOf(key));
   }
+  /** CG / 插图：`assets/avg/images/<key>.png`（`[Image]` 全量，PNG 原样不转码）。 */
+  const cgEntries = wantsImages()
+    ? corpus.cgs.map(([name, uses]) => {
+        const key = `torappu.prts.wiki/assets/avg/images/${name}.png`;
+        return { key, group: "cg", kind: "cg", url: `https://${key}`, uses, file: fileNameFor(key, "png"), quality: null };
+      })
+    : [];
+
+  // 顺序 = **预算优先级**（`fetchAll` 按候选顺序吃预算，超了只跳这一条）：
+  //   1. core（UI 小图，必要）→ 2. background（全量）→ 3. portrait 主差分（每个 base 一张）
+  //   → 4. **cg（`[Image]` 全量）** → 5. portrait 其余差分（能吃多少吃多少）→ 6. audio。
+  // 4 放在 5 前面是实测结论：放后面时 15,982 张差分先把预算吃满，CG 一张都进不来。
   if (wantsPortrait("first")) for (const entry of first) push(entry);
+  for (const entry of cgEntries) push(entry);
   if (wantsPortrait("rest")) for (const entry of rest) push(entry);
 
   // 4) audio：`story_variables.json` 里指向 `Sound_Beta_2/...` 的音频变量，按语料
@@ -337,22 +371,35 @@ async function ensure(entry) {
   // 退避重试 2 次；仍失败才抛（调用方据此写进 missing 缓存）。
   const url = encodeAssetUrl(entry.url);
   const headers = { "User-Agent": UA, Referer: "https://prts.wiki/" };
-  let res;
-  for (let attempt = 1; ; attempt += 1) {
-    res = await fetch(url, { headers });
-    if (res.ok || attempt > 2) break;
-    await res.arrayBuffer().catch(() => {});
-    await new Promise((r) => setTimeout(r, 250 * attempt));
+  // 3 次尝试：① 正常取；② HTTP 非 2xx 退避重试；③ 200 但**是 57 B 中转页**
+  //   （`<script>document.location.reload()</script>`）也要重试 —— 实测 PRTS 在
+  //   批量并发下把**正常存在的图**回成中转页（同一 URL 单独 curl 就是 PNG）。
+  //   这一条是「全量档」能不能拿到 CG / 全差分的关键：不重试时 1589 张 CG 全废。
+  const ATTEMPTS = 5;
+  let source = null;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      await res.arrayBuffer().catch(() => {});
+      if (attempt === ATTEMPTS) throw new Error(`HTTP ${res.status} for ${entry.url}`);
+    } else {
+      const body = Buffer.from(await res.arrayBuffer());
+      if (!/document\.location\.reload\(\)/.test(body.subarray(0, 200).toString("utf8"))) {
+        source = body;
+        break;
+      }
+      if (attempt === ATTEMPTS) throw new Error(`PRTS 中转页（${body.length} B，图床未就绪）for ${entry.url}`);
+    }
+    // 退避：0.4s / 0.9s / 1.6s / 2.5s —— PRTS 的"图床未就绪"是**秒级**的，
+    // 之前 3 次共 1.5s 太短（实测 1,589 张 CG 只拿到 721 张）。
+    await new Promise((r) => setTimeout(r, 100 * (attempt + 1) * (attempt + 1)));
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${entry.url}`);
-  const source = Buffer.from(await res.arrayBuffer());
+  if (!source) throw new Error(`取不到字节 for ${entry.url}`);
   const head = source.subarray(0, 8).toString("latin1");
   // PNG / RIFF(WebP) / JPEG / MP3（`ID3` 标签或裸帧同步 0xFF）。
   const magicOk = head.startsWith("\x89PNG") || head.slice(0, 4) === "RIFF"
     || head.slice(0, 3) === "\xff\xd8\xff" || head.startsWith("ID3") || source[0] === 0xff;
-  // PRTS 图床对「目录里有、图还没生成」的差分（几乎全是 `$` 形态）回 200 + 57 B 中转页：
-  //   `<html><script>document.location.reload();</script></html>`
-  // 语义是"下次再来"，重试 6 次也**不变**（实测）→ 记 missing，重跑不再打网络。
+  // 中转页已在上面的重试循环里处理（3 次都中转页才抛）；这里只兜一次最终判定。
   if (/document\.location\.reload\(\)/.test(source.subarray(0, 200).toString("utf8"))) {
     throw new Error(`PRTS 中转页（${source.length} B，图床未就绪）for ${entry.url}`);
   }
@@ -428,9 +475,10 @@ function writeManifests(entries, meta) {
       core: byGroup.core?.files ?? 0,
       background: byGroup.background?.files ?? 0,
       portrait: byGroup.portrait?.files ?? 0,
+      cg: byGroup.cg?.files ?? 0,
       portraitBases: meta.bases ?? null,
       minBases: meta.minBases ?? null,
-      note: "core=UI 小图（原格式）；background=全量（catalog）；portrait=语料 base 频次降序 + 全差分；均 WebP 压缩",
+      note: "core=UI 小图（原格式）；background=全量（catalog）；portrait=语料 base 频次降序 + 全差分（WebP）；cg=[Image] 全量（PNG 原样）；audio=story_variables 的 mp3",
       skipped: meta.skipped ?? [],
     },
     entries,
@@ -440,7 +488,7 @@ function writeManifests(entries, meta) {
     "# 起步素材集出处（bundled starter assets）",
     "",
     "为了「自创剧情不必每次打开都联网下载」，安装包内置一批**常用**素材：",
-    `UI 小图 ${byGroup.core?.files ?? 0} 张 + 背景 ${byGroup.background?.files ?? 0} 张 + 立绘 ${byGroup.portrait?.files ?? 0} 张（覆盖 ${meta.bases ?? "?"} 个角色 base 的全差分），合计 ${human(total)}。`,
+    `UI 小图 ${byGroup.core?.files ?? 0} 张 + 背景 ${byGroup.background?.files ?? 0} 张 + 立绘 ${byGroup.portrait?.files ?? 0} 张（覆盖 ${meta.bases ?? "?"} 个角色 base 的全差分）+ CG ${byGroup.cg?.files ?? 0} 张${byGroup.audio ? ` + 音频 ${byGroup.audio.files} 条` : ""}，合计 ${human(total)}。`,
     "全部取自 PRTS Wiki 托管的《明日方舟》AVG 资源；版权归上海鹰角网络（Hypergryph）所有，",
     "此处仅作离线播放/同人创作之用，遵循应用整体免责声明（仓库根 `README.md`）。",
     "",

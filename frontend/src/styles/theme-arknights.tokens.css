@@ -1,0 +1,88 @@
+/**
+ * `theme-arknights.tokens.css` —— **明日方舟风**的全部 token（`--ak-*`）。
+ *
+ * 分层：
+ * 1. `--ak-bg-0..3` / `--ak-line-0..3`：底色与描边（4 档，**只用亮度分层**，不用阴影）。
+ * 2. **旧名重绑**：`--bg-primary` / `--bg-secondary` / `--bg-tertiary` / `--text-primary`
+ *    / `--text-secondary` / `--border` / `--accent` / `--accent-hover` —— `global.css`
+ *    与 `browser.css` 里几百处旧引用**一行不改**就换肤（这是本次改造能"全面"的前提）。
+ * 3. `--hl-*`（编辑器语法着色）：在深蓝底上重挑一遍，保持 4.5:1 以上的对比
+ *    （`--hl-indent` 故意压暗，缩进不该抢眼）。
+ * 4. 几何/动效 token：`--ak-radius` / `--ak-notch` / `--ak-dur` / `--ak-ease`。
+ */
+:root {
+  /* 1) 底色：近黑蓝（#0e1216 → #262f38），层级靠亮度 */
+  --ak-bg-0: #0e1216;
+  --ak-bg-1: #141a1f;
+  --ak-bg-2: #1b2228;
+  --ak-bg-3: #232c34;
+  --ak-bg-4: #2b353e;
+  --ak-line-0: #232c34;
+  --ak-line-1: #2c3742;
+  --ak-line-2: #3a4753;
+  --ak-line-3: #4d5c6a;
+  --ak-line-accent: color-mix(in srgb, var(--ak-accent) 45%, transparent);
+
+  /* 文本 4 档：正文 / 次要 / 弱化 / 极弱 */
+  --ak-text-1: #e8eef4;
+  --ak-text-2: #a9b6c2;
+  --ak-text-3: #7c8894;
+  --ak-text-4: #5a656f;
+
+  /* 主色（明日方舟的金）+ 高光 + 语义色 */
+  --ak-accent: #f4c430;
+  --ak-accent-hi: #ffe08a;
+  --ak-accent-dim: color-mix(in srgb, var(--ak-accent) 22%, transparent);
+  --ak-ok: #52c07a;
+  --ak-warn: #f0b429;
+  --ak-err: #e2564d;
+
+  /* 2) 旧名重绑（**别删**：全仓旧 CSS 靠它换肤） */
+  --bg-primary: var(--ak-bg-0);
+  --bg-secondary: var(--ak-bg-1);
+  --bg-tertiary: var(--ak-bg-3);
+  --text-primary: var(--ak-text-1);
+  --text-secondary: var(--ak-text-2);
+  --border: var(--ak-line-1);
+  --accent: var(--ak-accent);
+  --accent-hover: #d9ab22;
+  --success: var(--ak-ok);
+  --error: var(--ak-err);
+
+  /* 3) 编辑器语法着色（深蓝底重挑） */
+  --hl-controller: #8fb8ff;
+  --hl-arg: #c9a2f0;
+  --hl-string: #b8e08a;
+  --hl-number: #f2a077;
+  --hl-bool: #ffd166;
+  --hl-semicolon: #86d9e8;
+  --hl-speaker: #ff9fb8;
+  --hl-text: #dfe7ee;
+  --hl-comment: #77838e;
+  --hl-bracket: #8b98a6;
+  --hl-indent: #3b4650;
+  --hl-bare: #dfe7ee;
+  --hl-severity-error: #ff8a80;
+  --hl-severity-warning: #ffd54f;
+
+  /* 4) 几何 / 动效 / 字体 */
+  --ak-radius: 4px;
+  --ak-radius-lg: 6px;
+  /** 45° 左上切角（系列 UI 的识别点）；`:root` 里算不了函数，用固定值。 */
+  --ak-notch: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px);
+  --ak-dur: 120ms;
+  --ak-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ak-font: NotoSans, "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --ak-font-num: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /** 面板/页头的极低对比网格 + 30° 斜纹（`background` 简写里直接用）。 */
+  --ak-grid:
+    linear-gradient(90deg, color-mix(in srgb, var(--ak-text-1) 3%, transparent) 1px, transparent 1px) 0 0 / 6px 6px,
+    linear-gradient(180deg, color-mix(in srgb, var(--ak-text-1) 3%, transparent) 1px, transparent 1px) 0 0 / 6px 6px;
+  /** 45° 斜条纹（进度条 / 加载 / 选中条底纹）。 */
+  --ak-stripes: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--ak-accent) 22%, transparent) 0 6px,
+    transparent 6px 12px
+  );
+}

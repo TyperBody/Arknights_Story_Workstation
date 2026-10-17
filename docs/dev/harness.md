@@ -37,9 +37,10 @@
 | ⑬ | **素材库**（预览/试听/拖拽：正文=插 key 可撤、舞台=应用到当前场景；导入进包 + 收藏/分组落 `stateStore`） | `_asset-lib-check.mjs`、`assetLibrary-selftest.mjs`（50） | editor |
 | ⑭ | **工作流竖排**（默认 TB：层→y、正交折线自上而下、方向键按阅读序切卡片、`Enter` 跳行+预览跟随） | `branch-shot.mjs`（154）、`branchGraph-selftest.mjs`（103） | branch |
 | ⑮ | **新建剧本**（三套模板已 Tab 缩进 + 幂等 + 归一化逐字节）+ 工具栏 `file/view/edit` 分组 / 面包屑 / 响应式 | `_layout-create-check.mjs`（21）、`createPack-selftest.mjs`（33） | editor |
+| ⑯ | **UI 皮肤（明日方舟风）**：token 实测生效 + 旧名重绑 + 五页截图 + DOM 契约不变 + `prefers-reduced-motion` | `ui-skin.mjs`（10） | editor |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
-`npm run test:harness` 当前 = **34 个 harness**（workbench 9 / branch 1 / engine 2 / assets 3 / shell 8 / player 2 / editor 9）。
+`npm run test:harness` 当前 = **35 个 harness**（workbench 9 / branch 1 / engine 2 / assets 3 / shell 8 / player 2 / editor 10）。
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
 

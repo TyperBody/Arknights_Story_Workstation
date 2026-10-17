@@ -1,0 +1,123 @@
+/**
+ * `theme-arknights.pages.css` —— 首页 / 书架 / 详情 / 设置 / 播放器 的**明日方舟风**皮肤。
+ *
+ * 范围：`.home-*` `.browser-*` `.story-*` `.cover-*` `.chapter-*` `.settings-*`
+ *       `.player-*` `.sp-*` `.dl-*`（下载条）`.dbg-*`（调试台）与通用弹层。
+ * 只改观感；DOM 契约与类名不动。token 见 `theme-arknights.tokens.css`。
+ */
+
+/* ── 1. 首页 / 书架 ───────────────────────────────────────────── */
+
+.home-page,
+.browser-page {
+  background:
+    radial-gradient(120% 80% at 50% -10%, color-mix(in srgb, var(--ak-accent) 7%, transparent), transparent 60%),
+    var(--ak-bg-0);
+}
+
+.home-logo {
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--ak-accent) 22%, transparent));
+}
+.home-title {
+  letter-spacing: 0.14em;
+  font-weight: 600;
+}
+.home-sub,
+.home-version {
+  color: var(--ak-text-3);
+  letter-spacing: 0.04em;
+}
+
+/* 分类行 / 分组标题：左侧一条 3px 金线（系列 UI 的分节方式）。 */
+.browser-section-title,
+.shelf-cat-title,
+.bs-group-title {
+  border-left: 3px solid var(--ak-accent);
+  padding-left: 8px;
+  letter-spacing: 0.06em;
+  color: var(--ak-text-1);
+}
+
+/* 章节行：hover/选中用金色描边 + 8% 底色，不用整块反白。 */
+.chapter-row,
+.chapter-item {
+  border-radius: var(--ak-radius);
+  transition: background var(--ak-dur) var(--ak-ease), border-color var(--ak-dur) var(--ak-ease);
+}
+.chapter-row:hover,
+.chapter-item:hover {
+  background: color-mix(in srgb, var(--ak-accent) 7%, transparent);
+  border-color: var(--ak-line-accent);
+}
+
+/* 进度 / 缓存圆点：三态色与系列一致（灰未缓存 / 金已缓存 / 绿已读）。 */
+.dot-partial { background: var(--ak-accent); }
+.dot-cached { background: var(--ak-ok); }
+.dot-none { background: var(--ak-text-4); }
+
+/* ── 2. 设置页 ──────────────────────────────────────────────── */
+
+.settings-page {
+  background: var(--ak-bg-0);
+}
+.settings-section,
+.set-card,
+.set-row {
+  border-radius: var(--ak-radius);
+  border-color: var(--ak-line-1);
+}
+.settings-section h2,
+.set-card h2 {
+  letter-spacing: 0.06em;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ak-text-1);
+  border-left: 3px solid var(--ak-accent);
+  padding-left: 8px;
+}
+.settings-link,
+.set-link {
+  color: var(--ak-accent);
+  border-bottom: 1px solid color-mix(in srgb, var(--ak-accent) 35%, transparent);
+}
+.settings-link:hover,
+.set-link:hover {
+  color: var(--ak-accent-hi);
+}
+
+/* 设置项里的 select / input：细描边 + 聚焦金色环。 */
+.settings-page select,
+.settings-page input[type="text"],
+.settings-page input[type="number"] {
+  background: var(--ak-bg-2);
+  border: 1px solid var(--ak-line-2);
+  border-radius: var(--ak-radius);
+  color: var(--ak-text-1);
+}
+.settings-page select:focus-visible,
+.settings-page input:focus-visible {
+  outline: 2px solid var(--ak-accent-dim);
+  outline-offset: 1px;
+  border-color: var(--ak-accent);
+}
+
+/* ── 3. 播放器页 chrome（引擎 iframe 之内**不动**）──────────────── */
+
+.player-page,
+.story-player-page {
+  background: #000; /* 演出周围留黑（系列 UI 的全屏演出观感） */
+}
+.sp-bar,
+.sp-topbar {
+  background: color-mix(in srgb, var(--ak-bg-0) 88%, transparent);
+  border-bottom: 1px solid var(--ak-line-1);
+  backdrop-filter: blur(6px);
+}
+.sp-btn {
+  border-radius: var(--ak-radius);
+  color: var(--ak-text-2);
+}
+.sp-btn:hover {
+  color: var(--ak-accent-hi);
+  background: color-mix(in srgb, var(--ak-accent) 10%, transparent);
+}
