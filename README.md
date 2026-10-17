@@ -111,12 +111,14 @@
 上游 PRTS 的引擎文件是带哈希的（`StoryPlayer.<hash>.js`），换版本或网络抖动时会短暂取不到。此时应用会自动重试 2 次（1.5s / 3s），再回退到本地已验证快照；提示条只出现一条、可关闭，播放不受影响。若长期出现，可在设置里换一个下载源。
 
 **自带素材不够 / 想离线玩全部剧情？**
-安装包内置的是**起步素材**（UI + 全量背景 + 主要角色主差分立绘，≈250 MB，**不含音频与 CG**）。想更全，可另下两个**与主程序同版本号**的补丁包（GitHub Release 的 Assets），解压到资源目录的 `assets/starter/` 即可（桌面：设置页可打开「资源目录」；Android：`Android/data/cn.aunly.arkstage/files/assets/starter/`）：
+安装包内置的是**起步素材**（UI + 全量背景 + 主要角色主差分立绘，≈250 MB，**不含音频与 CG**）。想更全，装两个**与主程序同版本号**的**补丁安装包**（GitHub Release 的 Assets）——它们会**自动找到 Arkstage 本体**，把素材装进 `<资源目录>/assets/starter/`（**只补缺失，不覆盖**你已有的文件）：
 
-- `Arkstage-<版本>-assets-assets.zip` —— **除音频外的全部素材**：立绘**全差分**（≈1.5 GB）+ **CG / 插图全量**（≈1.3 GB）+ 背景全量，解压后 ≈ **3 GB**；
-- `Arkstage-<版本>-assets-audio.zip` —— **音频**（音乐 / 音效，约 2,800 条，≈ **1 GB**）。
+- `Arkstage-<版本>-assets-assets-setup.exe`（Windows 安装器）/ `.run`（Linux / macOS 自解压）—— **除音频外的全部素材**：立绘**全差分** + **CG / 插图全量** + 背景全量，装后 ≈ **3 GB**；
+- `Arkstage-<版本>-assets-audio-setup.exe` / `.run` —— **音频**（音乐 / 音效，≈2,800 条，≈ **1 GB**）。
 
-两者都解压后 = 无网也能播全部剧情（等价于「全量」档），合计约 **4.5 GB** 素材 + 250 MB 主程序。开发者可直接一条命令出全量：`npm run assets:patch:assets` / `npm run assets:patch:audio`（见 `docs/DEVELOPMENT.md`）。
+**找不到本体时**：Windows 上弹「没有找到 Arkstage 本体」；`.run` 打印同样的提示并**以退出码 2 结束**（一个文件都不写）。也可以手动 `sh Arkstage-<版本>-assets-audio-setup.run --data-root <资源目录>` 指定位置（Android：`Android/data/cn.aunly.arkstage/files/assets/starter/`）。
+
+两个补丁都装好后 = 无网也能播全部剧情（等价于「全量」档），合计约 **4.5 GB** 素材 + 250 MB 主程序。开发者可直接一条命令出全量：`npm run assets:patch:assets` / `npm run assets:patch:audio`（见 `docs/DEVELOPMENT.md`）。
 
 **「压缩资源」会损失画质吗？能撤销吗？**
 取决于档位：**无损**档画质完全不变；**高质量**档肉眼基本无损；**极致**档体积最小、可能有轻微可见差异。压缩会替换原图、不保留原始 PNG，**无法还原**，但可随时重新下载对应剧情以恢复原图。压缩期间为避免冲突会暂时禁止下载新资源，任务支持暂停与退出后自动续传。

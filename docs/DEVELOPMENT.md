@@ -206,8 +206,25 @@ Rust 源码里的常量与 JS 的运行时展开逐字节比对（另有 Rust �
 |---|---|---|---|
 | `starters` | UI + 背景全量 + 每 base **主差分**立绘（**无音频 / CG**） | ≈250 MB | `src-tauri/resources/assets/starter/`（随包） |
 | `patch-assets` | UI + 背景全量 + 立绘**全差分** + **CG / 插图全量** | ≈3 GB | `build/artifacts/Arkstage-<ver>-assets-assets.zip` |
+| ↑ 的**安装包** | 同上（**自解压**：找到本体才装、只补缺失） | ≈3 GB | `...-assets-assets-setup.run` / `-setup.exe` |
 | `patch-audio` | **只有音频**（`story_variables` → mp3） | ≈1 GB | `build/artifacts/Arkstage-<ver>-assets-audio.zip` |
+| ↑ 的**安装包** | 同上 | ≈1 GB | `...-assets-audio-setup.run` / `-setup.exe` |
 | `full` | 全部 | ≈4.5 GB | 目录（`--archive` 才打 zip） |
+
+
+补丁的**安装形态**（用户口径「补丁包是安装包的形式，装到 Arkstage 的目录里；没有 Arkstage 就提示没有本体」）：
+
+```bash
+npm run assets:patch:assets && npm run assets:patch:audio   # 先备好 zip 载荷
+node scripts/fanfic/build-patch-installer.mjs               # 出 .run（Linux/macOS 自解压）
+node scripts/fanfic/build-patch-installer.mjs --win         # 出 -setup.exe（NSIS）
+```
+
+- `.run` = `patch-installer/install.sh` + zip 载荷（`tail -c` 按**字节偏移**取载荷）；查找本体顺序
+  `--data-root` → `$PRTS_DATA_DIR` → `config.json` 的 `data_root` → `~/.local/share/cn.aunly.arkstage` → 可执行文件同级；
+  找不到 → 提示 + `exit 2`（**一个文件都不写**）；找到 → `unzip` 到 `<root>/assets/starter/`，**只补缺失**。
+- `.exe`（NSIS）查找顺序：注册表 `HKCU\Software\Arkstage\InstallDir` → `%LOCALAPPDATA%\cn.aunly.arkstage`
+  → `%PROGRAMFILES%\Arkstage` → 安装器同级；找不到 → `MessageBox` 提示后 `Abort`。`SetOverwrite off` = 不覆盖既有文件。
 
 默认预算**按档给**（`starters` 250 MB / `patch-assets` 3.2 GB / `patch-audio` 1.2 GB / `full` 5 GB），
 `--budget=` 覆盖。候选**顺序即预算优先级**：`core → background → portrait 主差分 → cg → portrait 其余差分 → audio`

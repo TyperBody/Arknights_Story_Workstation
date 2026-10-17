@@ -272,12 +272,10 @@ mod tests {
         let budget = starter_budget_bytes();
         assert!(budget > 0, "清单缺 budgetBytes（策展脚本应写入）");
         assert!(bytes <= budget, "起步素材集超预算：{bytes} > {budget}");
-        assert_eq!(
-            groups.get("core").copied().unwrap_or(0)
-                + groups.get("background").copied().unwrap_or(0)
-                + groups.get("portrait").copied().unwrap_or(0),
-            files
-        );
+        // 分组和 = 总条目数：**逐组相加**（2026-10-17 起起步集也带少量 `cg`，
+        // 只加 core/background/portrait 三项会在扩档后误报）。
+        let grouped: usize = groups.values().map(|n| *n).sum();
+        assert_eq!(grouped, files, "分组计数之和 ≠ 条目数：{groups:?} vs {files}");
         assert!(groups.get("background").copied().unwrap_or(0) >= 60);
         assert!(groups.get("portrait").copied().unwrap_or(0) >= 80);
     }

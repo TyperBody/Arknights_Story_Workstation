@@ -177,3 +177,39 @@
   background: color-mix(in srgb, var(--ak-accent) 14%, transparent);
   color: var(--ak-accent-hi);
 }
+
+/* ── 7. 编辑器控件统一（与 pages 分片同一套基线）────────────────
+   `.ed-btn`（工具栏 / HUD）= 28px 小档；`.ed-rail-btn` = 30px；
+   `.ed-tab` = 30px。三者此前各写各的 `padding/font-size`，"按钮忽大忽小"。 */
+.ed-btn {
+  box-sizing: border-box;
+  min-height: var(--ak-ctrl-h-sm);
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.ed-tab {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+}
+.ed-rail-btn,
+.ed-rail-toggle {
+  min-height: 30px;
+}
+.ed-status-btn {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+}
+/* 焦点环统一（ak-ui `--ak-focus-*`）。 */
+.ed-btn:focus-visible,
+.ed-rail-btn:focus-visible,
+.ed-tab:focus-visible,
+.btn-primary:focus-visible,
+.nav-btn:focus-visible {
+  outline: var(--ak-focus-width) solid var(--ak-focus-color);
+  outline-offset: 2px;
+}

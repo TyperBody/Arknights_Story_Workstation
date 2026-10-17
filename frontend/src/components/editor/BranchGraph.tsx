@@ -266,6 +266,10 @@ export default function BranchGraph({
   // `react-hooks/set-state-in-effect` 判为级联渲染。
   const attachPan = useCallback((node: HTMLDivElement | null) => {
     panRef.current = node;
+    // ⚠️ `panFocusRef` 也要在这里挂：它此前**从没被赋过值**（一直是 null），
+    // 于是"方向键后把焦点收回图上"是空操作、点击空白处的 `focus()` 也是空操作
+    // —— 焦点靠 div 的 `tabIndex` 原生获得，才"看起来正常"。
+    panFocusRef.current = node;
     if (!node) return;
     const next = { w: node.clientWidth || 0, h: node.clientHeight || 0 };
     setSize((prev) => (prev.w === next.w && prev.h === next.h ? prev : next));
@@ -384,8 +388,14 @@ export default function BranchGraph({
     const node = layout.nodes.find((candidate) => candidate.id === id);
     setPicked({ text, id });
     setAnnounce({ text, index: next, total: order.length });
-    if (node) scrollIntoView(node);
-  }, [layout.nodes, readOrder, scrollIntoView, selectedId, text]);
+    if (node) {
+      scrollIntoView(node);
+      // **跟着方向键走**（用户反馈「预览/目录不会跟随方向键」）：换卡片就把
+      // 编辑器光标 + 舞台 + 预览读数带到该行，而不是只在 Enter 时才同步。
+      onJumpToLine(node.line);
+      onFocusLine?.(node.line);
+    }
+  }, [layout.nodes, onFocusLine, onJumpToLine, readOrder, scrollIntoView, selectedId, text]);
 
   /** 方向键处理（`onKeyDown`，挂在 `[data-branch-pan]` 上 —— 面板已聚焦才收键）。 */
   const onPanKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -393,12 +403,20 @@ export default function BranchGraph({
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const key = event.key;
-    const down = key === "ArrowDown" || key === "j" || key === "J";
-    const up = key === "ArrowUp" || key === "k" || key === "K";
+    // 四个方向都收：**竖排**（TB）时 ←/→ 也按阅读序翻（用户「可视流不会跟随
+    // 左右方向键」）；**横排**（LR）时 ↑/↓ 同理。`h`/`l` 与 `j`/`k` 一并支持
+    // —— vim 习惯，且不会和输入框冲突（上面已按 tag 放行 INPUT/TEXTAREA）。
+    const down = key === "ArrowDown" || key === "ArrowRight" || key === "j" || key === "J" || key === "l" || key === "L";
+    const up = key === "ArrowUp" || key === "ArrowLeft" || key === "k" || key === "K" || key === "h" || key === "H";
     if (down || up) {
       event.preventDefault();
       event.stopPropagation();
       moveSelection(down ? 1 : -1);
+      // `moveSelection` 会经 `onJumpToLine` 让编辑器把光标放到该行
+      //（`textarea.focus()` + `syncCaret`），焦点离开图 → **下一页键落进正文**
+      //（实测：第 2 次 ↓ 只在正文里移动光标）。下一帧把焦点收回图上，
+      // 保证"连按方向键一张张翻"；`preventScroll` 免得又把面板滚走。
+      requestAnimationFrame(() => panFocusRef.current?.focus({ preventScroll: true }));
       return;
     }
     if (key === "Home" || key === "End") {

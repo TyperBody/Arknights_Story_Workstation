@@ -72,12 +72,12 @@ const token = await page.evaluate(() => {
     font: body.fontFamily,
   };
 });
-ok("(b) token 生效：--ak-accent / --accent 都是 #f4c430", () => {
-  assert.equal(token.akAccent, "#f4c430");
-  assert.equal(token.accent, "#f4c430");
+ok("(b) token 生效：--accent = ak-ui advanced（#f1c644）", () => {
+  assert.equal(token.akAccent, "#f1c644");
+  assert.equal(token.accent, "#f1c644");
 });
-ok("(b) 旧名重绑：--bg-primary = --ak-bg-0（#0e1216）", () => assert.equal(token.bgPrimary, "#0e1216"));
-ok("(b) body 底色 = 近黑蓝 rgb(14, 18, 22)", () => assert.equal(token.bg, "rgb(14, 18, 22)"));
+ok("(b) 旧名重绑：--bg-primary = --ak-surface-canvas（ak-ui #111315）", () => assert.equal(token.bgPrimary, "#111315"));
+ok("(b) body 底色 = 中性近黑 rgb(17, 19, 21)（**不偏蓝**）", () => assert.equal(token.bg, "rgb(17, 19, 21)"));
 ok("(b) body 字体栈含 Noto Sans SC", () => assert.match(token.font, /Noto Sans SC/));
 
 await shot("/fanfic", "fanfic");

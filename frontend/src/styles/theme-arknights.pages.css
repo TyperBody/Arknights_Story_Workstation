@@ -121,3 +121,54 @@
   color: var(--ak-accent-hi);
   background: color-mix(in srgb, var(--ak-accent) 10%, transparent);
 }
+
+/* ── 6. 控件尺寸基线（用户：「按钮大小不统一需要修复」）─────────────
+   所有"看起来是按钮"的东西共用一套高度/内边距/字号：
+   小档（工具条 / 徽标）= 28px、常规档（页面动作）= 34px、块档（弹层主按钮）= 38px。
+   用 `min-height` + `box-sizing`，所以文字多时长得下去但不会"忽高忽低"。 */
+:root {
+  --ak-ctrl-h-sm: 28px;
+  --ak-ctrl-h: 34px;
+  --ak-ctrl-h-lg: 38px;
+  --ak-ctrl-pad-sm: 0 10px;
+  --ak-ctrl-pad: 0 14px;
+  --ak-ctrl-pad-lg: 0 18px;
+}
+.btn-primary,
+.btn-danger,
+.nav-btn,
+.fl-btn,
+.ed-btn,
+.fl-alert-close,
+.back-icon {
+  box-sizing: border-box;
+  min-height: var(--ak-ctrl-h);
+  padding: var(--ak-ctrl-pad);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1;
+  font-size: 13px;
+  border-radius: var(--ak-radius);
+}
+.btn-primary,
+.btn-danger {
+  min-height: var(--ak-ctrl-h-lg);
+  padding: var(--ak-ctrl-pad-lg);
+  font-size: 14px;
+}
+.toolbar .nav-btn,
+.fl-toolbar .nav-btn,
+.fl-empty-actions .nav-btn {
+  min-height: var(--ak-ctrl-h);
+}
+/* 文案/标签类（不是按钮）在视觉上比按钮矮一档，避免"错位感"。 */
+.fl-badge,
+.ed-badge,
+.fl-count {
+  min-height: 22px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+}

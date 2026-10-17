@@ -43,6 +43,15 @@ node build/ctx/… tools/mirror/mirror-selftest.mjs   # 94/94
 | 15 | 「工作流改成竖的编排 从上到下 方向键可以快速切换卡片预览」 | `node scripts/fanfic/branchGraph-selftest.mjs`（103）、`node build/harness/branch-shot.mjs`（153） | ✅ 默认 **TB**；`↑/↓`（`j/k`）按 layer→x 阅读序切卡、`Home/End`、`Enter` 跳行；`[data-branch-action="direction"]` 可切 LR |
 | 16 | 「优化或者重构页面布局（…blender/vscode…但不要模仿）」+「创建剧本操作」 | `node build/harness/_layout-create-check.mjs`（21）、`node scripts/fanfic/createPack-selftest.mjs`（33）、`cargo test --release --lib`（73，含 `create_library_pack` 4 条） | ✅ 工具条 `file/view/edit` 三组 + `data-editor-part="breadcrumb"` + ≤1100/≤820 响应式；`CreatePackDialog` 三套模板（Tab 缩进 / 幂等 / 归一化逐字节） |
 
+## 第四轮（UI 皮肤 = 明日方舟风 / 三包编译 / 补丁安装器）
+
+| # | 需求（用户原话） | 证据（命令） | 结果 |
+|---|---|---|---|
+| 17 | 「全面优化 ui 要明日方舟同款风格」（后续：「色调太蓝了」+ ak-ui 参考） | `node build/harness/ui-skin.mjs`（10） | ✅ `theme-arknights.{css,tokens,pages,editor}.css` 皮肤层；token 按 **ak-ui**（`--ak-surface-canvas #111315` 中性近黑、`--ak-color-advanced #f1c644` 操作金、hairline 1px + 45° 切角、`--ak-motion-*`）；旧名全量重绑 → 旧 CSS 零改动换肤；`prefers-reduced-motion` 生效 |
+| 18 | 「预览对目录与可视流不会跟随方向键」+「可视流不会跟随左右方向键」+「按钮大小不统一」+「(括号)不会自动补齐」 | `_probe-focus2` / `_probe-follow` 实测 + `run.mjs editor` | ✅ ←/→/↑/↓（含 `h/j/k/l`）都翻卡片并**同帧**跟随光标+预览读数；焦点不再被 `onJumpToLine` 抢走（补 `panFocusRef` 挂载 + 下一帧收回）；`[`/`(`/`"` **成对补齐**（有选区=包住；右半重复=跳过）；按钮统一 28/34/38px 三档基线 |
+| 19 | 「编译三包 全量素材和音频补丁包 主程序只 200MB 基础素材…一共起码 5–6GB」 | `build/artifacts/` 实测 | ✅ 主程序 263 MB（含 250 MB 起步素材）/ 素材补丁 2.4 GB（立绘全差分 + CG 1,476 张）/ 音频补丁 823 MB；三包合计 **3.5 GB** |
+| 20 | 「补丁包是安装包的形式 安装到 arkstage 的文件夹里 如果没有 arkstage 则提示没有本体」 | `scripts/fanfic/build-patch-installer.mjs`（+ `--win`） | ✅ `.run`（Linux/macOS 自解压：`--data-root`→`PRTS_DATA_DIR`→`config.json`→`~/.local/share`→exe 同级；**找不到 → exit 2**）。NSIS `.exe`（注册表→LOCALAPPDATA→Program Files→同级；**找不到 → MessageBox + Abort**；`SetOverwrite off`）；**>2 GiB 自动分卷**（NSIS 32 位偏移） |
+
 ## 需要人工（非代码）动作
 - 建 `djkcyl/arkstage-mirror` 空仓 + 配 `MIRROR_TOKEN`，跑一次 `.github/workflows/publish-mirror.yml` → jsd/fastly/ghproxy 才真正可用（当前自动回退 prts）。
 - 真机验证：Windows WebView2 / Android 上的 `snapshot.json`（`include_bytes!`）与 CSP。

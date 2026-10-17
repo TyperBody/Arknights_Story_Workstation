@@ -29,7 +29,9 @@
     "assets:patch:assets": "node scripts/fanfic/fetch-starter-assets.mjs --pack=patch-assets",
     "assets:patch:audio": "node scripts/fanfic/fetch-starter-assets.mjs --pack=patch-audio",
     "test:workbench:model": "node build/harness/wb-selftest.mjs",
-    "test:harness": "node scripts/harness/run.mjs"
+    "test:harness": "node scripts/harness/run.mjs",
+    "assets:installers": "node scripts/fanfic/build-patch-installer.mjs",
+    "assets:installers:win": "node scripts/fanfic/build-patch-installer.mjs --win"
   },
   "dependencies": {
     "@tauri-apps/api": "~2.10.1",

@@ -1208,6 +1208,8 @@ export default function StoryEditorPage() {
   const [docSize, setDocSize] = useState({ width: 0, height: 0 });
   /** 0 = 不截断（预览到文末）；>0 = 预览时截到第 N 行。 */
   const [previewUpto, setPreviewUpto] = useState(0);
+  /** 图上方向键漫游触发「按截断行重建预览」的计数器（`onFocusLine` 写、effect 读）。 */
+  const [previewReload, setPreviewReload] = useState(0);
   /** 行定位条滑杆位置（光标行，1 基）。 */
   const scrubLine = previewUpto > 0 ? previewUpto : caret.line;
   /** 「区域缩进」的结果提示（`role="status"`，2.4s 后自动消失）。 */
@@ -1809,7 +1811,10 @@ export default function StoryEditorPage() {
     if ((item.kind ?? "controller") === "controller" && !insert.trimEnd().endsWith("]")) {
       insert = `${insert}]`;
     }
-    applyEdit(popup.from, popup.from + popup.prefix.length, insert, caretInside(insert, popup.from));
+    // 成对补齐留下的 `]`（在 `popup.prefix` 之后）一并吃掉，避免 `[X(...)]]`。
+    const after = textRef.current.slice(popup.from + popup.prefix.length);
+    const eat = after.startsWith("]") ? 1 : 0;
+    applyEdit(popup.from, popup.from + popup.prefix.length + eat, insert, caretInside(insert, popup.from));
     hiddenRef.current = true;
     setPopup(null);
   }, [applyEdit, popup]);
@@ -1826,14 +1831,22 @@ export default function StoryEditorPage() {
     const line = full.slice(lineStart, lineEnd === -1 ? full.length : lineEnd);
     const before = line.slice(0, offset - lineStart);
     const after = line.slice(offset - lineStart);
-    if (after.trim() !== "") return false; // 光标必须在行尾（半截控制器之后）
+    // 光标右侧只允许**空**或**一个自动补齐的 `]`**（成对补齐之后 `after === "]"`，
+    // 旧判定把它当成"不在行尾"→ Tab 骨架永远不生效 = "不会自动补齐"）。
+    const trailing = after.trim();
+    if (trailing !== "" && trailing !== "]") return false;
     const match = /^(\s*)\[([A-Za-z_]\w*)?$/.exec(before);
     if (!match) return false;
     const prefix = match[2] ?? "";
     const skeleton = bracketSkeleton(prefix, modelRef.current, line, offset - lineStart);
     if (!skeleton) return false;
     const insertFrom = lineStart + match[1].length + 1; // `[` 之后
-    applyEdit(insertFrom, offset, skeleton.text, insertFrom + skeleton.caret);
+    // **与成对补齐协同**：`[Cha` 时 `[` 已自动补了 `]`（`after === "]"`），
+    // 骨架自己又以 `]` 收尾 → 替换区间**连带吃掉那个 `]`**，得到
+    // `[Character(name="")]` 而不是 `[Character(name="")]]`。
+    const eat = trailing === "]" ? 1 : 0;
+    const at = insertFrom + skeleton.caret;
+    applyEdit(insertFrom, offset + eat, skeleton.text, at);
     hiddenRef.current = true;
     setPopup(null);
     return true;
@@ -2407,6 +2420,18 @@ export default function StoryEditorPage() {
     };
   }, []);
 
+  /**
+   * **预览跟随键盘漫游**（用户反馈「预览不会跟随方向键」）：`previewReload` 一变
+   * （图上 ←↑↓→ 换卡片）就按当前 `previewUpto` 重建预览 —— 复用 `openPreview(upto)`
+   * 那条通路，「截到第 N 行」的语义与「▶ 预览到此处」完全一致（预览没开时也开起来）。
+   */
+  useEffect(() => {
+    if (!previewReload) return;
+    void openPreview(previewUpto > 0 ? previewUpto : undefined);
+    // 只由 `previewReload` 触发（`previewUpto` 在回调里先写好）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewReload]);
+
   /** 舞台状态：演到「光标行 / 预览截断行」时的立绘与背景。 */
   const stageState = useMemo(() => {
     const upto = previewOpen && previewUpto > 0 ? previewUpto : caret.line;
@@ -2792,6 +2817,41 @@ export default function StoryEditorPage() {
             }}
             onKeyDown={(event) => {
               const mod = event.ctrlKey || event.metaKey;
+              // **成对补齐**（用户：「不会自动补齐」）：打 `[`/`(`/`"` 自动补右半，
+              // 光标留在中间；再打一次右半 = **跳过**（不重复插入）。
+              // `Ctrl/Cmd/Alt` 组合键让给快捷键；中文输入法合成期（`isComposing`）不动。
+              // ⚠️ **不排除 popup**：输入 `[Cha` 时补全弹窗是开着的，而弹窗只吃
+              // Arrow/Enter/Esc（见下），成对补齐在它开着时照样要生效。
+              if (!mod && !event.altKey && !event.nativeEvent.isComposing) {
+                const pair: Record<string, string> = { "[": "]", "(": ")", '"': '"' };
+                const closer: Record<string, string> = { "]": "[", ")": "(", '"': '"' };
+                const el = taRef.current;
+                const at = el?.selectionStart ?? 0;
+                const to = el?.selectionEnd ?? at;
+                const nextChar = textRef.current.slice(to, to + 1);
+                const closerOf = pair[event.key];
+                if (closerOf) {
+                  event.preventDefault();
+                  // 有选区：用括号**包住**选区（`[Character]` 最常用）。
+                  if (to > at) {
+                    const inner = textRef.current.slice(at, to);
+                    applyEdit(at, to, `${event.key}${inner}${closerOf}`, at + 1, to + 1);
+                  } else {
+                    const closeOver = nextChar === closerOf;   // 后面已经有右半 → 只插左半
+                    applyEdit(at, at, closeOver ? event.key : `${event.key}${closerOf}`, at + 1);
+                  }
+                  return;
+                }
+                // 打右半、**右边正好是同一个右半** → 跳过它（不重复插入）。
+                // 触发面收窄到"自动补出来的那一个"：左边必须是配对的左半
+                //（`[`+`]`、`(`+`)`、`"`+`"`），避免手写文本里误吞用户输入。
+                if (closer[event.key] && nextChar === event.key && at === to) {
+                  event.preventDefault();
+                  if (el) el.setSelectionRange(at + 1, at + 1);
+                  syncCaret();
+                  return;
+                }
+              }
               if (mod && event.key.toLowerCase() === "s") {
                 event.preventDefault();
                 void doSave();
@@ -3312,7 +3372,16 @@ export default function StoryEditorPage() {
           /* 图上按 Enter：编辑器跳行之外，**预览也跟到该行** —— 复用底部
              「▶ 预览到此处」的同一条通路（`previewUpto`），harness 读定位滑杆的
              `value` 即可验收「键盘漫游 → 预览跟随」。 */
-          onFocusLine={(line: number) => void openPreview(line)}
+          onFocusLine={(line: number) => {
+            // 方向键换卡片 → 预览**跟到该行**（用户：「预览不会跟随方向键」）：
+            //   · 定位滑杆 / `previewUpto` 立刻跟随（这是"预览到第几行"的读数）；
+            //   · 预览**已经开着**时才重建 runtime —— 没开时不重建，否则
+            //     `openPreview` 会把 preview 面板加进工作台 → 分支图重挂 →
+            //     `picked` 复位（实测：选中卡住不动、读数不更新）。
+            const at = Math.max(1, line);
+            setPreviewUpto(at);
+            if (previewOpen) setPreviewReload((n) => n + 1);
+          }}
           onPatch={(nextText: string, line?: number) => {
             // 图上改分支 = 一次"整体替换"（撤销可回到改前）。
             const before: HistoryEntry = { text: textRef.current, sel: [0, 0] };
