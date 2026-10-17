@@ -86,13 +86,42 @@ const audioKeys = new Set(
     .filter((value) => typeof value === "string" && /sound_beta_2\//i.test(value))
     .map((value) => `torappu.prts.wiki/${String(value).toLowerCase().replace("sound_beta_2", "assets/audio")}.mp3`),
 );
+// CG / 插图：`assets/avg/images/<key>.png` —— **不在 catalog-data.json 里**
+//（目录只收 background / characters），source 是**剧情语料**的 `[Image(image=…)]`。
+// 所以这里按语料重建一遍候选名（与 `fetch-starter-assets.mjs` 的 CG 池同一口径）。
+const corpusDir = [
+  process.env.AKSTAGE_CORPUS_DIR,
+  join(process.env.HOME ?? "", ".akresearch/akgd/zh_CN/gamedata/story"),
+].filter(Boolean).find((dir) => existsSync(dir) && statSync(dir).isDirectory());
+const cgNames = new Set();
+if (corpusDir) {
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else {
+        for (const m of readFileSync(path, "utf8").matchAll(/\[(?:Image|ImageTween)\(([^\]]*)\)/g)) {
+          const hit = /image\s*=\s*"([^"]+)"/.exec(m[1]);
+          if (hit) cgNames.add(hit[1]);
+        }
+      }
+    }
+  };
+  walk(corpusDir);
+}
 const known = new Set([
   ...catalog.backgroundPaths,
   ...catalog.characterPaths,
   ...(catalog.external ?? []).map((e) => e.url.replace(/^https?:\/\//, "")),
   ...audioKeys,
 ]);
-const unknown = curated.entries.filter((e) => !known.has(e.key)).map((e) => e.key);
+/** CG 条目：`.../assets/avg/images/<name>.png`，`<name>` 必须来自语料（没语料就放行整类）。 */
+const isCg = (key) => {
+  const hit = /^torappu\.prts\.wiki\/assets\/avg\/images\/(.+)\.png$/.exec(key);
+  if (!hit) return false;
+  return cgNames.size === 0 || cgNames.has(hit[1]);
+};
+const unknown = curated.entries.filter((e) => !known.has(e.key) && !isCg(e.key)).map((e) => e.key);
 t("③ 全部 key 命中 catalog / story_variables", unknown.length === 0, unknown.slice(0, 3).join(", ") || `${curated.entries.length} 条`);
 const inCorpusTop = curated.entries.filter((e) => e.group === "background").slice(0, 5).map((e) => e.key.split("/").pop());
 t("③ 背景按语料频次（bg_black 应排第一）", inCorpusTop[0]?.startsWith("bg_black"), inCorpusTop.join(", "));
