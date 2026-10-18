@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 const DEV = "http://localhost:5174";
 const browser = await chromium.launch({ executablePath: "/snap/bin/chromium", args: ["--no-sandbox"] });
 try {
@@ -13,6 +14,7 @@ try {
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
   await page.addStyleTag({ content: ".bookshelf-sync-warning{display:none!important}" }).catch(() => {});
   await page.waitForTimeout(1000);
+  await openMenu(page, "预览");
   await page.locator(".ed-viewtabs .ed-btn", { hasText: /预览/ }).first().evaluate((el) => el.click());
   await page.waitForTimeout(12000);
   const state = await page.evaluate(() => ({

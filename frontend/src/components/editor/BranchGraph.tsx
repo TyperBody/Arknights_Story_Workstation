@@ -47,6 +47,7 @@ import {
 } from "../../../../src/akstage/local/branchGraph.js";
 import { useT } from "../../i18n/index.ts";
 import "./branchGraph.css";
+import Icon from "../ui/Icon.tsx";
 
 /** 组件的 props：task-16 契约 + P4 的可选 chrome（BRIEF §2.2）。 */
 export interface BranchGraphProps {
@@ -661,7 +662,7 @@ export default function BranchGraph({
           aria-expanded={!hidden}
           aria-label={`${hidden ? tr("editor.toolbar.foldShow", undefined, "展开") : tr("editor.toolbar.foldHide", undefined, "收起")}${chrome?.ariaLabel || tr("editor.panel.branchAriaFallback", undefined, "分支图")}`}
         >
-          {hidden ? "▸" : "▾"}
+          {hidden ? <Icon name="chevron-right" size={14} /> : <Icon name="chevron-down" size={14} />}
         </button>
         {onClose ? (
           <button type="button" className="ed-graph-close" onClick={onClose} aria-label={tr("editor.branch.close", undefined, "关闭分支图")}>✕</button>

@@ -8,6 +8,7 @@
 //   ④ （兼容）历史的命名布局键仍在存储层；不带 UI 也**不影响**启动（启动只按 `active` 回放）。
 //   ⑤ 分支图缩放入口（`+` / `−` / `%`）在 `[data-branch-zoom-bar]` 里。
 import { chromium } from "playwright-core";
+import { openAllMenus, clickMenuItem } from "./menu-helper.mjs";
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 let pass = 0, fail = 0;
 const t = (l, ok, d = "") => { if (ok) { pass += 1; console.log(`ok   ${l}${d ? ` — ${d}` : ""}`); } else { fail += 1; console.log(`FAIL ${l}${d ? ` — ${d}` : ""}`); } };
@@ -66,7 +67,7 @@ try {
   const branchOn = p.locator('[data-branch-zoom-bar]');
   // 分支图可能没开：先点工具栏「⌥ 分支图」再断言（Map 语义）。
   if (!(await branchOn.count())) {
-    await p.locator("button", { hasText: "分支图" }).first().evaluate((el) => el.click()).catch(() => {});
+    await clickMenuItem(p, "分支图").catch(() => {});
     await p.waitForTimeout(900);
   }
   const zoomBar = p.locator('[data-branch-zoom-bar="1"]');

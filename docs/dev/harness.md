@@ -38,9 +38,11 @@
 | ⑭ | **工作流竖排**（默认 TB：层→y、正交折线自上而下、方向键按阅读序切卡片、`Enter` 跳行+预览跟随） | `branch-shot.mjs`（154）、`branchGraph-selftest.mjs`（103） | branch |
 | ⑮ | **新建剧本**（三套模板已 Tab 缩进 + 幂等 + 归一化逐字节）+ 工具栏 `file/view/edit` 分组 / 面包屑 / 响应式 | `_layout-create-check.mjs`（21）、`createPack-selftest.mjs`（33） | editor |
 | ⑯ | **UI 风格 = ak-ui**：`@yunyoujun/ak-ui` 加载顺序 + 语义 token 实测生效（旧名重绑）+ 五页截图 + DOM 契约不变 + `prefers-reduced-motion` | `ui-skin.mjs`（10） | editor |
+| ⑰ | **补全光标落点**：`[Cha`→Tab/Enter 光标在 `("")` 里；参数补全替换 token（不叠整行）；`""`→`()`→`(`→`]` 之前的优先级；成对补齐协同 | `edit-completion.mjs`（9） | editor |
+| ⑱ | **素材库增量加载**：首帧只挂一页（120）、滚到底自动续页、`更多` 计数、搜索回落第一页、`loading=lazy` | `asset-incremental.mjs`（8） | editor |
 | — | 原生 WebKitGTK：断网复用 + 覆盖层命中 + 起步素材集 seed | `native-source-probe.mjs`、`scripts/fanfic/selfcontained-check.mjs`（需 Xvfb） | 手动 |
 
-`npm run test:harness` 当前 = **35 个 harness**（workbench 9 / branch 1 / engine 2 / assets 3 / shell 8 / player 2 / editor 10）。
+`npm run test:harness` 当前 = **37 个 harness**（workbench 9 / branch 1 / engine 2 / assets 3 / shell 8 / player 2 / editor 12）。
 
 配套（不在本 runner 内，属产品自测）：`npm run test:editor|test:stage|test:mirror|test:selfcontained`、`cargo test --release --lib`。
 

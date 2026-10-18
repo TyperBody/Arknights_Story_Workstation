@@ -13,6 +13,7 @@ import ChapterDetail from "../components/ChapterDetail";
 import SelectionBar from "../components/SelectionBar";
 import { storylineIcon } from "../assets/storylines";
 import { confirmAction, showNotice } from "../lib/dialogs";
+import Icon from "../components/ui/Icon.tsx";
 
 /**
  * Cinematic ebook bookshelf. Categories become shelf sections; chapters sharing
@@ -250,7 +251,7 @@ export default function StoryBrowserPage() {
         <>
           <div className="browser-header">
             <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回">
-              ◀
+              <Icon name="chevron-left" size={16} />
             </button>
             <h1>剧情书架</h1>
             <input

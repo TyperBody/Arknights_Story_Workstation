@@ -2,6 +2,7 @@
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 const OUT = resolve("build/harness/shots"); mkdirSync(OUT, { recursive: true });
 const SCRIPT = [
@@ -23,6 +24,7 @@ await p.waitForSelector("textarea.ed-textarea", { timeout: 40000 });
 await p.waitForTimeout(2500);
 await p.screenshot({ path: resolve(OUT, "lead-workbench.png") });
 // 分支图
+await openMenu(p, "分支图");
 const tab = p.locator(".ed-viewtabs .ed-btn", { hasText: "分支图" });
 await tab.first().evaluate((el) => el.click());
 await p.waitForTimeout(1500);

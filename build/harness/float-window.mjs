@@ -28,6 +28,7 @@
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { chromium } from "playwright-core";
+import { openAllMenus, clickMenuItem } from "./menu-helper.mjs";
 
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 const CHROMIUM = process.env.CHROMIUM_PATH || "/snap/bin/chromium";

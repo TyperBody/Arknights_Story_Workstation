@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { openAllMenus, clickMenuItem } from "./menu-helper.mjs";
 const DEV = "http://localhost:5174";
 const browser = await chromium.launch({ executablePath: "/snap/bin/chromium", args: ["--no-sandbox"] });
 try {
@@ -8,6 +9,7 @@ try {
   await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent('[Character(name="char_002_amiya_1")]\n[name="阿米娅"]  hi')}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
   await page.waitForTimeout(1500);
+  await openAllMenus(page);
   const tabs = await page.locator(".ed-viewtabs .ed-btn").allInnerTexts();
   console.log("tabs:", JSON.stringify(tabs));
   const preview = page.locator(".ed-viewtabs .ed-btn", { hasText: /^预览$/ }).first();

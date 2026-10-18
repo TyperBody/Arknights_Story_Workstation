@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import readmeRaw from "../../../README.md?raw";
 import { openExternal } from "../lib/external";
+import Icon from "../components/ui/Icon.tsx";
 
 // 使用说明 = 仓库根 README.md 的内容，构建时以 ?raw 内置进包，离线渲染，避免联网取文档出错。
 export default function HelpPage() {
@@ -10,7 +11,7 @@ export default function HelpPage() {
   return (
     <div className="help-page">
       <div className="help-head">
-        <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回">◀</button>
+        <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回"><Icon name="chevron-left" size={16} /></button>
         <h1>使用说明</h1>
       </div>
       <div className="help-md">

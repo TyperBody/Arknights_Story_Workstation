@@ -7,6 +7,7 @@
 //   (5) 右下角手柄可改尺寸；
 //   (6) `✕` = 从工作台移除（`[data-wb-panel=branch]` 消失）。
 import { chromium } from "playwright-core";
+import { openAllMenus, clickMenuItem } from "./menu-helper.mjs";
 
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 let pass = 0, fail = 0;
@@ -41,7 +42,7 @@ try {
   ok("展开：Body 回来", (await page.locator('[data-wb-panel="toolpanel"] .ed-win-body:not([hidden])').count()) === 1);
 
   // Map：branch
-  await page.evaluate(() => { [...document.querySelectorAll(".ed-viewtabs .ed-btn")].find((el) => el.textContent.includes("分支图"))?.click(); });
+  await clickMenuItem(page, "分支图");
   await page.waitForTimeout(600);
   const actions = await page.locator('[data-wb-panel="branch"] .ed-win-bar button').evaluateAll((els) => els.map((e) => e.dataset.winAction ?? "?"));
   ok("Map 标题条 = ▾ + ⧉ + ✕", JSON.stringify(actions) === JSON.stringify(["fold", "float", "close"]), JSON.stringify(actions));

@@ -6,6 +6,7 @@
 import { chromium } from "playwright-core";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 const SHOTS = resolve("build/harness/shots");
@@ -150,6 +151,7 @@ try {
   }
 
   // ── 4. 分支图 = Map 开关 + dify 视图 ────────────────────
+  await openMenu(page, "分支图"); // 文本菜单：只展开它所在的那个
   const tab = page.locator(".ed-viewtabs .ed-btn", { hasText: "分支图" });
   if (await tab.count()) {
     const beforeN = await page.locator('[data-wb-panel="branch"]').count();

@@ -15,6 +15,7 @@
 
 import { useT } from "../../i18n/index.ts";
 import type { PanelChromeProps } from "./inspectorWindow";
+import Icon from "../ui/Icon.tsx";
 
 export interface PanelChromeViewProps {
   id: string;
@@ -65,7 +66,7 @@ export function PanelFold({
       aria-label={chrome.ariaLabel ? `${fold}${chrome.ariaLabel}` : fold}
       aria-expanded={visible}
     >
-      {visible ? "▾" : "▸"}
+      {visible ? <Icon name="chevron-down" size={14} /> : <Icon name="chevron-right" size={14} />}
     </button>
   );
 }

@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 
 // 断言有效性自检：**人为**恢复旧样式（`.grow` 只 `flex: 1`、无 nowrap），
 // 多行 loader 报错必须把 `.ed-preview-bar` 撑高 → 证明 preview-bar-oneline.mjs
@@ -12,6 +13,7 @@ try {
     { waitUntil: "domcontentloaded" },
   );
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
+  await openMenu(page, "预览面板");
   await page.locator(".ed-viewtabs .ed-btn", { hasText: "预览面板" }).evaluate((el) => el.click());
   await page.waitForSelector(".ed-preview-bar", { timeout: 15000 });
 

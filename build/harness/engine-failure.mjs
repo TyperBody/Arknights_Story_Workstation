@@ -3,6 +3,7 @@
 // 做法：Playwright route 把 StoryPlayer.*.js 的**前 2 次**请求打成 500，第 3 次放行；
 //       断言横幅出现且文案含 HTTP 500 / 文件名；页面不白屏（#firstHeading / .story-player 可见）；重试后成功。
 import { chromium } from "playwright-core";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 let pass = 0, fail = 0;
 const t = (label, ok, detail = "") => { if (ok) { pass += 1; console.log("ok   " + label + (detail ? ` — ${detail}` : "")); } else { fail += 1; console.log("FAIL " + label + (detail ? ` — ${detail}` : "")); } };
@@ -23,6 +24,7 @@ try {
   await page.goto(`${DEV}/editor/demo?text=${encodeURIComponent('[Character(name="char_002_amiya_1")]\n[name="阿米娅"]  hi')}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
   await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none !important;pointer-events:none !important}" }).catch(() => {});
+  await openMenu(page, "预览");
   const previewTab = page.locator(".ed-viewtabs .ed-btn", { hasText: /预览/ }).first();
   await previewTab.waitFor({ state: "visible", timeout: 20000 });
   try {

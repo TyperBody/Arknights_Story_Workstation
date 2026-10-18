@@ -26,6 +26,7 @@
 import { useCallback, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { useT } from "../../i18n/index.ts";
+import Icon, { type IconName } from "../ui/Icon.tsx";
 import type { PanelId } from "./workbenchLayout";
 
 export interface RailItem {
@@ -48,13 +49,15 @@ export interface EditorRailProps {
   onResetLayout?: () => void;
 }
 
-/** 图标（几何字形，不依赖任何图标库/emoji 字体；缺字时也只是不好看，不会崩）。 */
-const GLYPHS: Record<PanelId, string> = {
-  toolpanel: "☰",
-  assets: "▦",
-  stage: "▤",
-  preview: "▷",
-  branch: "⌥",
+/** 面板图标：**内联 SVG**（`components/ui/Icon.tsx`）。
+ *  原来这里是 `☰ ▦ ▤ ▷ ⌥` 这类字体字形 —— 不同字体的字面/字宽不同，会被拉长压扁
+ *  （用户：「图标被扭曲了」）；SVG 的几何固定，永不变形。 */
+const GLYPHS: Record<PanelId, IconName> = {
+  toolpanel: "tools",
+  assets: "layers",
+  stage: "stage",
+  preview: "play",
+  branch: "branch",
 };
 
 export default function EditorRail({ items, collapsed, onRestorePanel, onToggleRail, onResetLayout }: EditorRailProps): ReactNode {
@@ -103,7 +106,9 @@ export default function EditorRail({ items, collapsed, onRestorePanel, onToggleR
         title={collapsed ? tr("editor.rail.expand", undefined, "展开侧边栏") : tr("editor.rail.collapse", undefined, "收起侧边栏")}
         aria-label={collapsed ? tr("editor.rail.expand", undefined, "展开侧边栏") : tr("editor.rail.collapse", undefined, "收起侧边栏")}
       >
-        <span className="ed-rail-glyph" aria-hidden="true">{collapsed ? "›" : "‹"}</span>
+        <span className="ed-rail-glyph" aria-hidden="true">
+          <Icon name={collapsed ? "chevron-right" : "chevron-left"} size={15} />
+        </span>
       </button>
 
       {/*
@@ -124,7 +129,9 @@ export default function EditorRail({ items, collapsed, onRestorePanel, onToggleR
             aria-label={`${tr("editor.rail.restore", undefined, "放回工作台")}：${item.title}`}
             onClick={() => onRestorePanel(item.id)}
           >
-            <span className="ed-rail-glyph" aria-hidden="true">{GLYPHS[item.id] ?? "▢"}</span>
+            <span className="ed-rail-glyph" aria-hidden="true">
+              <Icon name={GLYPHS[item.id] ?? "panel"} size={15} />
+            </span>
             <span className="ed-rail-label">{item.title}</span>
           </button>
         ))}
@@ -147,7 +154,9 @@ export default function EditorRail({ items, collapsed, onRestorePanel, onToggleR
             title={tr("editor.layout.resetTitle", undefined, "把当前布局恢复成默认（工具面板左 / 编辑区上 / 舞台下）")}
             aria-label={tr("editor.layout.reset", undefined, "重置布局")}
           >
-            <span className="ed-rail-glyph" aria-hidden="true">⟲</span>
+            <span className="ed-rail-glyph" aria-hidden="true">
+              <Icon name="reset" size={15} />
+            </span>
             <span className="ed-rail-sr">{tr("editor.layout.reset", undefined, "重置布局")}</span>
           </button>
         </span>

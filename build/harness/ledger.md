@@ -61,6 +61,17 @@ node build/ctx/… tools/mirror/mirror-selftest.mjs   # 94/94
 | 21b | — | 实测 | ⚠️ ak-ui `.ak-button` 是**固定 150×50** → 适配层必须先 `width/height:auto` 再套密度；`--bg-secondary` 接到 `--ak-surface-muted` 会变**亮纸面**（`.fl-empty` 整片发白）→ 改接深色抬升面 |
 | 21c | — | `run.mjs`（35/35） | ✅ 组件自带 CSS（`inspectorWindow/workbench/branchGraph`）硬编码色也换成 ak-ui token；harness 侧加固：`ui-skin` 每张截图换 page（本机 8 GB、load 高，同 renderer 连开 6 页会被 OOM killer 杀），`_stage-clip-check` 去掉 `--renderer-process-limit=1` 并在开编辑器页前关掉舞台页 |
 
+## 第六轮（chrome 重做 / 补全落点 / 素材库增量）
+
+| # | 需求（用户原话） | 证据（命令） | 结果 |
+|---|---|---|---|
+| 22 | 「图标被扭曲了」 | `ui-skin.mjs` + 截图 | ✅ 字形（`⇤ ▾ ⧉ ✕ ◀ ▦ ☰`）→ **内联 SVG**（`components/ui/Icon.tsx`，24×24/1.8px）；窗口条 26px、rail 图标 15px |
+| 23 | 「菜单栏不要选择按钮式 要文本式」 | `_layout-create-check.mjs`（21） | ✅ 工具条 → **文本菜单栏**（`文件/视图/编辑/帮助`，条目右对齐快捷键；`↑↓`/`Home`/`End`/`Enter`/`Esc` + 悬停切换）；`[data-rail-group]`→`[data-menu-group]`，条目保留 `.ed-btn` → 老选择器仍命中 |
+| 24 | 「编辑页面里不应该出现新建剧本」 | `_layout-create-check.mjs` (c) | ✅ 常态菜单**没有** `create`；只在 `[data-create-empty]` 空态出现（harness 断言两者） |
+| 25 | 「素材库要加载优化 演示不要全量加载演示」 | `asset-incremental.mjs`（8） | ✅ 首帧 120 格（全量 5,200+/2 万）；IntersectionObserver 续页 + 「更多（已显示 N / M）」；搜索/切类型回落第一页；`loading=lazy`；**素材表改为按需解析**（打开素材库才在 `requestIdleCallback` 里载入） |
+| 26 | 「补全光标也要在 `[]` 里边；函数也要在 `()` 里，而不是第一次就挪到外面」 | `edit-completion.mjs`（9） | ✅ `caretInside` 优先级 `""`→`()`→`(`→`]` 之前；`acceptCompletion` 用 `insertText`（**不再**用整行骨架 → 修掉 `[Character(Character(…)]`） |
+| 27 | 「UI 有点难看……看看 blender 的设计语言吧」 | `docs/dev/workbench.md` §3.4.1 | ✅ 按 [Blender 手册](https://docs.blender.org/manual/zh-hans/dev/interface/index.html)取四条：标题栏=菜单+常用工具、菜单键位、图标可与文字同用、区块可折叠留箭头；菜单条目的"信号条 + 反白"沿用 ak-ui token |
+
 ## 需要人工（非代码）动作
 - 建 `djkcyl/arkstage-mirror` 空仓 + 配 `MIRROR_TOKEN`，跑一次 `.github/workflows/publish-mirror.yml` → jsd/fastly/ghproxy 才真正可用（当前自动回退 prts）。
 - 真机验证：Windows WebView2 / Android 上的 `snapshot.json`（`include_bytes!`）与 CSP。

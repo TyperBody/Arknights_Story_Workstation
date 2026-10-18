@@ -29,6 +29,7 @@ import {
 } from "react";
 
 import { useT } from "../../i18n/index.ts";
+import Icon from "../ui/Icon.tsx";
 import "./inspectorWindow.css";
 import { clampWindowState, parseWindowState, writeWindowState, type WindowState } from "./windowState";
 import type { PanelChromeProps } from "./inspectorWindow";
@@ -450,8 +451,8 @@ export default function InspectorWindow({
           floating
             ? tr("editor.window.barFloat", undefined, "拖动移动 · 双击回停靠")
             : shell === "map"
-              ? tr("editor.window.barMap", undefined, "拖动拼接 · 双击（或 ⧉）浮动")
-              : tr("editor.window.barDock", undefined, "常驻面板：拖到别的面板边缘拼接 · 折叠 ▾ 收起")
+              ? tr("editor.window.barMap", undefined, "拖动拼接 · 双击（或右上角按钮）浮动")
+              : tr("editor.window.barDock", undefined, "常驻面板：拖到别的面板边缘拼接 · 折叠按钮收起")
         }
       >
         {icon && <span className="ed-win-icon">{icon}</span>}
@@ -467,7 +468,7 @@ export default function InspectorWindow({
             title={tr("editor.window.park", undefined, "收进侧边栏")}
             aria-label={tr("editor.window.park", undefined, "收进侧边栏")}
           >
-            ⇤
+            <Icon name="park" />
           </button>
         ) : null}
         {foldHandler ? (
@@ -480,7 +481,7 @@ export default function InspectorWindow({
             aria-label={folded ? tr("editor.window.expandPanel", undefined, "展开面板") : tr("editor.window.collapsePanel", undefined, "收起面板")}
             aria-expanded={!folded}
           >
-            {folded ? "▸" : "▾"}
+            <Icon name={folded ? "chevron-right" : "chevron-down"} />
           </button>
         ) : null}
         {showFloatButton ? (
@@ -492,7 +493,7 @@ export default function InspectorWindow({
             title={floating ? tr("editor.window.dockBack", undefined, "停靠回工作台") : tr("editor.window.floatWindow", undefined, "浮动窗口")}
             aria-label={floating ? tr("editor.window.dockWindow", undefined, "停靠窗口") : tr("editor.window.floatWindow", undefined, "浮动窗口")}
           >
-            ⧉
+            <Icon name="float" />
           </button>
         ) : null}
         {showClose ? (
@@ -504,7 +505,7 @@ export default function InspectorWindow({
             title={tr("editor.window.closeEsc", undefined, "关闭（Esc）")}
             aria-label={tr("editor.window.closeWindow", undefined, "关闭窗口")}
           >
-            ✕
+            <Icon name="close" />
           </button>
         ) : null}
       </div>

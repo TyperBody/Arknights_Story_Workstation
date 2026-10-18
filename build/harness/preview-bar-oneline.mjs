@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 
 // 回归：`.ed-preview-bar` 必须保持**单行**高度。
 // 复现：面板拖窄 + 状态里塞一条多行 loader 报错（真实场景见 _p6-ed2.mjs 的
@@ -13,6 +14,7 @@ try {
   );
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
   await page.addStyleTag({ content: ".bookshelf-sync-warning{display:none!important}" }).catch(() => {});
+  await openMenu(page, "预览面板");
   await page.locator(".ed-viewtabs .ed-btn", { hasText: "预览面板" }).evaluate((el) => el.click());
   await page.waitForSelector(".ed-preview-bar", { timeout: 15000 });
 

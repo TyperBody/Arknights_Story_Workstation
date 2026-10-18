@@ -31,6 +31,7 @@ import { chromium } from "playwright-core";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 
 // ── 路径 / 常量 ─────────────────────────────────────────────────────────
 /** 规范模块说明符（相对**本文件**解析）——与仓库内调用方一致。 */
@@ -665,8 +666,9 @@ try {
   check("浏览器 textarea.ed-textarea 存在", textareaCount, textareaCount >= 1);
 
   // (a) 工具栏「⌥ 分支图」：legacy `.ed-viewtabs .ed-btn` + 文案选择器都试。
+  await openMenu(page, "分支图"); // 文本菜单：只展开它所在的那个
   const legacyTab = page.locator(".ed-viewtabs .ed-btn", { hasText: "分支图" });
-  const anyTab = page.locator('button:has-text("⌥ 分支图")');
+  const anyTab = page.locator('.ed-menu-pop .ed-btn:has-text("分支图")');
   const tab = (await legacyTab.count()) ? legacyTab.first() : anyTab.first();
   if (await tab.count()) {
     if (await tab.isEnabled()) {

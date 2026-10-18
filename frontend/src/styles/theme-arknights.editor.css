@@ -48,6 +48,135 @@
   margin-left: var(--ak-space-2);
 }
 
+
+/* ── 2b. 菜单栏（文本式；Blender 标题栏菜单 + ak-ui 弹出面板口径）──────
+   用户口径：「菜单栏不要选择按钮式 要文本式」——所以这里是**文字 + 小三角**，
+   点开才是条目（条目右侧给快捷键，形状取自 ak-ui `.ak-popover`）。 */
+
+.ed-menubar {
+  display: flex;
+  align-items: center;
+  gap: var(--ak-space-1);
+  padding: 0 var(--ak-space-2);
+  min-height: var(--ak-ctrl-h-sm);
+  background: var(--ak-color-dark);
+  border-bottom: var(--ak-line-hairline) solid var(--ak-color-gray);
+}
+.ed-menubar .ed-viewtabs {
+  display: flex;
+  align-items: center;
+  gap: var(--ak-space-1);
+}
+.ed-menu {
+  position: relative;
+}
+.ed-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ak-text-secondary);
+  font-family: var(--ak-font-sans);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.ed-menu-trigger:hover,
+.ed-menu.is-open .ed-menu-trigger {
+  background: color-mix(in srgb, var(--ak-text-primary) 10%, transparent);
+  color: var(--ak-text-primary);
+}
+.ed-menu-caret {
+  opacity: 0.6;
+}
+.ed-menu.is-open .ed-menu-caret {
+  transform: rotate(180deg);
+}
+.ed-menu-pop {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 15rem;
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+  background: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid #626a70;
+  box-shadow: var(--ak-shadow-panel);
+}
+.ed-menu-pop--end {
+  left: auto;
+  right: 0;
+}
+.ed-menu-pop[hidden] {
+  display: none;
+}
+.ed-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ak-space-2);
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ak-text-primary);
+  font-family: var(--ak-font-sans);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+.ed-menu-item:hover:not(:disabled),
+.ed-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--ak-signal-action) 18%, transparent);
+  outline: none;
+}
+.ed-menu-item.on {
+  color: var(--ak-color-yellow);
+}
+.ed-menu-item.on::before {
+  content: "";
+  width: 3px;
+  align-self: stretch;
+  margin: -6px 0 -6px -8px;
+  background: var(--ak-signal-action);
+}
+.ed-menu-item:disabled {
+  color: var(--ak-text-4);
+  cursor: not-allowed;
+}
+.ed-menu-item kbd,
+.ed-menu-keys kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: var(--ak-line-hairline) solid var(--ak-color-gray);
+  color: var(--ak-text-secondary);
+  font-family: var(--ak-font-mono);
+  font-size: 0.6875rem;
+}
+.ed-menu-hint {
+  margin: 4px 6px 2px;
+  color: var(--ak-text-secondary);
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  letter-spacing: var(--ak-type-wide);
+  text-transform: uppercase;
+}
+.ed-menu-keys {
+  display: flex;
+  align-items: center;
+  gap: var(--ak-space-2);
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--ak-text-secondary);
+  font-size: 0.75rem;
+}
+.ed-menu-keys kbd {
+  margin-left: 0;
+}
+
 /* ── 2. rail（收起窗口的托盘）：石墨面 + 选中项 4px 左信号条 ─────── */
 
 .ed-rail {
@@ -302,4 +431,22 @@
 .ak-segmented.ed-assets-kinds .ak-segmented__item small {
   color: inherit;
   opacity: 0.72;
+}
+
+/* ── 7c. 素材库：增量加载的「更多」+ 网格密度（ak-ui 的紧凑元信息口径）── */
+
+.ed-assets-more {
+  margin: var(--ak-space-2) auto;
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  letter-spacing: var(--ak-type-wide);
+}
+.ed-assets-sentinel {
+  height: 1px;
+}
+.ed-assets-search {
+  font-family: var(--ak-font-mono);
+}
+.ed-assets-grid {
+  align-content: start;
 }

@@ -25,6 +25,7 @@ import {
   useAppSettings,
 } from "../lib/appSettings";
 import { catalogSummary, mirrorUrl, type CatalogSummary } from "../lib/engineCatalog";
+import Icon from "../components/ui/Icon.tsx";
 
 /** 下载源下拉项（`SOURCE_IDS` 的中文标签 + 说明）。 */
 const MIRROR_LABELS: Record<MirrorSource, { label: string; hint: string }> = {
@@ -402,7 +403,7 @@ export default function SettingsPage() {
     <div className="settings-page">
       <div className="settings-content">
       <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
-        <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回">◀</button>
+        <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回"><Icon name="chevron-left" size={16} /></button>
         <h1 style={{ margin: 0 }}>设置</h1>
       </div>
 

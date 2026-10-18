@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 
 /* eslint-disable no-console */
 
@@ -15,6 +16,7 @@ try {
   );
   await page.waitForSelector("textarea.ed-textarea", { timeout: 25000 });
   await page.addStyleTag({ content: ".bookshelf-sync-warning{display:none!important}" }).catch(() => {});
+  await openMenu(page, "预览面板");
   await page.locator(".ed-viewtabs .ed-btn", { hasText: "预览面板" }).evaluate((el) => el.click());
   await page.waitForSelector(".ed-preview", { timeout: 15000 });
   await page.waitForTimeout(500);

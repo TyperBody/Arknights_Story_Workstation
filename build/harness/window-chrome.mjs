@@ -2,6 +2,7 @@
 //   node build/harness/window-chrome.mjs            # 需要 dev server:5174
 // 只读断言；失败打印原因，退出码非 0。
 import { chromium } from "playwright-core";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 const text = [
@@ -55,6 +56,7 @@ try {
   }
   // 分支图 = Map：默认不在，点工具栏后出现、再点消失
   const before = await count(panelSel("branch"));
+  await openMenu(page, "分支图");
   const tab = page.locator(".ed-viewtabs .ed-btn", { hasText: "分支图" });
   if (await tab.count()) {
     // 点击可能被「书架信息已更新」浮条拦（浮条在 head 前插入时样式注入会失败）→ 兜底 JS click。

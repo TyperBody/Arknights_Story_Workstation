@@ -9,6 +9,7 @@ import { setLandscape } from "../lib/orientation";
 import { setImmersive } from "../lib/immersive";
 import { useHidePlayerBack } from "../lib/uiSettings";
 import { disposeEngineFrame } from "../lib/storyPlayerBoot";
+import Icon from "../components/ui/Icon.tsx";
 
 /**
  * Story player page — loads the ORIGINAL PRTS ScenarioSimulator engine via bootEngine().
@@ -160,7 +161,7 @@ export default function StoryPlayerPage() {
 
   return (
     <div style={{ width: "100%", height: "100%", background: "#000", position: "relative" }}>
-      {!hidePlayerBack && <button onClick={handleBack} style={backBtnStyle} aria-label="返回" title="返回">◀</button>}
+      {!hidePlayerBack && <button onClick={handleBack} style={backBtnStyle} aria-label="返回" title="返回"><Icon name="chevron-left" size={18} /></button>}
 
       {syncWarning && (
         <div style={warningStyle} role="status">

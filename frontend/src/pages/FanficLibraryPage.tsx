@@ -10,6 +10,7 @@ import {
 import { confirmAction, showNotice } from "../lib/dialogs";
 import { useT } from "../i18n/index.ts";
 import CreatePackDialog, { type CreatedPack } from "../components/editor/CreatePackDialog";
+import Icon from "../components/ui/Icon.tsx";
 
 /**
  * 同人剧本目录页（`/fanfic`）。
@@ -226,7 +227,7 @@ export default function FanficLibraryPage() {
     <div className="browser-page fanfic-page">
       <div className="browser-header">
         <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回">
-          ◀
+          <Icon name="chevron-left" size={16} />
         </button>
         <h1>同人剧本</h1>
         <span className="fl-spacer" />

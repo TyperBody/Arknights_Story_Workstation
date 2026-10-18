@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { getVersion } from "@tauri-apps/api/app";
 import { openExternal } from "../lib/external";
 import { GITHUB_URL, PRTS_URL } from "../lib/version";
+import Icon from "../components/ui/Icon.tsx";
 
 const DISCLAIMER = `方舟剧场（Arkstage）是一个非官方的《明日方舟》同人 / 学习性质的剧情离线回放器。
 
@@ -73,7 +74,7 @@ export default function AboutPage() {
     return (
       <div className="about-page">
         <div className="about-head">
-          <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回">◀</button>
+          <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回"><Icon name="chevron-left" size={16} /></button>
           <h1>{s.title}</h1>
         </div>
         <pre className="about-text">{s.body}</pre>
@@ -84,7 +85,7 @@ export default function AboutPage() {
   return (
     <div className="about-page">
       <div className="about-head">
-        <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回">◀</button>
+        <button className="back-icon" onClick={() => navigate(-1)} aria-label="返回"><Icon name="chevron-left" size={16} /></button>
         <h1>关于</h1>
       </div>
 

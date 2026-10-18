@@ -188,6 +188,56 @@ export default function AssetLibrary({
 
   const active = useMemo(() => entries.find((entry) => entry.key === selected) ?? null, [entries, selected]);
 
+  /**
+   * **增量加载**（用户：「素材库要加载优化 演示不要全量加载演示」）：引擎目录里有
+   * 2 万+ 条，全量挂 DOM（每条一个 `<button>` + `<img>`）首帧要几百毫秒、还很吃内存。
+   * 这里分页：先挂 `PAGE` 条，滚到底（或点「更多」）再 +`PAGE`。
+   * 口径：
+   *  - 切类型 / 改搜索 / 改整理**都从第一页重来**（列表内容换了）；
+   *  - 分组视图（按类型分组）**只在组内增量**（每组的 `more` 独立）；
+   *  - 「更多」按钮带文案与计数（`已显示 N / M`），native lazy `<img>` 负责图片。
+   */
+  const PAGE = 120;
+  const [page, setPage] = useState(PAGE);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setPage(PAGE);
+    // 换了列表内容 → 回到顶部（否则「已经滚到底」的容器会立刻又触发下一页）。
+    const box = gridRef.current?.closest(".ed-assets-groups, .ed-assets");
+    if (box instanceof HTMLElement) box.scrollTop = 0;
+  }, [kind, query, organized.onlyBundled, organized.favoritesOnly, organized.sort]);
+  const visible = useMemo(() => shown.slice(0, page), [page, shown]);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    // ⚠️ 真正的滚动容器是 `.ed-assets-groups`（面板本身 `overflow: visible`），
+    // 用 closest 找，避免以后改布局时 root 找错 → 观察器永不触发。
+    const box = gridRef.current?.closest(".ed-assets-groups, .ed-assets");
+    const more = moreRef.current;
+    if (!box || !more || shown.length <= page) return;
+    // 滚动到底：IntersectionObserver（比 onScroll 省，且滚轮/键盘/拖动都覆盖）。
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setPage((prev) => (prev >= shown.length ? prev : prev + PAGE));
+        }
+      },
+      { root: box, rootMargin: "320px 0px" }
+    );
+    io.observe(more);
+    return () => io.disconnect();
+  }, [page, shown.length]);
+  const moreButton = (total: number, size: number, onMore: () => void) =>
+    total > size ? (
+      <button
+        type="button"
+        className="ak-button ed-assets-more"
+        data-asset-more="1"
+        onClick={onMore}
+      >
+        {tr("editor.assets.more", { shown: size, total }, `更多（已显示 ${size} / ${total}）`)}
+      </button>
+    ) : null;
+
   const toggleFavorite = useCallback((key: string) => {
     setOrganized((prev) => ({
       ...prev,
@@ -385,21 +435,32 @@ export default function AssetLibrary({
       ) : shown.length === 0 ? (
         <div className="ed-assets-empty">{tr("editor.assets.empty", undefined, "没有匹配的素材。")}</div>
       ) : groups ? (
-        <div className="ed-assets-groups">
-          {groups.map((group) => (
-            <section className="ed-assets-group" key={group.kind ?? "flat"} data-asset-group={group.kind ?? "flat"}>
-              <h4>
-                {group.kind
-                  ? tr(`editor.assets.${ASSET_KIND_KEY[group.kind]}`, undefined, group.kind)
-                  : tr("editor.assets.title", undefined, "素材库")}
-                <small>{group.entries.length}</small>
-              </h4>
-              <div className="ed-assets-grid">{group.entries.map(renderCell)}</div>
-            </section>
-          ))}
+        <div className="ed-assets-groups" ref={gridRef}>
+          {groups.map((group) => {
+            const list = group.entries.slice(0, page);
+            return (
+              <section className="ed-assets-group" key={group.kind ?? "flat"} data-asset-group={group.kind ?? "flat"}>
+                <h4>
+                  {group.kind
+                    ? tr(`editor.assets.${ASSET_KIND_KEY[group.kind]}`, undefined, group.kind)
+                    : tr("editor.assets.title", undefined, "素材库")}
+                  <small>{list.length} / {group.entries.length}</small>
+                </h4>
+                <div className="ed-assets-grid" data-asset-page={list.length}>{list.map(renderCell)}</div>
+                {moreButton(group.entries.length, list.length, () =>
+                  setPage((prev) => prev + PAGE)
+                )}
+              </section>
+            );
+          })}
+          <div ref={moreRef} className="ed-assets-sentinel" data-asset-sentinel="1" />
         </div>
       ) : (
-        <div className="ed-assets-grid">{shown.map(renderCell)}</div>
+        <div className="ed-assets-groups" ref={gridRef}>
+          <div className="ed-assets-grid" data-asset-page={visible.length}>{visible.map(renderCell)}</div>
+          {moreButton(shown.length, visible.length, () => setPage((prev) => prev + PAGE))}
+          <div ref={moreRef} className="ed-assets-sentinel" data-asset-sentinel="1" />
+        </div>
       )}
 
       <div

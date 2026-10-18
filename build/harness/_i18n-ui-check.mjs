@@ -16,6 +16,7 @@
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 
 const REPO = resolve(import.meta.dirname, "..", "..");
 const SHOTS = resolve(REPO, "build/harness/shots");
@@ -62,6 +63,7 @@ async function openPage(locale) {
   await page.evaluate((next) => localStorage.setItem("prts-language", next), locale);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector(".ed-viewtabs .ed-btn", { timeout: 30000 });
+  await openAllMenus(page); // 先全部展开读文案；⑤ 之前会 closeMenus 收起来
   await page.waitForTimeout(1200);
   return { page, errors };
 }
@@ -74,14 +76,14 @@ const en = await openPage("en-US");
 // ① 工具条
 const zhToolbar = await texts(zh.page, ".ed-viewtabs .ed-btn");
 const enToolbar = await texts(en.page, ".ed-viewtabs .ed-btn");
-ok("① 工具条：中文页有 校验/预览/保存", ["校验", "预览", "保存"].every((t) => zhToolbar.includes(t)), zhToolbar.join("/"));
+ok("① 菜单栏：中文页有 校验/预览/保存", ["校验", "预览", "保存"].every((t) => zhToolbar.some((el) => el.startsWith(t))), zhToolbar.join("/"));
 ok(
-  "① 工具条：英文页有 Validate/Preview/Save",
-  ["Validate", "Preview", "Save"].every((t) => enToolbar.includes(t)),
+  "① 菜单栏：英文页有 Validate/Preview/Save",
+  ["Validate", "Preview", "Save"].every((t) => enToolbar.some((el) => el.startsWith(t))),
   enToolbar.join("/"),
 );
 ok(
-  "① 工具条两页数量一致",
+  "① 菜单栏两页数量一致",
   zhToolbar.length === enToolbar.length && zhToolbar.length >= 9,
   `${zhToolbar.length} vs ${enToolbar.length}`,
 );
@@ -110,6 +112,8 @@ const enPatch = await en.page.locator('[data-stage-patch="1"]').first().innerTex
 ok("③ 舞台补丁提示：英文", /engine-ready patch/.test(enPatch), enPatch.trim().slice(0, 60));
 
 // ④ 调色板：分类标题 + 控制器按钮
+await closeMenus(en.page);          // 弹出面板别盖住正文
+await closeMenus(zh.page);
 await en.page.locator(".ed-tab").nth(1).click();
 await en.page.waitForTimeout(500);
 const enGroups = await texts(en.page, ".ed-palette-group h3");
@@ -121,13 +125,19 @@ ok(
 const enCommands = (await texts(en.page, ".ed-palette-btn")).slice(0, 3);
 ok("④ 调色板：控制器按钮是引擎英文名（canonical）", enCommands.every((c) => /^[A-Za-z_]/.test(c)), enCommands.join("/"));
 
-// ⑤ 分支图 chrome（Map 开关：`.ed-btn.on` 命中同名 `⌥ 分支图`；用 JS click 避开 sticky header 遮挡）
+// 读文案结束：菜单收起（否则展开的弹出面板会盖住正文，后面的 `click()` 命中不了）。
+await closeMenus(en.page);
+await closeMenus(zh.page);
+
+// ⑤ 分支图 chrome（Map 开关：`.ed-btn.on` 命中同名 `分支图`；用 JS click 避开 sticky header 遮挡）
 for (const { pair, re } of [
   { pair: en, re: /Branch graph/ },
   { pair: zh, re: /分支图/ },
 ]) {
-  const toggle = pair.page.locator(".ed-viewtabs .ed-btn").filter({ hasText: re }).first();
-  await toggle.evaluate((el) => el.click()).catch(() => {});
+  // 文本菜单：条目在弹出面板里 → 先展开它所在的那个菜单（**只展开一个**，
+  // 全展开的话右边的面板会盖住左边的条目）。
+  // ⚠️ `clickMenuItem` **已经点过了**（一次点击 = 开）。再点一次就又关上了。
+  await clickMenuItem(pair.page, re.source.replace(/[\\^$]/g, "")).catch(() => {});
   await pair.page.waitForSelector('[data-chrome="branch"]', { timeout: 15000 }).catch(() => {});
   await pair.page.waitForTimeout(900);
 }

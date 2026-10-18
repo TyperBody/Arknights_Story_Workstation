@@ -1,6 +1,7 @@
 // 验收 harness #4：拼接/换位/调尺寸（依赖 P3 的 [data-wb-gutter] + P5 接线）
 //   node build/harness/workbench-drag.mjs
 import { chromium } from "playwright-core";
+import { openAllMenus, openMenu, clickMenuItem, closeMenus } from "./menu-helper.mjs";
 const DEV = process.env.DEV_URL ?? "http://localhost:5174";
 let pass = 0, fail = 0;
 const t = async (label, fn) => { try { await fn(); pass += 1; console.log("ok   " + label); } catch (e) { fail += 1; console.log("FAIL " + label + " — " + e.message); } };
@@ -45,6 +46,7 @@ try {
     });
   }
   await t("拖「分支图」标题条到 toolpanel 右侧 → 结构变化", async () => {
+    await openMenu(page, "分支图");
     const tab = page.locator(".ed-viewtabs .ed-btn", { hasText: "分支图" });
     if (!(await tab.count())) throw new Error("工具栏没有分支图开关");
     await tab.first().click(); await page.waitForTimeout(400);

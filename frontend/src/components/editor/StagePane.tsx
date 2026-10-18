@@ -72,6 +72,7 @@ import {
 //   }
 import type { PanelChromeProps } from "./inspectorWindow";
 import { useT } from "../../i18n/index.ts";
+import Icon from "../ui/Icon.tsx";
 
 /** 组件接受的字符（`parseStage` 的产物超集；缺 rect 时自己算）。 */
 export interface StagePaneChar extends StageCharInput {
@@ -578,7 +579,7 @@ export function StagePane(props: StagePaneProps) {
             aria-label={chrome?.ariaLabel ? `${chromeVisible ? tr("editor.toolbar.foldHide", undefined, "收起") : tr("editor.toolbar.foldShow", undefined, "展开")}${chrome.ariaLabel}` : tr("editor.toolbar.foldHide", undefined, "收起")}
             style={buttonStyle(false)}
           >
-            {chromeVisible ? "▾" : "▸"}
+            {chromeVisible ? <Icon name="chevron-down" size={14} /> : <Icon name="chevron-right" size={14} />}
           </button>
         ) : null}
       </div>

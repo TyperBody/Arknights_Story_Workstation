@@ -38,13 +38,13 @@ const ok = (label, fn) => {
 /** 「搬位置」前的动作按钮清单（**契约**，只增不减）。 */
 const REQUIRED_ACTIONS = [
   "indent-region", // 编辑：区域缩进（task-5）
-  "create", // 文件：新建剧本（task-11）
+  "preview-panel", // 视图：预览面板（Map 开关）
 ];
-/** 分组前就存在的工具条按钮（文案硬编码清单，对拍「只搬位置、没丢按钮」）。 */
+/** 分组前就存在的动作（文案硬编码清单，对拍「只搬位置、没丢动作」）。 */
 const REQUIRED_BUTTONS = ["校验", "预览", "缩进区域", "分支图", "预览面板", "插入控制器", "重新载入", "保存"];
-/** 每个分组**至少**要有这些按钮文案（归组的语义）。 */
+/** 每个菜单**至少**要有这些条目文案（分组的语义）。 */
 const GROUP_SHAPE = {
-  file: ["新建剧本", "重新载入", "保存"],
+  file: ["重新载入", "保存"],
   view: ["校验", "预览", "分支图", "检视器"],
   edit: ["缩进区域", "插入控制器"],
 };
@@ -149,23 +149,37 @@ ok("(a) 取消后 [data-create-pack] 消失", () => assert.equal(afterCancel, 0)
 // ── (c)(d)(e) 编辑器：分组 / 面包屑 / 响应式 ───────────────────────
 await openWith(`/editor/demo?text=${encodeURIComponent(SCRIPT)}`, ".ed-textarea");
 
+/** 菜单栏（2026-10-19）：动作从"一排方块按钮"改为**文本菜单**——
+ *  `data-rail-group` → `data-menu-group`，按钮在菜单**弹出面板**里（默认收起）。 */
+const openMenus = () =>
+  page.evaluate(() => {
+    document.querySelectorAll(".ed-menu").forEach((menu) => {
+      const trigger = menu.querySelector(".ed-menu-trigger");
+      trigger?.setAttribute("data-open", "1");
+      menu.querySelector(".ed-menu-pop")?.removeAttribute("hidden");
+      menu.querySelector(".ed-menu-pop")?.setAttribute("data-open", "1");
+    });
+  });
+await openMenus();
+
 const groups = await page.evaluate(() =>
   ["file", "view", "edit"].map((name) => ({
     name,
-    count: document.querySelectorAll(`[data-rail-group="${name}"]`).length,
+    count: document.querySelectorAll(`[data-menu-group="${name}"]`).length,
     // 文案优先（归组语义按**可见文案**对拍）；没文案的用 action 兜底。
-    buttons: [...document.querySelectorAll(`[data-rail-group="${name}"] button`)].map(
+    buttons: [...document.querySelectorAll(`[data-menu-group="${name}"] button`)].map(
       (b) => (b.textContent?.trim() || b.dataset.editorAction || b.dataset.wbAction || "").slice(0, 24)
     ),
   }))
 );
 ok(
-  "(c) 工具栏三组 [data-rail-group=file|view|edit] 齐全",
+  "(c) 菜单三组 [data-menu-group=file|view|edit] 齐全",
   () => assert.deepEqual(groups.map((g) => g.count > 0), [true, true, true])
 );
+await openMenus();
 const toolbar = await page.evaluate(() => ({
   actions: [...document.querySelectorAll("[data-editor-action]")].map((el) => el.dataset.editorAction),
-  texts: [...document.querySelectorAll(".ed-viewtabs button")].map((el) => el.textContent?.trim() ?? ""),
+  texts: [...document.querySelectorAll(".ed-menubar button")].map((el) => el.textContent?.trim() ?? ""),
 }));
 ok(
   `(c) 动作按钮没丢（${REQUIRED_ACTIONS.join(",")}）`,
@@ -193,10 +207,11 @@ ok("(c) 每个分组里的按钮归属正确（file/view/edit 的语义）", () 
   }
 });
 
+// 「新建剧本」按用户口径**不进编辑页**（只在编辑器空态出现）→ 常态工具栏里**没有**它。
 const emptyCreate = await page.evaluate(() => ({
-  tool: document.querySelectorAll(".ed-viewtabs [data-editor-action=\"create\"]").length,
+  tool: document.querySelectorAll(".ed-menubar [data-editor-action=\"create\"]").length,
 }));
-ok("(c) 文件组里有 [data-editor-action=create]", () => assert.equal(emptyCreate.tool, 1));
+ok("(c) 常态菜单里**没有**「新建剧本」（用户：编辑页面里不应该出现）", () => assert.equal(emptyCreate.tool, 0));
 
 const crumb = await page.evaluate(() => {
   const node = document.querySelector('[data-editor-part="breadcrumb"]');

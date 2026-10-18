@@ -73,6 +73,8 @@ import { buildPackBundle, localPacks, localUpstream, stripControls } from "../..
 import { loadStoryRuntime } from "../lib/predownload";
 import { loadBundledEngine } from "../lib/enginePack";
 import { pushLog } from "../lib/debugLog";
+import Icon from "../components/ui/Icon.tsx";
+import EditorMenu from "../components/editor/EditorMenu.tsx";
 
 /**
  * 剧本编辑器（`/editor/:packId`）。
@@ -153,6 +155,8 @@ interface Completion {
   full?: unknown;
   /** 编辑器模型保留的整行插入字段。 */
   insertTextFull?: unknown;
+  /** 归一化后的**整行骨架**（带 `[`）；替换语义用 `insertText`，行级插入用这个。 */
+  line?: string;
 }
 
 /** 从 Completion 取整行骨架（`formatLine` 的替代）。 */
@@ -224,10 +228,15 @@ function normalizeCompletion(raw: Completion): Completion {
     }
     return "";
   };
+  // ⚠️ 顺序很关键：`insertText` 是**替换当前 token** 的文本（`name=""`），
+  // `insertTextFull` 是**整行骨架**（`[Character(name=…)]`，面板「插入」用）。
+  // 之前把 `full` 排在最前面 → 参数补全（`na`）会插入整行骨架，
+  // 正文变成 `[Character(Character(name=…)]`（实测）。`full` 只作兜底。
+  const line_ = pick(raw.insertTextFull, ["text", "line", "insert"]);
   const source =
-    pick(raw.full, ["text", "line", "insert"]) ||
-    pick(raw.insertTextFull, ["text", "line", "insert"]) ||
     pick(raw.insertText, ["text", "line", "insert"]) ||
+    pick(raw.full, ["text", "line", "insert"]) ||
+    line_ ||
     pick(raw.label, ["label", "text", "description", "detail", "command", "canonical", "name"]);
   let insert = source.startsWith("[") ? source.slice(1) : source;
   const wordish = /^[A-Za-z_]\w*\]?$/.test(insert);
@@ -248,6 +257,8 @@ function normalizeCompletion(raw: Completion): Completion {
     kind: isController ? "controller" : raw.kind ?? "text",
     insertText: insert,
     full: source,
+    // 整行骨架（带 `[`）；面板「插入控制器」用它。**不含**在替换语义里。
+    line: line_ || (source.startsWith("[") ? source : undefined),
   };
 }
 
@@ -993,12 +1004,24 @@ function completionQuery(full: string, offset: number): CompletionQuery {
   return { args: undefined, prefix: "", from: offset, kind: "argument" };
 }
 
-/** 光标是否落在空串/空括号里：`Character(name="")` → 落在两个引号中间。 */
+/**
+ * 补全后的光标落点（用户口径：「光标也要在 `[]` 里边；出现函数也要在 `()` 里，
+ * 而不是第一次就挪到外面」）。优先级：
+ *   1. 空串 `""` / `''` → 落在两个引号之间（最里层，`name=""` 就是这里）；
+ *   2. 空括号 `()` → 落在括号里；
+ *   3. 有 `(` 但没空括号（`Delay(time=1)`）→ 落在**第一个 `(` 之后**；
+ *   4. 否则若以 `]` 收尾 → 落在 `]` **之前**（仍在方括号里）。
+ */
 function caretInside(insert: string, base: number): number {
-  for (const pair of ['""', "''", "()"]) {
+  for (const pair of ['""', "''"]) {
     const at = insert.indexOf(pair);
     if (at >= 0) return base + at + 1;
   }
+  const parens = insert.indexOf("()");
+  if (parens >= 0) return base + parens + 1;
+  const open = insert.indexOf("(");
+  if (open >= 0) return base + open + 1;
+  if (insert.endsWith("]")) return base + insert.length - 1;
   return base + insert.length;
 }
 
@@ -1258,6 +1281,8 @@ export default function StoryEditorPage() {
   /** 「新建剧本…」对话框（task-11）；纯 Vite 时按钮禁用 + title。 */
   const [createOpen, setCreateOpen] = useState(false);
   /** 素材库（task-9）：引擎表（快照优先）+ 当前包自带映射；懒加载、失败留空。 */
+  /** 素材表是否已解析完（`false` = 面板显示"还没就绪"，但**不阻塞**首帧）。 */
+  const [assetTablesReady, setAssetTablesReady] = useState(false);
   const [assetTables, setAssetTables] = useState<{ backgrounds: AssetTable; characters: AssetTable; variables: Record<string, unknown> | null }>({
     backgrounds: null,
     characters: null,
@@ -1762,24 +1787,47 @@ export default function StoryEditorPage() {
     setHover(null);
   }, [text]);
 
-  /** 素材表：首帧后台取一次（内置快照 → runtime）；失败静默（面板显示"没就绪"）。 */
+  /**
+   * 素材表：**按需**载入（用户：「素材库要加载优化 演示不要全量加载演示」）。
+   *
+   * 引擎快照里的资源表有 2 万+ 条（`background.json` + `character.json` +
+   * `story_variables.json`），解析一次要几十毫秒、还要常驻内存；而**大多数会话
+   * 根本不打开素材库**。所以这里只做「标记需要 → 空闲时解析」：
+   *  - `assetTableNeeded` 由「素材库面板可见 / 用户点开 rail 上的 ▦」置真；
+   *  - `requestIdleCallback`（无则 `setTimeout 0`）里跑，不抢首帧；
+   *  - 解析完置 `assetTablesReady`，面板从「素材表还没就绪」切到内容。
+   */
+  const assetTableNeeded = visible.includes("assets");
   useEffect(() => {
+    if (!assetTableNeeded || assetTablesReady) return;
     let alive = true;
-    void (async () => {
-      try {
-        const pack = await loadBundledEngine();
-        const picked = pack?.snapshot
-          ? pickAssetTables(pack.snapshot.data as Record<string, unknown>)
-          : await Promise.resolve(pickAssetTables(null));
-        if (alive) setAssetTables(picked);
-      } catch {
-        // 快照缺失：资产表保持 null（面板给「素材表还没就绪」）。
-      }
-    })();
+    const run = () => {
+      void (async () => {
+        try {
+          const pack = await loadBundledEngine();
+          const picked = pack?.snapshot
+            ? pickAssetTables(pack.snapshot.data as Record<string, unknown>)
+            : await Promise.resolve(pickAssetTables(null));
+          if (alive) {
+            setAssetTables(picked);
+            setAssetTablesReady(true);
+          }
+        } catch {
+          // 快照缺失：资产表保持默认（面板给「素材表还没就绪」）。
+        }
+      })();
+    };
+    const idle = (window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
+      .requestIdleCallback;
+    /** `handle` 的类型在两条分支里不同（`number`）→ 分开存，取消时按来源走。 */
+    const usedIdle = typeof idle === "function";
+    const handle = usedIdle && idle ? idle(run, { timeout: 1200 }) : window.setTimeout(run, 0);
     return () => {
       alive = false;
+      if (usedIdle) window.cancelIdleCallback?.(handle);
+      else window.clearTimeout(handle);
     };
-  }, []);
+  }, [assetTableNeeded, assetTablesReady]);
 
   /** 包自带素材映射（`build/assets.local.json`）：切包时重读；无 Tauri → null。 */
   useEffect(() => {
@@ -1813,8 +1861,10 @@ export default function StoryEditorPage() {
     }
     // 成对补齐留下的 `]`（在 `popup.prefix` 之后）一并吃掉，避免 `[X(...)]]`。
     const after = textRef.current.slice(popup.from + popup.prefix.length);
-    const eat = after.startsWith("]") ? 1 : 0;
-    applyEdit(popup.from, popup.from + popup.prefix.length + eat, insert, caretInside(insert, popup.from));
+    const eat = after.startsWith("]") && item.kind === "controller" ? 1 : 0;
+    // 光标：控制器/参数/值**一律落在括号里**（`""` → `()` → `(` → `]` 之前）。
+    const inside = item.kind === "value" ? popup.from + insert.length : caretInside(insert, popup.from);
+    applyEdit(popup.from, popup.from + popup.prefix.length + eat, insert, inside);
     hiddenRef.current = true;
     setPopup(null);
   }, [applyEdit, popup]);
@@ -3563,7 +3613,7 @@ export default function StoryEditorPage() {
       */}
       <div className="browser-header ed-header">
         <button className="ak-button ak-button--outline back-icon" onClick={() => navigate(-1)} aria-label={tr("editor.toolbar.back", undefined, "返回")}>
-          ◀
+          <Icon name="chevron-left" size={16} />
         </button>
         <div className="ed-title" data-editor-part="title">
           <h1 title={title}>{title}</h1>
@@ -3644,35 +3694,49 @@ export default function StoryEditorPage() {
 
       {/* 工具栏（`data-rail-group`：file / view / edit）：**动作**按钮的归组。
           口径：rail（`data-ed-rail`）只管「收起的窗口挂哪里」，这里只管动作。 */}
-      <div className="ed-toolbar-row">
+      {/* 菜单栏（**文本式**，Blender 的标题栏菜单口径：文字 + 右侧小三角，
+          不是一排方块按钮）。分组与动作**一个不少**，只是换了呈现：
+          · 文件：重新载入 / 保存（+「新建剧本…」，仅在**没打开包**时出现）
+          · 视图：校验 / 预览 / 分支图 / 预览面板 / 检视器
+          · 编辑：缩进区域 / 插入控制器
+          契约：`data-rail-group` / `data-editor-action` / 文案（harness 按这些断言）。 */}
+      <div className="ed-menubar" data-editor-menu-bar="1" role="menubar" aria-label={tr("editor.toolbar.menuAria", undefined, "剧本菜单")}>
         <div className="ed-viewtabs">
-          <div className="ed-toolgroup" data-rail-group="file">
-            <button
-              className="ak-button ed-btn"
-              data-editor-action="create"
-              onClick={() => setCreateOpen(true)}
-              title={tr("editor.create.button", undefined, "新建剧本…")}
-            >
-              {tr("editor.create.button", undefined, "新建剧本…")}
-            </button>
-            <button className="ak-button ed-btn" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
+          <EditorMenu label={tr("editor.toolbar.menuFile", undefined, "文件")} group="file">
+            {loadState === "empty" && (
+              <button
+                type="button"
+                className="ed-btn ed-menu-item"
+                data-editor-action="create"
+                onClick={() => setCreateOpen(true)}
+                title={tr("editor.create.button", undefined, "新建剧本…")}
+              >
+                {tr("editor.create.button", undefined, "新建剧本…")}
+              </button>
+            )}
+            <button type="button" className="ed-btn ed-menu-item" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
               {tr("editor.toolbar.reload", undefined, "重新载入")}
+              <kbd>F5</kbd>
             </button>
             <button
-              className="ak-button ed-btn primary"
+              type="button"
+              className="ed-btn ed-menu-item"
               onClick={() => void doSave()}
               disabled={busy === "save"}
-              title="Ctrl+S"
+              title={tr("editor.toolbar.save", undefined, "保存")}
             >
               {busy === "save" ? tr("editor.toolbar.saving", undefined, "保存中…") : tr("editor.toolbar.save", undefined, "保存")}
+              <kbd>Ctrl S</kbd>
             </button>
-          </div>
-          <div className="ed-toolgroup" data-rail-group="view">
-            <button className="ak-button ed-btn" onClick={runLint} title={tr("editor.toolbar.lintTitle", undefined, "重新运行校验（实时诊断也会自动刷新）")}>
+          </EditorMenu>
+
+          <EditorMenu label={tr("editor.toolbar.menuView", undefined, "视图")} group="view">
+            <button type="button" className="ed-btn ed-menu-item" onClick={runLint} title={tr("editor.toolbar.lintTitle", undefined, "重新运行校验（实时诊断也会自动刷新）")}>
               {tr("editor.toolbar.lint", undefined, "校验")}
             </button>
             <button
-              className="ak-button ed-btn"
+              type="button"
+              className="ed-btn ed-menu-item"
               onClick={() => {
                 mapToggle("preview", true);
                 void openPreview();
@@ -3682,47 +3746,54 @@ export default function StoryEditorPage() {
               {tr("editor.toolbar.preview", undefined, "预览")}
             </button>
             <button
-              className={`ak-button ed-btn${inTree("branch") ? " on" : ""}`}
-              onClick={() => mapToggle("branch")}
-              disabled={!BranchGraphPart}
-              title={
-                BranchGraphPart
-                  ? tr("editor.toolbar.branchTitleReady", undefined, "分支图 = Map：按 Decision/Predicate 画剧情走向；开/关都在工作台里（拖标题条可拼接）")
-                  : tr("editor.toolbar.branchTitleTodo", undefined, "分支图由并行任务交付；文件落盘后自动可用")
-              }
-            >
-              {tr("editor.toolbar.branch", undefined, "⌥ 分支图")}
-            </button>
-            {/* 「预览面板」= 只把 Map 面板放进 / 移出工作台（开演用左边的「预览」）。
-                保留它是因为三条预览类 harness 按**文案**点它（`.ed-viewtabs` 里
-                找「预览面板」）；语义与「预览」互补，不是第三个开关。 */}
-            <button
-              className={`ak-button ed-btn${inTree("preview") ? " on" : ""}`}
+              type="button"
+              className={`ed-btn ed-menu-item${inTree("preview") ? " on" : ""}`}
               data-editor-action="preview-panel"
+              aria-pressed={inTree("preview")}
               onClick={() => mapToggle("preview")}
-              title={tr("editor.toolbar.previewPanelTitle", undefined, "预览 = Map：把它放进 / 移出工作台（开演用左边的「预览」按钮）")}
+              title={tr("editor.toolbar.previewPanelTitle", undefined, "预览 = Map：把它放进 / 移出工作台（开演用上一条「预览」）")}
             >
               {tr("editor.toolbar.previewPanel", undefined, "预览面板")}
             </button>
             <button
-              className="ak-button ed-btn"
+              type="button"
+              className={`ed-btn ed-menu-item${inTree("branch") ? " on" : ""}`}
+              aria-pressed={inTree("branch")}
+              onClick={() => mapToggle("branch")}
+              disabled={!BranchGraphPart}
+              title={
+                BranchGraphPart
+                  ? tr("editor.toolbar.branchTitleReady", undefined, "分支图 = Map：按 Decision/Predicate 画剧情走向；开/关都在工作台里")
+                  : tr("editor.toolbar.branchTitleTodo", undefined, "分支图由并行任务交付；文件落盘后自动可用")
+              }
+            >
+              {tr("editor.toolbar.branch", undefined, "分支图")}
+            </button>
+            <button
+              type="button"
+              className={`ed-btn ed-menu-item${showInspector ? " on" : ""}`}
+              aria-pressed={showInspector}
               onClick={() => toggleInspector()}
               title={tr("editor.toolbar.inspectorTitle", undefined, "显示/隐藏控制器检视器")}
             >
               {showInspector ? tr("editor.toolbar.inspectorShow", undefined, "收起检视器") : tr("editor.toolbar.inspectorHide", undefined, "检视器")}
             </button>
-          </div>
-          <div className="ed-toolgroup" data-rail-group="edit">
+          </EditorMenu>
+
+          <EditorMenu label={tr("editor.toolbar.menuEdit", undefined, "编辑")} group="edit">
             <button
-              className="ak-button ed-btn"
+              type="button"
+              className="ed-btn ed-menu-item"
               data-editor-action="indent-region"
               onClick={() => indentRegion("region")}
               title={tr("editor.indent.title", undefined, "给选中的分支线路加两格缩进；只为可读，送引擎前会自动去掉行首空白")}
             >
               {tr("editor.indent.button", undefined, "缩进区域")}
+              <kbd>Ctrl Alt I</kbd>
             </button>
             <button
-              className="ak-button ed-btn"
+              type="button"
+              className="ed-btn ed-menu-item"
               onClick={() => setWizardOpen(true)}
               disabled={!ControllerWizardPart}
               title={
@@ -3731,9 +3802,17 @@ export default function StoryEditorPage() {
                   : tr("editor.toolbar.wizardTitleTodo", undefined, "插入向导由并行任务交付；文件落盘后自动可用")
               }
             >
-              {tr("editor.toolbar.wizardOpen", undefined, "插入控制器…")}
+              {tr("editor.toolbar.wizardOpen", undefined, "插入控制器")}
             </button>
-          </div>
+          </EditorMenu>
+
+          <EditorMenu label={tr("editor.toolbar.menuHelp", undefined, "帮助")} group="help" align="end">
+            <p className="ed-menu-hint">{tr("editor.toolbar.menuKeys", undefined, "快捷键")}</p>
+            <p className="ed-menu-keys"><kbd>Ctrl S</kbd> {tr("editor.toolbar.save", undefined, "保存")}</p>
+            <p className="ed-menu-keys"><kbd>Ctrl Z</kbd> {tr("editor.toolbar.undoTitle", undefined, "撤销（Ctrl+Z）")}</p>
+            <p className="ed-menu-keys"><kbd>Ctrl Space</kbd> {tr("editor.toolbar.keysComplete", undefined, "补全提示")}</p>
+            <p className="ed-menu-keys"><kbd>Tab</kbd> {tr("editor.toolbar.keysIndent", undefined, "缩进 / 骨架")}</p>
+          </EditorMenu>
         </div>
       </div>
 
