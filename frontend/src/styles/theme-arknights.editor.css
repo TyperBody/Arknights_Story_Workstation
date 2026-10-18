@@ -274,3 +274,32 @@
     transition-duration: 1ms;
   }
 }
+
+/* ── 7b. 素材库类型栏 = ak-ui `.ak-segmented`（JSX 里就是这个类）。
+      `browser.css` 的 `.ed-assets-kind` 是 999px 胶囊 + 金色描边，会和
+      `.ak-segmented__item` 打架 → 这里按 ak-ui 的口径收正（0 圆角、选中反白）。 */
+
+.ak-segmented.ed-assets-kinds {
+  gap: 2px;
+  padding: 2px;
+  background: var(--ak-surface-inverse);
+}
+.ak-segmented.ed-assets-kinds .ak-segmented__item {
+  min-width: 0;
+  min-height: var(--ak-ctrl-h-sm);
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.ak-segmented.ed-assets-kinds .ak-segmented__item[aria-pressed="true"] {
+  background: var(--ak-segmented-signal);
+  color: var(--ak-text-inverse);
+}
+.ak-segmented.ed-assets-kinds .ak-segmented__item small {
+  color: inherit;
+  opacity: 0.72;
+}

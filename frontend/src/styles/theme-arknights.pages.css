@@ -54,6 +54,34 @@
   padding-left: var(--ak-space-2);
 }
 
+/* 首页：`--ak-type-display-size`（clamp 2.25→4.5rem）**要夹住**（clamp 在
+ *  1500px 视口上会顶到 4.5rem=72px，比原 32px 大一倍多，首页会被标题压满）。
+ *  展示字角色本来就是给"主操作标题"的（ak-ui `--ak-type-display-size`）。 */
+.home-page {
+  background:
+    radial-gradient(120% 80% at 50% -10%, color-mix(in srgb, var(--ak-color-blue) 8%, transparent), transparent 60%),
+    var(--ak-surface-canvas);
+}
+.home-title {
+  font-family: var(--ak-font-serif);
+  font-weight: 900;
+  font-size: clamp(2rem, 4.2vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: var(--ak-type-tight);
+  color: var(--ak-text-primary);
+}
+.home-tagline {
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  font-weight: 800;
+  letter-spacing: var(--ak-type-wide);
+  text-transform: uppercase;
+  color: var(--ak-text-secondary);
+}
+.home-logo {
+  filter: drop-shadow(0 0.4rem 1.2rem rgba(0, 0, 0, 0.6));
+}
+
 /* 元信息（计数 / 版本 / 时间戳…）：等宽、大写、加字距 —— ak-ui 的元信息角色。 */
 .shelf-count,
 .fl-count,
