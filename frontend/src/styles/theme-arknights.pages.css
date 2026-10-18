@@ -1,174 +1,337 @@
 /**
- * `theme-arknights.pages.css` —— 首页 / 书架 / 详情 / 设置 / 播放器 的**明日方舟风**皮肤。
+ * `theme-arknights.pages.css` —— **页面层适配**：把本应用的类名**映射到 ak-ui 的组件外观**。
  *
- * 范围：`.home-*` `.browser-*` `.story-*` `.cover-*` `.chapter-*` `.settings-*`
- *       `.player-*` `.sp-*` `.dl-*`（下载条）`.dbg-*`（调试台）与通用弹层。
- * 只改观感；DOM 契约与类名不动。token 见 `theme-arknights.tokens.css`。
+ * 风格来源 = `@yunyoujun/ak-ui`（`main.tsx` 里 `import "@yunyoujun/ak-ui/style.css"`）。
+ * 这一层的职责不是"再发明一套风格"，而是：
+ *   1. 直接用 ak-ui 的 `.ak-*` 组件类（见各页 JSX）→ 外观 100% 来自 ak-ui；
+ *   2. 给本应用的**结构类**（`.browser-*` / `.cover-*` / `.settings-*` / `.fl-*`…）
+ *      补上 ak-ui 的**几何与排版**：`--ak-line-strong` 左侧信号条、hairline 描边、
+ *      衬线重标题、等宽大写元信息 —— 取值全部来自 ak-ui token；
+ *   3. 只保留"ak-ui 没有对应角色"的布局（栅格、间距、滚动）。
+ *
+ * ⚠️ ak-ui 的 `.ak-button` 默认是**主机大按钮**档（150×50）；桌面工具条放不下，
+ * 所以在 §2 里统一收成 `--ak-ctrl-*` 三档 —— 形状、过渡、`::after` 按压反馈、
+ * `:hover` 抬起**仍然是 ak-ui 的**，只改尺寸。
  */
 
-/* ── 1. 首页 / 书架 ───────────────────────────────────────────── */
+/* ── 1. 页面骨架：ak-ui 的中性近黑画布 + 分层表面 ─────────────── */
 
 .home-page,
-.browser-page {
-  background:
-    radial-gradient(120% 80% at 50% -10%, color-mix(in srgb, var(--ak-accent) 7%, transparent), transparent 60%),
-    var(--ak-bg-0);
+.browser-page,
+.settings-page,
+.fanfic-page,
+.help-page,
+.about-page,
+.editor-page {
+  background: var(--ak-surface-canvas);
+  color: var(--ak-text-primary);
 }
 
-.home-logo {
-  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--ak-accent) 22%, transparent));
+/* 页头：石墨表面 + hairline 分隔（ak-ui「层级靠亮度 + 细描边」）。 */
+.browser-header {
+  background: var(--ak-color-dark);
+  border-bottom: var(--ak-line-hairline) solid var(--ak-color-gray);
 }
-.home-title {
-  letter-spacing: 0.14em;
-  font-weight: 600;
-}
-.home-sub,
-.home-version {
-  color: var(--ak-text-3);
-  letter-spacing: 0.04em;
+.browser-header h1 {
+  font-family: var(--ak-font-serif);
+  font-weight: 900;
+  letter-spacing: var(--ak-type-tight);
+  color: var(--ak-text-primary);
 }
 
-/* 分类行 / 分组标题：左侧一条 3px 金线（系列 UI 的分节方式）。 */
+/* 分组标题：左侧 `--ak-line-strong`（4px）信号条 = ak-ui 的分节方式。 */
 .browser-section-title,
 .shelf-cat-title,
-.bs-group-title {
-  border-left: 3px solid var(--ak-accent);
-  padding-left: 8px;
-  letter-spacing: 0.06em;
-  color: var(--ak-text-1);
-}
-
-/* 章节行：hover/选中用金色描边 + 8% 底色，不用整块反白。 */
-.chapter-row,
-.chapter-item {
-  border-radius: var(--ak-radius);
-  transition: background var(--ak-dur) var(--ak-ease), border-color var(--ak-dur) var(--ak-ease);
-}
-.chapter-row:hover,
-.chapter-item:hover {
-  background: color-mix(in srgb, var(--ak-accent) 7%, transparent);
-  border-color: var(--ak-line-accent);
-}
-
-/* 进度 / 缓存圆点：三态色与系列一致（灰未缓存 / 金已缓存 / 绿已读）。 */
-.dot-partial { background: var(--ak-accent); }
-.dot-cached { background: var(--ak-ok); }
-.dot-none { background: var(--ak-text-4); }
-
-/* ── 2. 设置页 ──────────────────────────────────────────────── */
-
-.settings-page {
-  background: var(--ak-bg-0);
-}
-.settings-section,
-.set-card,
-.set-row {
-  border-radius: var(--ak-radius);
-  border-color: var(--ak-line-1);
-}
+.bs-group-title,
 .settings-section h2,
+.setting-group > label,
 .set-card h2 {
-  letter-spacing: 0.06em;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ak-text-1);
-  border-left: 3px solid var(--ak-accent);
-  padding-left: 8px;
-}
-.settings-link,
-.set-link {
-  color: var(--ak-accent);
-  border-bottom: 1px solid color-mix(in srgb, var(--ak-accent) 35%, transparent);
-}
-.settings-link:hover,
-.set-link:hover {
-  color: var(--ak-accent-hi);
+  font-family: var(--ak-font-serif);
+  font-weight: 900;
+  letter-spacing: var(--ak-type-tight);
+  color: var(--ak-text-primary);
+  border-left: var(--ak-line-strong) solid var(--ak-signal-action);
+  padding-left: var(--ak-space-2);
 }
 
-/* 设置项里的 select / input：细描边 + 聚焦金色环。 */
-.settings-page select,
-.settings-page input[type="text"],
-.settings-page input[type="number"] {
-  background: var(--ak-bg-2);
-  border: 1px solid var(--ak-line-2);
-  border-radius: var(--ak-radius);
-  color: var(--ak-text-1);
-}
-.settings-page select:focus-visible,
-.settings-page input:focus-visible {
-  outline: 2px solid var(--ak-accent-dim);
-  outline-offset: 1px;
-  border-color: var(--ak-accent);
-}
-
-/* ── 3. 播放器页 chrome（引擎 iframe 之内**不动**）──────────────── */
-
-.player-page,
-.story-player-page {
-  background: #000; /* 演出周围留黑（系列 UI 的全屏演出观感） */
-}
-.sp-bar,
-.sp-topbar {
-  background: color-mix(in srgb, var(--ak-bg-0) 88%, transparent);
-  border-bottom: 1px solid var(--ak-line-1);
-  backdrop-filter: blur(6px);
-}
-.sp-btn {
-  border-radius: var(--ak-radius);
-  color: var(--ak-text-2);
-}
-.sp-btn:hover {
-  color: var(--ak-accent-hi);
-  background: color-mix(in srgb, var(--ak-accent) 10%, transparent);
+/* 元信息（计数 / 版本 / 时间戳…）：等宽、大写、加字距 —— ak-ui 的元信息角色。 */
+.shelf-count,
+.fl-count,
+.cache-info,
+.home-version,
+.dl-result-sub,
+.dl-result-msg,
+.setting-hint {
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  font-weight: 800;
+  letter-spacing: var(--ak-type-wide);
+  color: var(--ak-text-secondary);
 }
 
-/* ── 6. 控件尺寸基线（用户：「按钮大小不统一需要修复」）─────────────
-   所有"看起来是按钮"的东西共用一套高度/内边距/字号：
-   小档（工具条 / 徽标）= 28px、常规档（页面动作）= 34px、块档（弹层主按钮）= 38px。
-   用 `min-height` + `box-sizing`，所以文字多时长得下去但不会"忽高忽低"。 */
-:root {
-  --ak-ctrl-h-sm: 28px;
-  --ak-ctrl-h: 34px;
-  --ak-ctrl-h-lg: 38px;
-  --ak-ctrl-pad-sm: 0 10px;
-  --ak-ctrl-pad: 0 14px;
-  --ak-ctrl-pad-lg: 0 18px;
-}
-.btn-primary,
-.btn-danger,
-.nav-btn,
-.fl-btn,
-.ed-btn,
-.fl-alert-close,
-.back-icon {
+/* ── 2. 组件密度：ak-ui 的默认档是"主机大按钮"（150×50）；
+      桌面工具条按 `--ak-ctrl-*` 收成三档，**形状与反馈仍取自 ak-ui**。 */
+
+/* ⚠️ `width/height: auto` 必须显式写：ak-ui 的 `.ak-button` 是**固定** 150×50
+   （`width:150px; height:50px`），只给 `min-height` 压不住它 —— 实测工具条里
+   每个按钮都是 150×50 的大方块。 */
+.ak-button.nav-btn,
+.ak-button.btn-primary,
+.ak-button.btn-danger,
+.ak-button.back-icon,
+.ak-button.sel-btn,
+.ak-button.fl-btn,
+.ak-button.ed-btn,
+.ak-button.ed-status-btn,
+.ak-button.ed-scrub-btn,
+.ak-button.ed-assets-btn,
+.ak-button.ed-win-btn,
+.ak-button.ed-rail-btn,
+.ak-button.create-pack-x {
+  width: auto;
+  height: auto;
   box-sizing: border-box;
   min-height: var(--ak-ctrl-h);
   padding: var(--ak-ctrl-pad);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--ak-space-2);
+  font-family: var(--ak-font-sans);
+  font-size: 0.8125rem;
   line-height: 1;
-  font-size: 13px;
-  border-radius: var(--ak-radius);
 }
-.btn-primary,
-.btn-danger {
+.ak-button.btn-primary,
+.ak-button.btn-danger {
   min-height: var(--ak-ctrl-h-lg);
   padding: var(--ak-ctrl-pad-lg);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
-.toolbar .nav-btn,
-.fl-toolbar .nav-btn,
-.fl-empty-actions .nav-btn {
+.ak-button.back-icon,
+.ak-button.ed-btn,
+.ak-button.ed-status-btn,
+.ak-button.ed-scrub-btn,
+.ak-button.ed-assets-btn,
+.ak-button.ed-win-btn,
+.ak-button.ed-rail-btn,
+.ak-button.create-pack-x,
+.ak-button.sel-btn {
+  min-height: var(--ak-ctrl-h-sm);
+  padding: var(--ak-ctrl-pad-sm);
+}
+
+/* ── 2b. 按钮配色：直接沿用 ak-ui 的档位语义（`--action` 实色蓝、
+      `--outline` 2px 白描边），**不再用本应用自己的金色渐变**。 */
+
+.ak-button.ak-button--action,
+.ak-button.btn-primary {
+  background-color: var(--ak-color-blue);
+  color: var(--ak-text-inverse);
+  font-weight: 800;
+}
+.ak-button.ak-button--outline,
+.ak-button.nav-btn,
+.ak-button.back-icon {
+  background-color: transparent;
+  border: 2px solid var(--ak-text-primary);
+  color: var(--ak-text-primary);
+  font-weight: 700;
+}
+.ak-button.ak-button--outline:hover:not(:disabled),
+.ak-button.nav-btn:hover:not(:disabled),
+.ak-button.back-icon:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+.ak-button.ak-button--danger,
+.ak-button.btn-danger,
+.ak-button.danger {
+  border-color: var(--ak-signal-danger);
+  color: var(--ak-signal-danger);
+  background-color: transparent;
+}
+
+
+/* ── 2c. `.primary` 变体（编辑器里的「保存」等）：ak-ui 的 `--action` 实色。 */
+
+.ak-button.ed-btn.primary,
+.ak-button.ed-assets-btn.primary,
+.ak-button.primary {
+  background-color: var(--ak-color-blue);
+  border-color: var(--ak-color-blue);
+  color: var(--ak-text-inverse);
+  font-weight: 800;
+}
+
+/* ── 2d. 纯文字按钮（`home-help`）：ak-ui `.ak-nav__link` 的"下划线 + 信号色"。 */
+
+.ak-button.home-help {
+  border: 0;
+  background: transparent;
+  color: var(--ak-color-light-blue);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
   min-height: var(--ak-ctrl-h);
 }
-/* 文案/标签类（不是按钮）在视觉上比按钮矮一档，避免"错位感"。 */
-.fl-badge,
-.ed-badge,
-.fl-count {
-  min-height: 22px;
-  padding: 0 8px;
-  display: inline-flex;
-  align-items: center;
+.ak-button.home-help:hover:not(:disabled) {
+  color: var(--ak-color-primary);
+  transform: none;
+}
+
+/* ── 3. 书架：封面 = ak-card 的"可放置位"（`--place` 的底边 4px 信号条、
+      选中抬起），书名/副标题按 `ak-card__title` / `__description` 的角色。 */
+
+.cover-card,
+.chapter-row,
+.fl-card {
+  background: var(--ak-color-dark);
+  border: var(--ak-line-hairline) solid var(--ak-color-gray);
+  border-bottom: var(--ak-line-strong) solid var(--ak-line-3);
+  box-shadow: none;
+  border-radius: var(--ak-radius-subtle);
+  transition: box-shadow var(--ak-motion-base) var(--ak-ease-standard),
+    transform var(--ak-motion-base) var(--ak-ease-standard),
+    border-color var(--ak-motion-base) var(--ak-ease-standard);
+}
+.cover-card:hover,
+.fl-card:hover {
+  border-bottom-color: var(--ak-signal-action);
+  transform: translateY(-2px);
+  box-shadow: var(--ak-shadow-panel);
+}
+.cover-card.selected,
+.fl-card.on {
+  border-color: var(--ak-text-primary);
+  border-bottom-color: var(--ak-signal-action);
+  box-shadow: 0 0 0 1px var(--ak-signal-action), var(--ak-shadow-panel);
+}
+.cover-title,
+.fl-card-title {
+  font-family: var(--ak-font-serif);
+  font-weight: 900;
+  letter-spacing: var(--ak-type-tight);
+}
+.cover-sub,
+.fl-card-sub {
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  letter-spacing: var(--ak-type-wide);
+  color: var(--ak-text-secondary);
+}
+
+/* ── 4. 书架缓存圆点：ak-ui 的"信号"用法 —— 颜色之外还有形状/文字。 */
+
+.dot-partial { background: var(--ak-signal-action); }
+.dot-cached { background: var(--ak-signal-success); }
+.dot-none { background: var(--ak-signal-disabled); }
+
+/* ── 5. 表单：`<input class="ak-input ak-input--dark">` 是本应用的暗底分支。
+      ak-ui 的 `.ak-input` 是**亮纸面**（`#fdf…`）+ 左边 4px 信号条、0 圆角；
+      深色页面上取同一套几何、把表面换成 `--ak-surface-inverse`。 */
+
+.input-dark,
+.search-input,
+.create-pack-row input,
+.create-pack-row textarea,
+.ed-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--ak-ctrl-h);
+  padding: 0.5rem 0.75rem;
+  color: var(--ak-text-primary);
+  background-color: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid var(--ak-color-gray);
+  border-left: var(--ak-line-strong) solid var(--ak-color-low);
+  border-radius: 0;
+  outline: none;
+  font-family: var(--ak-font-sans);
+  font-size: 0.875rem;
+}
+.input-dark:focus-visible,
+.search-input:focus-visible,
+.create-pack-row input:focus-visible,
+.create-pack-row textarea:focus-visible,
+.ed-input:focus-visible {
+  border-left-color: var(--ak-signal-info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ak-signal-info) 20%, transparent);
+}
+
+/* ── 6. 下载 / 压缩条 + 调试台：ak-ui 的"石墨面板 + 左信号条"口径。 */
+
+.dl-bar {
+  background: var(--ak-surface-inverse);
+  border-top: var(--ak-line-hairline) solid var(--ak-color-gray);
+}
+.dl-result,
+.dbg-panel {
+  background: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid #626a70;
+  border-left: var(--ak-line-strong) solid var(--ak-signal-action);
+  box-shadow: var(--ak-shadow-panel);
+}
+.dl-fill {
+  background: var(--ak-signal-action);
+}
+
+/* ── 7. 浮层与提示：ak-ui `.ak-notice` / `.ak-dialog` 的"左 0.35rem 信号条"。 */
+
+.bookshelf-sync-warning {
+  background: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid #626a70;
+  border-left: 0.35rem solid var(--ak-signal-action);
+  color: var(--ak-text-primary);
+}
+.fl-alert {
+  background: var(--ak-surface-inverse);
+  border-left: 0.35rem solid var(--ak-signal-danger);
+}
+
+/* ── 8. 设置页：分节 = ak-card 的描边 + 8px 节奏。 */
+
+.setting-group {
+  background: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid var(--ak-color-gray);
+  padding: var(--ak-space-4);
+  border-radius: 0;
+}
+.setting-group + .setting-group {
+  margin-top: var(--ak-space-3);
+}
+
+/* ── 9. 播放器 chrome（引擎 iframe 之内不动）：全屏演出周围留黑。 */
+
+.story-player-page,
+.player-page {
+  background: #000;
+}
+.sp-topbar,
+.player-bar {
+  background: color-mix(in srgb, var(--ak-surface-inverse) 92%, transparent);
+  border-bottom: var(--ak-line-hairline) solid var(--ak-color-gray);
+}
+
+/* ── 10. 焦点：键盘焦点必须可见（ak-ui `--ak-focus-*`）。 */
+
+.nav-btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-danger:focus-visible,
+.back-icon:focus-visible,
+.sel-btn:focus-visible,
+.cover-card:focus-visible,
+.fl-card:focus-visible,
+.ak-input:focus-visible,
+.ak-select:focus-visible {
+  outline: var(--ak-focus-width) solid var(--ak-focus-color);
+  outline-offset: var(--ak-focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-card,
+  .fl-card,
+  .chapter-row,
+  .chapter-item,
+  .nav-btn,
+  .btn-primary,
+  .btn-danger {
+    transition-duration: 1ms;
+  }
 }

@@ -1,129 +1,126 @@
 /**
- * `theme-arknights.tokens.css` —— **明日方舟风格**的 token（对齐 ak-ui 的语义角色）。
+ * `theme-arknights.tokens.css` —— **ak-ui 适配层（token）**。
  *
- * 参考：<https://ak-ui.yyj.moe/guide/tokens.html>（Unofficial ak-ui design language，
- * MIT）。**只借"语义角色 / 取值口径"，不引入依赖、不改类名**。上一版偏蓝（`#0e1216`
- * 蓝底）—— 这里按 ak-ui 的 **中性近黑** 收正：
+ * 风格来源：**`@yunyoujun/ak-ui@1.1.0`**（<https://ak-ui.yyj.moe/components/>，
+ * `frontend/src/main.tsx` 里 `import "@yunyoujun/ak-ui/style.css"`）。ak-ui 自带
+ * 全套语义 token（`--ak-surface-*` / `--ak-text-*` / `--ak-signal-*` / `--ak-color-*`
+ * / `--ak-cut-*` / `--ak-motion-*` …）**且不含任何全局 reset**（实测无 `html`/`body`/`*`
+ * 规则），所以它是"CSS Core"，我们这边只做两件事：
  *
- *   canvas `#111315`（中性）· raised `rgba(66,66,66,.92)` · hairline `1px`
- *   text `#f8f8f5` / `--ak-text-secondary: rgba(248,248,245,.68)`
- *   signal-info `#4aabea` · signal-action `#f1c644`（advanced）· accent `#f6540e`
- *   几何：hairline 1px + strong 4px 线、`--ak-cut-*` 45° 切角（clip-path）、`radius-subtle: 2px`
- *   动效：`--ak-motion-fast 120ms` / `base 200ms`，`ease-standard cubic-bezier(.2,0,0,1)`
+ *   1. **旧名重绑**：本应用数百处旧 CSS 用的是 `--bg-primary` / `--accent` / `--border`
+ *      / `--text-*` / `--hl-*`，这里把它们接到 ak-ui 的语义 token 上 —— 一行 JSX 不用改
+ *      就整体换肤；**取值不再由本文件发明**（上一版自己调的"金/蓝"已删）。
+ *   2. **组件级变量**：ak-ui 的 `.ak-tabs` / `.ak-nav` / `.ak-status` / `.ak-progress`
+ *      / `.ak-tag` 都读 `--ak-*-signal`（带 fallback），这里按本应用的分工填值
+ *      （操作 = `--ak-signal-action` 金、信息 = `--ak-signal-info` 蓝）。
+ *
+ * 唯一"应用私有"的补充是**布局/密度**（`--ak-ctrl-h*` / `--ak-grid` / `--ak-stripes`
+ * / `--hl-*`）：这些 ak-ui 没有对应角色，或它的取值是按 44px 触控目标给的（桌面工具条
+ * 太胖）。颜色、描边、切角、动效**一律取自 ak-ui**。
  */
 :root {
-  /* ── 1. 色板（ak-ui `--ak-color-*`）──────────────────────────── */
-  --ak-c-white: #fff;
-  --ak-c-low: #9c9c9c;
-  --ak-c-basic: #d8dd5a;
-  --ak-c-primary: #4aabea;
-  --ak-c-secondary: #cfc2d1;
-  --ak-c-advanced: #f1c644;
-  --ak-c-accent: #f6540e;
-  --ak-c-blue: #2bf;
-  --ak-c-gray: #313131;
-  --ak-c-dark: #222;
-
-  /* ── 2. 语义表面 / 文本（**这就是"不那么蓝"的关键**）───────── */
-  --ak-surface-canvas: #111315;
-  --ak-surface-muted: #1a1c1e;
-  --ak-surface-raised: #26282b;
-  --ak-surface-raised-2: #313335;
-  --ak-surface-panel: rgba(66, 66, 66, 0.92);
-  --ak-surface-inverse: #17191b;
-  --ak-text-primary: #f8f8f5;
-  --ak-text-secondary: rgba(248, 248, 245, 0.68);
-  --ak-text-tertiary: rgba(248, 248, 245, 0.44);
-  --ak-text-inverse: #1b1d1f;
-
-  /* 信号色 */
-  --ak-signal-info: var(--ak-c-primary);
-  --ak-signal-action: var(--ak-c-advanced);
-  --ak-signal-accent: var(--ak-c-accent);
-  --ak-signal-success: #46c47c;
-  --ak-signal-danger: #e33b3b;
-  --ak-signal-disabled: var(--ak-c-low);
-
-  /* ── 3. 旧名重绑（全仓数百处旧 CSS 靠这里换肤）───────────────── */
+  /* ── 1. 旧名重绑（全部指向 ak-ui 的语义 token）───────────────── */
   --bg-primary: var(--ak-surface-canvas);
-  --bg-secondary: var(--ak-surface-muted);
+  /** ⚠️ ak-ui 的 `--ak-surface-muted` / `--ak-surface-panel` 是**亮纸面**
+   *  （`rgba(235,236,235,.9)`）—— 那是给 ak-ui 自带亮底组件用的。本应用的旧 CSS
+   *  把 `--bg-secondary/tertiary` 当"比画布亮一档的深色面板"，所以接到**深色**
+   *  的抬升面（`--ak-surface-raised`）上，否则会出现亮块（`.fl-empty` 曾整片发白）。 */
+  --bg-secondary: var(--ak-surface-raised);
   --bg-tertiary: var(--ak-surface-raised-2);
   --text-primary: var(--ak-text-primary);
   --text-secondary: var(--ak-text-secondary);
-  --border: #3a3d40;
+  --border: var(--ak-color-gray);
   --accent: var(--ak-signal-action);
-  --accent-hover: #d9ab22;
+  --accent-hover: var(--ak-color-yellow);
   --success: var(--ak-signal-success);
   --error: var(--ak-signal-danger);
-  /** 编辑器里"信息/链接"类用蓝色，与金色操作色分工（ak-ui 的 info vs action）。 */
-  --ak-info: var(--ak-signal-info);
-  --ak-line-accent: color-mix(in srgb, var(--ak-signal-action) 48%, transparent);
 
-  /* ── 4. 编辑器语法着色（中性底上重挑）──────────────────────── */
-  --hl-controller: #7fb8ea;
-  --hl-arg: #cfc2d1;
-  --hl-string: #d8dd5a;
-  --hl-number: #f0a878;
-  --hl-bool: #f1c644;
-  --hl-semicolon: #3ff7ff;
-  --hl-speaker: #ffa9c0;
+  /* ── 2. 编辑器语法着色（ak-ui 调色板里挑，深底可读）───────────── */
+  --hl-controller: var(--ak-color-primary);
+  --hl-arg: var(--ak-color-secondary);
+  --hl-string: var(--ak-color-basic);
+  --hl-number: color-mix(in srgb, var(--ak-signal-accent) 60%, var(--ak-text-primary));
+  --hl-bool: var(--ak-signal-action);
+  --hl-semicolon: var(--ak-color-light-blue);
+  --hl-speaker: color-mix(in srgb, var(--ak-color-secondary) 60%, var(--ak-signal-accent));
   --hl-text: #f2f2ee;
-  --hl-comment: #8b8d90;
-  --hl-bracket: #9c9c9c;
-  --hl-indent: #45484b;
+  --hl-comment: var(--ak-color-low);
+  --hl-bracket: var(--ak-color-low);
+  --hl-indent: color-mix(in srgb, var(--ak-color-low) 42%, transparent);
   --hl-bare: #f2f2ee;
   --hl-severity-error: #ff8a80;
-  --hl-severity-warning: #ffd54f;
+  --hl-severity-warning: var(--ak-color-yellow);
 
-  /* ── 5. 几何 / 动效 / 字体（ak-ui 口径）──────────────────── */
-  --ak-radius: 2px;                  /* `--ak-radius-subtle` */
-  --ak-radius-lg: 4px;
-  --ak-line-hairline: 1px;
-  --ak-line-strong: 4px;
-  --ak-cut-sm: 6px;
-  --ak-cut-md: 12px;
-  /** 45° 左上切角（ak-ui `clip-path: polygon(0 0, calc(100% - cut) 0, 100% cut, …)` 的简化）。 */
-  --ak-notch: polygon(0 0, calc(100% - var(--ak-cut-sm)) 0, 100% var(--ak-cut-sm), 100% 100%, 0 100%);
-  --ak-motion-fast: 120ms;
-  --ak-motion-base: 200ms;
-  --ak-ease: cubic-bezier(0.2, 0, 0, 1);
-  --ak-font: "Noto Sans SC", Roboto, Arial, "Microsoft YaHei", system-ui, sans-serif;
-  --ak-font-command: "Noto Serif SC", "Source Han Serif SC", serif;
-  --ak-font-num: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --ak-type-wide: 0.12em;
+  /* ── 3. 组件级变量：把 ak-ui 组件的信号色接到本应用的语义 ─────── */
+  --ak-tabs-signal: var(--ak-signal-action);
+  --ak-segmented-signal: var(--ak-signal-action);
+  --ak-nav-signal: var(--ak-signal-info);
+  --ak-progress-signal: var(--ak-signal-action);
+  --ak-slider-accent: var(--ak-signal-action);
+  --ak-field-signal: var(--ak-signal-info);
+  --ak-choice-fill: var(--ak-signal-info);
+  --ak-choice-signal: var(--ak-signal-info);
   --ak-focus-color: var(--ak-signal-action);
-  --ak-focus-width: 2px;
+  --ak-card-place-color: var(--ak-signal-action);
+  --ak-icon-stuff-color: var(--ak-color-basic);
+  --ak-dialog-signal: var(--ak-signal-action);
+  --ak-dialog-info: var(--ak-signal-info);
+  --ak-notice-signal: var(--ak-signal-info);
+  --ak-popover-signal: var(--ak-signal-action);
 
-  /** 极低对比网格（面板/页头）+ 45° 斜条纹（进度 / 加载）。 */
-  --ak-grid:
-    linear-gradient(90deg, rgb(248 248 245 / 3.5%) 1px, transparent 1px) 0 0 / 8px 8px,
-    linear-gradient(180deg, rgb(248 248 245 / 3.5%) 1px, transparent 1px) 0 0 / 8px 8px;
-  --ak-stripes: repeating-linear-gradient(
-    -45deg,
-    color-mix(in srgb, var(--ak-signal-action) 26%, transparent) 0 6px,
-    transparent 6px 12px
-  );
-}
-
-/** 兼容别名：分片（pages/editor）里用的是 `--ak-bg-*` / `--ak-text-1..4` / `--ak-line-*`。 */
-:root {
-  --ak-bg-0: var(--ak-surface-canvas);
-  --ak-bg-1: var(--ak-surface-muted);
-  --ak-bg-2: var(--ak-surface-raised);
-  --ak-bg-3: var(--ak-surface-raised-2);
-  --ak-bg-4: #3a3c3f;
-  --ak-line-1: #3a3d40;
+  /* ── 4. 应用别名（编辑器/页面分片用短名，全部指向 ak-ui）──────── */
+  /** 面板块：ak-ui 的 `--ak-surface-raised` 是**半透明**的
+   *  `rgba(66,66,66,.92)`；本应用的面板/窗口是实心层叠，半透明会互相透底，
+   *  所以在**应用层**落成实色（`--ak-surface-raised-2` 是同一色的再亮一档）。 */
+  --ak-surface-raised: #26282b;
+  --ak-surface-raised-2: #313335;
+  --ak-text-tertiary: rgba(248, 248, 245, 0.44);
+  --ak-line-1: var(--ak-color-gray);
   --ak-line-2: #4a4d51;
   --ak-line-3: #5c6064;
+  --ak-bg-0: var(--ak-surface-canvas);
+  --ak-bg-1: #1a1c1e;
+  --ak-bg-2: var(--ak-surface-raised);
+  --ak-bg-3: var(--ak-surface-raised-2);
+  --ak-bg-4: var(--ak-color-gray);
   --ak-text-1: var(--ak-text-primary);
   --ak-text-2: var(--ak-text-secondary);
   --ak-text-3: var(--ak-text-tertiary);
   --ak-text-4: rgba(248, 248, 245, 0.3);
   --ak-accent: var(--ak-signal-action);
-  --ak-accent-hi: #ffe08a;
+  --ak-accent-hi: var(--ak-color-yellow);
+  --ak-accent-dim: color-mix(in srgb, var(--ak-signal-action) 55%, transparent);
+  --ak-line-accent: color-mix(in srgb, var(--ak-signal-action) 48%, transparent);
+  --ak-info: var(--ak-signal-info);
   --ak-ok: var(--ak-signal-success);
   --ak-warn: var(--ak-signal-action);
   --ak-err: var(--ak-signal-danger);
+  --ak-font: var(--ak-font-sans);
+  --ak-font-command: var(--ak-font-serif);
+  --ak-font-num: var(--ak-font-mono);
+  --ak-radius: var(--ak-radius-subtle);
+  --ak-radius-lg: 4px;
   --ak-dur: var(--ak-motion-fast);
-  --ak-ok2: 0;
+  --ak-ease: var(--ak-ease-standard);
+  --ak-notch: polygon(0 0, calc(100% - var(--ak-cut-sm)) 0, 100% var(--ak-cut-sm), 100% 100%, 0 100%);
+
+  /* ── 5. 应用私有：布局 / 密度 / 纹理（ak-ui 没有对应角色）─────── */
+  /** 极低对比网格（面板/页头）。 */
+  --ak-grid:
+    linear-gradient(90deg, rgb(248 248 245 / 3.5%) 1px, transparent 1px) 0 0 / 8px 8px,
+    linear-gradient(180deg, rgb(248 248 245 / 3.5%) 1px, transparent 1px) 0 0 / 8px 8px;
+  /** 45° 斜条纹（进度 / 加载），与 ak-ui `.ak-progress__track::after` 同款口径。 */
+  --ak-stripes: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--ak-signal-action) 26%, transparent) 0 6px,
+    transparent 6px 12px
+  );
+  /** 控件三档（桌面工具条 28 / 页面动作 34 / 弹层主按钮 38）；
+   *  ak-ui 的 `--ak-density-control-height` 是 44px 触控目标，移动端仍可用它。 */
+  --ak-ctrl-h-sm: 28px;
+  --ak-ctrl-h: 34px;
+  --ak-ctrl-h-lg: 38px;
+  --ak-ctrl-pad-sm: 0 10px;
+  --ak-ctrl-pad: 0 14px;
+  --ak-ctrl-pad-lg: 0 18px;
 }

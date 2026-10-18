@@ -305,7 +305,7 @@ export default function AssetLibrary({
         />
         <button
           type="button"
-          className="ed-assets-btn"
+          className="ak-button ed-assets-btn"
           data-asset-import="1"
           disabled={!inTauri() || !packId || busy}
           title={inTauri() && packId ? undefined : tr("editor.assets.onlyDesktop", undefined, "导入需要桌面版（Tauri）。")}
@@ -339,7 +339,7 @@ export default function AssetLibrary({
         </button>
         <button
           type="button"
-          className="ed-assets-btn"
+          className="ak-button ed-assets-btn"
           onClick={() =>
             setOrganized((prev) => ({ ...prev, sort: prev.sort === "uses" ? "name" : "uses" }))
           }
@@ -350,10 +350,10 @@ export default function AssetLibrary({
         </button>
       </div>
 
-      <div className="ed-assets-kinds">
+      <div className="ak-segmented ed-assets-kinds">
         <button
           type="button"
-          className={`ed-assets-kind${kind === "all" ? " on" : ""}`}
+          className={`ak-segmented__item ed-assets-kind${kind === "all" ? " on" : ""}`}
           data-asset-kind="all"
           aria-pressed={kind === "all"}
           onClick={() => setKind("all")}
@@ -365,7 +365,7 @@ export default function AssetLibrary({
           <button
             type="button"
             key={id}
-            className={`ed-assets-kind${kind === id ? " on" : ""}`}
+            className={`ak-segmented__item ed-assets-kind${kind === id ? " on" : ""}`}
             data-asset-kind={id}
             aria-pressed={kind === id}
             onClick={() => setKind(id)}
@@ -421,10 +421,10 @@ export default function AssetLibrary({
               <audio className="ed-assets-audio" data-asset-audio="1" controls preload="none" src={active.audioUrl} />
             )}
             <div className="ed-assets-preview-actions">
-              <button type="button" className="ed-assets-btn primary" data-asset-insert="1" onClick={() => onInsertKey(active.key)}>
+              <button type="button" className="ak-button ed-assets-btn primary" data-asset-insert="1" onClick={() => onInsertKey(active.key)}>
                 {tr("editor.assets.insertKeyAtCaret", undefined, "插入 key")}
               </button>
-              <button type="button" className="ed-assets-btn" data-asset-apply="1" onClick={() => onApplyToStage(active)}>
+              <button type="button" className="ak-button ed-assets-btn" data-asset-apply="1" onClick={() => onApplyToStage(active)}>
                 {tr("editor.assets.applyToStage", undefined, "应用到舞台")}
               </button>
             </div>

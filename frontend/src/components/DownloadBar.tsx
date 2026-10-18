@@ -29,11 +29,11 @@ function ResultPanel() {
         )}
         <div className="dl-result-actions">
           {failedKeys.length > 0 && (
-            <button className="nav-btn" onClick={copy}>
+            <button className="ak-button ak-button--outline nav-btn" onClick={copy}>
               {copied ? "已复制 ✓" : "复制失败列表"}
             </button>
           )}
-          <button className="nav-btn" onClick={dismissResult}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={dismissResult}>
             关闭
           </button>
         </div>
@@ -85,7 +85,7 @@ function CompressResultPanel() {
       <div className="dl-result" onClick={(e) => e.stopPropagation()}>
         <div className="dl-result-msg">{result.message}</div>
         <div className="dl-result-actions">
-          <button className="nav-btn" onClick={dismissResult}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={dismissResult}>
             关闭
           </button>
         </div>
@@ -124,13 +124,13 @@ function CompressBar() {
       </div>
       <span style={{ flex: "0 0 auto", minWidth: "72px", textAlign: "right" }}>已省 {freed}</span>
       <button
-        className="nav-btn"
+        className="ak-button ak-button--outline nav-btn"
         style={{ fontSize: "12px" }}
         onClick={() => (status.status === "paused" ? resume() : pause())}
       >
         {status.status === "paused" ? "继续" : "暂停"}
       </button>
-      <button className="nav-btn" style={{ fontSize: "12px" }} onClick={cancel}>
+      <button className="ak-button ak-button--outline nav-btn" style={{ fontSize: "12px" }} onClick={cancel}>
         取消
       </button>
     </div>
@@ -209,10 +209,10 @@ export default function DownloadBar() {
       <span style={{ flex: "0 0 auto", minWidth: "64px", textAlign: "right" }}>
         {status.paused ? "—" : fmtSpeed(status.bytesPerSec)}
       </span>
-      <button className="nav-btn" style={{ fontSize: "12px" }} onClick={togglePause}>
+      <button className="ak-button ak-button--outline nav-btn" style={{ fontSize: "12px" }} onClick={togglePause}>
         {status.paused ? "继续" : "暂停"}
       </button>
-      <button className="nav-btn" style={{ fontSize: "12px" }} onClick={() => session?.cancel()}>
+      <button className="ak-button ak-button--outline nav-btn" style={{ fontSize: "12px" }} onClick={() => session?.cancel()}>
         取消
       </button>
       <ResultPanel />

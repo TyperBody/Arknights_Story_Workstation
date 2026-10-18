@@ -3001,7 +3001,7 @@ export default function StoryEditorPage() {
         <div className="ed-code-empty" data-create-empty="1" data-editor-part="create-empty">
           <p>{tr("editor.create.emptyHint", undefined, "还没有打开剧本包：新建一个，或从「同人剧本」页进入。")}</p>
           <button
-            className="btn-primary"
+            className="ak-button ak-button--action btn-primary"
             data-editor-action="create"
             onClick={() => setCreateOpen(true)}
             disabled={!inTauri()}
@@ -3171,7 +3171,7 @@ export default function StoryEditorPage() {
                 onChange={(event) => setMeta((prev) => ({ ...prev, branchPoints: event.target.value }))}
               />
             </label>
-            <button className="ed-btn" onClick={() => void saveMetaOnly()} disabled={busy === "meta"}>
+            <button className="ak-button ed-btn" onClick={() => void saveMetaOnly()} disabled={busy === "meta"}>
               {busy === "meta" ? tr("editor.toolbar.saving", undefined, "保存中…") : tr("editor.info.save", undefined, "保存剧本信息")}
             </button>
 
@@ -3335,13 +3335,13 @@ export default function StoryEditorPage() {
         {/* 单行 + 省略号（CSS）；全文悬停可见：状态里可能带换行的多行 loader 报错。 */}
         <span className="grow" title={previewStatus || undefined}>{previewStatus}</span>
         <button
-          className="ed-btn"
+          className="ak-button ed-btn"
           onClick={() => void openPreview(previewUpto > 0 ? previewUpto : undefined)}
         >
           {tr("editor.preview.reload", undefined, "重新载入预览")}
         </button>
         <button
-          className="ed-btn"
+          className="ak-button ed-btn"
           data-preview-action="zoom"
           onClick={togglePreviewFull}
           title={
@@ -3352,7 +3352,7 @@ export default function StoryEditorPage() {
         >
           {previewFull ? tr("editor.preview.full", undefined, "还原") : tr("editor.preview.zoom", undefined, "放大")}
         </button>
-        <button className="ed-btn" onClick={() => { closePreview(); setPreviewOpen(false); }}>
+        <button className="ak-button ed-btn" onClick={() => { closePreview(); setPreviewOpen(false); }}>
           {tr("editor.preview.close", undefined, "关闭")}
         </button>
       </div>
@@ -3562,7 +3562,7 @@ export default function StoryEditorPage() {
         下方工具栏（`[data-rail-group]`）。
       */}
       <div className="browser-header ed-header">
-        <button className="back-icon" onClick={() => navigate(-1)} aria-label={tr("editor.toolbar.back", undefined, "返回")}>
+        <button className="ak-button ak-button--outline back-icon" onClick={() => navigate(-1)} aria-label={tr("editor.toolbar.back", undefined, "返回")}>
           ◀
         </button>
         <div className="ed-title" data-editor-part="title">
@@ -3603,7 +3603,7 @@ export default function StoryEditorPage() {
           <span className="ed-scrub-total">/ {lineStarts.length}</span>
           {previewUpto > 0 && <span className="ed-scrub-cut">{tr("editor.scrub.cutNotice", { line: previewUpto }, `预览截到第 ${previewUpto} 行`)}</span>}
           <button
-            className="ed-scrub-btn"
+            className="ak-button ed-scrub-btn"
             data-editor-action="line-prev"
             onClick={() => jumpToLine(Math.max(1, caret.line - 1))}
             disabled={caret.line <= 1}
@@ -3612,7 +3612,7 @@ export default function StoryEditorPage() {
             {tr("editor.scrub.up", undefined, "▲ 上一行")}
           </button>
           <button
-            className="ed-scrub-btn"
+            className="ak-button ed-scrub-btn"
             data-editor-action="line-next"
             onClick={() => jumpToLine(Math.min(lineStarts.length, caret.line + 1))}
             disabled={caret.line >= lineStarts.length}
@@ -3621,7 +3621,7 @@ export default function StoryEditorPage() {
             {tr("editor.scrub.down", undefined, "▼ 下一行")}
           </button>
           <button
-            className="ed-scrub-btn"
+            className="ak-button ed-scrub-btn"
             data-editor-action="preview-here"
             onClick={() => void openPreview(caret.line)}
             title={tr("editor.scrub.cutHereTitle", undefined, "按当前光标行截断剧本，从第一行开演到此处（不必先保存）")}
@@ -3629,7 +3629,7 @@ export default function StoryEditorPage() {
             {tr("editor.scrub.cutHere", undefined, "▶ 预览到此处")}
           </button>
           {previewUpto > 0 && (
-            <button className="ed-scrub-btn" onClick={() => void openPreview()} title={tr("editor.scrub.playAllTitle", undefined, "预览整篇")}>
+            <button className="ak-button ed-scrub-btn" onClick={() => void openPreview()} title={tr("editor.scrub.playAllTitle", undefined, "预览整篇")}>
               {tr("editor.scrub.playAll", undefined, "预览全篇")}
             </button>
           )}
@@ -3648,18 +3648,18 @@ export default function StoryEditorPage() {
         <div className="ed-viewtabs">
           <div className="ed-toolgroup" data-rail-group="file">
             <button
-              className="ed-btn"
+              className="ak-button ed-btn"
               data-editor-action="create"
               onClick={() => setCreateOpen(true)}
               title={tr("editor.create.button", undefined, "新建剧本…")}
             >
               {tr("editor.create.button", undefined, "新建剧本…")}
             </button>
-            <button className="ed-btn" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
+            <button className="ak-button ed-btn" onClick={reload} title={tr("editor.toolbar.reloadTitle", undefined, "放弃未保存改动，从磁盘重新载入")}>
               {tr("editor.toolbar.reload", undefined, "重新载入")}
             </button>
             <button
-              className="ed-btn primary"
+              className="ak-button ed-btn primary"
               onClick={() => void doSave()}
               disabled={busy === "save"}
               title="Ctrl+S"
@@ -3668,11 +3668,11 @@ export default function StoryEditorPage() {
             </button>
           </div>
           <div className="ed-toolgroup" data-rail-group="view">
-            <button className="ed-btn" onClick={runLint} title={tr("editor.toolbar.lintTitle", undefined, "重新运行校验（实时诊断也会自动刷新）")}>
+            <button className="ak-button ed-btn" onClick={runLint} title={tr("editor.toolbar.lintTitle", undefined, "重新运行校验（实时诊断也会自动刷新）")}>
               {tr("editor.toolbar.lint", undefined, "校验")}
             </button>
             <button
-              className="ed-btn"
+              className="ak-button ed-btn"
               onClick={() => {
                 mapToggle("preview", true);
                 void openPreview();
@@ -3682,7 +3682,7 @@ export default function StoryEditorPage() {
               {tr("editor.toolbar.preview", undefined, "预览")}
             </button>
             <button
-              className={`ed-btn${inTree("branch") ? " on" : ""}`}
+              className={`ak-button ed-btn${inTree("branch") ? " on" : ""}`}
               onClick={() => mapToggle("branch")}
               disabled={!BranchGraphPart}
               title={
@@ -3697,7 +3697,7 @@ export default function StoryEditorPage() {
                 保留它是因为三条预览类 harness 按**文案**点它（`.ed-viewtabs` 里
                 找「预览面板」）；语义与「预览」互补，不是第三个开关。 */}
             <button
-              className={`ed-btn${inTree("preview") ? " on" : ""}`}
+              className={`ak-button ed-btn${inTree("preview") ? " on" : ""}`}
               data-editor-action="preview-panel"
               onClick={() => mapToggle("preview")}
               title={tr("editor.toolbar.previewPanelTitle", undefined, "预览 = Map：把它放进 / 移出工作台（开演用左边的「预览」按钮）")}
@@ -3705,7 +3705,7 @@ export default function StoryEditorPage() {
               {tr("editor.toolbar.previewPanel", undefined, "预览面板")}
             </button>
             <button
-              className="ed-btn"
+              className="ak-button ed-btn"
               onClick={() => toggleInspector()}
               title={tr("editor.toolbar.inspectorTitle", undefined, "显示/隐藏控制器检视器")}
             >
@@ -3714,7 +3714,7 @@ export default function StoryEditorPage() {
           </div>
           <div className="ed-toolgroup" data-rail-group="edit">
             <button
-              className="ed-btn"
+              className="ak-button ed-btn"
               data-editor-action="indent-region"
               onClick={() => indentRegion("region")}
               title={tr("editor.indent.title", undefined, "给选中的分支线路加两格缩进；只为可读，送引擎前会自动去掉行首空白")}
@@ -3722,7 +3722,7 @@ export default function StoryEditorPage() {
               {tr("editor.indent.button", undefined, "缩进区域")}
             </button>
             <button
-              className="ed-btn"
+              className="ak-button ed-btn"
               onClick={() => setWizardOpen(true)}
               disabled={!ControllerWizardPart}
               title={
@@ -3856,7 +3856,7 @@ export default function StoryEditorPage() {
               : tr("editor.status.clean", undefined, "无诊断")}
         </span>
         <button
-          className="ed-status-btn"
+          className="ak-button ed-status-btn"
           onClick={() => doUndo()}
           disabled={historySizes.undo === 0}
           title={tr("editor.toolbar.undoTitle", undefined, "撤销（Ctrl+Z）")}
@@ -3864,7 +3864,7 @@ export default function StoryEditorPage() {
           {tr("editor.toolbar.undoCount", { count: historySizes.undo }, `撤销 ${historySizes.undo}`)}
         </button>
         <button
-          className="ed-status-btn"
+          className="ak-button ed-status-btn"
           onClick={() => doRedo()}
           disabled={historySizes.redo === 0}
           title={tr("editor.toolbar.redoTitle", undefined, "重做（Ctrl+Shift+Z / Ctrl+Y）")}

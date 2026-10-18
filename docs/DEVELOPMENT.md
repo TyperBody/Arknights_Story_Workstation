@@ -39,6 +39,24 @@ v5 及更早缓存仍由旧版引擎启动；不把旧资源表数量与新版�
 - **Rust** 稳定版工具链（通过 [rustup](https://rustup.rs) 安装）
 - 各平台的 Tauri 2 系统依赖（见下）
 
+## 前端技术栈
+
+React 19 + Vite(TS) + react-router；**样式 = [ak-ui](https://ak-ui.yyj.moe/components/)**
+（npm `@yunyoujun/ak-ui`，MIT）。它是 CSS Core：`.ak-*` 组件类 + `--ak-*` 语义 token，
+**不含全局 reset**（无 `html`/`body`/`*` 规则），所以在 `frontend/src/main.tsx` 里按
+`global.css` → `@yunyoujun/ak-ui/style.css` → `browser.css` → `styles/theme-arknights.css`
+的顺序加载（适配层最后，同名规则以它为准）。
+
+- JSX 直接使用 ak-ui 组件类：`ak-button`（+`--action` / `--outline` / `--danger`）、
+  `ak-segmented`（素材库类型栏）；应用原有类名（`nav-btn` / `btn-primary` / `ed-btn`…）
+  一律保留 —— harness 沿用按类/按文案的选择器。
+- 适配层只做两件事：**旧变量名重绑**（`--bg-*` / `--accent` / `--border` / `--text-*` /
+  `--hl-*` → ak-ui token）与**组件级 `--ak-*-signal` 填值**；覆盖 ak-ui 组件的只有
+  **尺寸**（`--ak-ctrl-h{,-sm,-lg}` = 28/34/38px）与"哪些类用哪档"。
+  ⚠️ `.ak-button` 是**固定** 150×50，覆盖时必须写 `width/height: auto`。
+- 改皮肤后跑 `node build/harness/ui-skin.mjs`（10 断言：加载顺序 / token 实测 / 五页截图 /
+  DOM 契约 / reduced-motion / 零报错）；细节见 `docs/dev/workbench.md` §3.4。
+
 ## 平台系统依赖
 
 **Linux（Debian / Ubuntu）**

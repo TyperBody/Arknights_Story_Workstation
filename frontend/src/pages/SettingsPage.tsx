@@ -416,7 +416,7 @@ export default function SettingsPage() {
             onChange={(e) => setNickname(e.target.value)}
             placeholder="博士"
           />
-          <button className="btn-primary" onClick={saveNickname}>保存</button>
+          <button className="ak-button ak-button--action btn-primary" onClick={saveNickname}>保存</button>
         </div>
       </div>
 
@@ -568,7 +568,7 @@ export default function SettingsPage() {
       <div className="setting-group">
         <label>播放器返回按钮</label>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-          <button className="nav-btn" onClick={togglePlayerBack}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={togglePlayerBack}>
             {hidePlayerBack ? "隐藏播放器返回按钮：开" : "隐藏播放器返回按钮：关"}
           </button>
           <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
@@ -581,7 +581,7 @@ export default function SettingsPage() {
       <div className="setting-group">
         <label>播放器底栏</label>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-          <button className="nav-btn" onClick={cyclePlayerChrome}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={cyclePlayerChrome}>
             {playerChrome === "show" ? "显示" : playerChrome === "auto" ? "自动隐藏" : "隐藏"}
           </button>
           <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
@@ -594,7 +594,7 @@ export default function SettingsPage() {
           {/* 「悬停显示」开关：默认关（= 永久隐藏）。只在「自动隐藏」档下有意义。 */}
           {playerChrome === "auto" && (
             <button
-              className="nav-btn"
+              className="ak-button ak-button--outline nav-btn"
               data-chrome-hover={chromeHover ? "on" : "off"}
               aria-pressed={chromeHover}
               onClick={() => {
@@ -617,7 +617,7 @@ export default function SettingsPage() {
       <div className="setting-group">
         <label>调试控制台</label>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-          <button className="nav-btn" onClick={toggleDebugConsole}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={toggleDebugConsole}>
             {debugConsole ? "调试日志：开" : "调试日志：关"}
           </button>
           <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
@@ -634,9 +634,9 @@ export default function SettingsPage() {
         <div className="setting-group">
         <label>资源目录（剧情图片/音频、引擎文件、缓存的存放位置）</label>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-          <button className="btn-primary" onClick={chooseResourceDir}>更改目录…</button>
+          <button className="ak-button ak-button--action btn-primary" onClick={chooseResourceDir}>更改目录…</button>
           {resDir?.is_custom && (
-            <button className="nav-btn" onClick={resetResourceDir}>恢复默认</button>
+            <button className="ak-button ak-button--outline nav-btn" onClick={resetResourceDir}>恢复默认</button>
           )}
         </div>
         <div className="cache-info">
@@ -649,9 +649,9 @@ export default function SettingsPage() {
               <div style={{ marginTop: "6px" }}>
                 本地剧本包放在 <code>{libraryDir?.library_dir ?? `${resDir.current}\\assets\\library`}</code>
                 {libraryDir ? `（已安装 ${libraryDir.pack_count} 个）` : ""}
-                <button className="nav-btn" style={{ marginLeft: "6px" }} onClick={openLibraryDir}>打开剧本包文件夹</button>
+                <button className="ak-button ak-button--outline nav-btn" style={{ marginLeft: "6px" }} onClick={openLibraryDir}>打开剧本包文件夹</button>
                 {" "}
-                <button className="nav-btn" onClick={importLibraryPack}>安装剧本包…</button>
+                <button className="ak-button ak-button--outline nav-btn" onClick={importLibraryPack}>安装剧本包…</button>
               </div>
               <div style={{ color: "var(--text-secondary)", marginTop: "4px" }}>
                 剧本包 = 一个目录，内含 <code>pack.json</code> 与 <code>script.txt</code>；
@@ -678,20 +678,20 @@ export default function SettingsPage() {
         <label>缓存管理</label>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button
-            className="btn-primary"
+            className="ak-button ak-button--action btn-primary"
             onClick={cacheAllStories}
             disabled={busy || compression.busy}
           >
             缓存全部剧情
           </button>
           <button
-            className="btn-primary"
+            className="ak-button ak-button--action btn-primary"
             onClick={openCompress}
             disabled={busy || compression.busy || downloadBusy}
           >
             压缩资源
           </button>
-          <button className="btn-danger" onClick={clearAllCache} disabled={busy || compression.busy}>
+          <button className="ak-button ak-button--danger btn-danger" onClick={clearAllCache} disabled={busy || compression.busy}>
             清除所有缓存
           </button>
         </div>
@@ -720,7 +720,7 @@ export default function SettingsPage() {
             )}
             {starter && !starter.present && (
               <button
-                className="nav-btn"
+                className="ak-button ak-button--outline nav-btn"
                 style={{ fontSize: "12px", marginLeft: "8px" }}
                 onClick={syncStarterSet}
               >
@@ -735,7 +735,7 @@ export default function SettingsPage() {
               </span>
               {!compression.busy && (
                 <button
-                  className="nav-btn"
+                  className="ak-button ak-button--outline nav-btn"
                   style={{ fontSize: "12px" }}
                   onClick={() => compression.disableRealtime()}
                 >
@@ -804,10 +804,10 @@ export default function SettingsPage() {
               );
             })}
             <div className="dl-result-actions" style={{ marginTop: "10px" }}>
-              <button className="btn-primary" onClick={confirmCompress} disabled={!selectedTier}>
+              <button className="ak-button ak-button--action btn-primary" onClick={confirmCompress} disabled={!selectedTier}>
                 开始压缩
               </button>
-              <button className="nav-btn" onClick={() => setShowCompress(false)}>
+              <button className="ak-button ak-button--outline nav-btn" onClick={() => setShowCompress(false)}>
                 取消
               </button>
             </div>
@@ -819,7 +819,7 @@ export default function SettingsPage() {
       <div className="setting-group">
         <label>关于</label>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-          <button className="btn-primary" onClick={() => navigate("/about")}>
+          <button className="ak-button ak-button--action btn-primary" onClick={() => navigate("/about")}>
             关于方舟剧场
           </button>
           <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
@@ -832,7 +832,7 @@ export default function SettingsPage() {
       <div className="setting-group">
         <label>环境信息（反馈问题用）</label>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          <button className="btn-primary" onClick={copyEnvInfo}>
+          <button className="ak-button ak-button--action btn-primary" onClick={copyEnvInfo}>
             复制环境信息
           </button>
           <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>

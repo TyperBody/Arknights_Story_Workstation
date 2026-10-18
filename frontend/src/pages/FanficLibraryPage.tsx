@@ -235,17 +235,17 @@ export default function FanficLibraryPage() {
 
       <div className="browser-content fl-content">
         <div className="fl-toolbar">
-          <button className="btn-primary" data-fanfic-action="create" onClick={() => setCreateOpen(true)} disabled={busy !== ""} title={desktopCreate ? undefined : tr("editor.create.needDesktop", undefined, "新建剧本需要桌面版（Tauri）。")}>
+          <button className="ak-button ak-button--action btn-primary" data-fanfic-action="create" onClick={() => setCreateOpen(true)} disabled={busy !== ""} title={desktopCreate ? undefined : tr("editor.create.needDesktop", undefined, "新建剧本需要桌面版（Tauri）。")}>
             {tr("editor.create.button", undefined, "新建剧本…")}
           </button>
-          <button className="nav-btn" onClick={importPacks} disabled={busy !== ""}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={importPacks} disabled={busy !== ""}>
             {busy === "import" ? "导入中…" : "导入剧本包…"}
           </button>
-          <button className="nav-btn" onClick={openFolder} disabled={busy !== ""}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={openFolder} disabled={busy !== ""}>
             <WindowsIcon />
             打开文件夹
           </button>
-          <button className="nav-btn" onClick={() => void refresh()} disabled={busy !== "" || loading}>
+          <button className="ak-button ak-button--outline nav-btn" onClick={() => void refresh()} disabled={busy !== "" || loading}>
             重新扫描
           </button>
           {importCmd && (
@@ -291,13 +291,13 @@ export default function FanficLibraryPage() {
               <code>{importCmd}</code>
             </pre>
             <div className="fl-empty-actions">
-              <button className="btn-primary" data-fanfic-action="create" onClick={() => setCreateOpen(true)} title={desktopCreate ? undefined : tr("editor.create.needDesktop", undefined, "新建剧本需要桌面版（Tauri）。")}>
+              <button className="ak-button ak-button--action btn-primary" data-fanfic-action="create" onClick={() => setCreateOpen(true)} title={desktopCreate ? undefined : tr("editor.create.needDesktop", undefined, "新建剧本需要桌面版（Tauri）。")}>
                 {tr("editor.create.button", undefined, "新建剧本…")}
               </button>
-              <button className="btn-primary" onClick={importPacks} disabled={busy !== ""}>
+              <button className="ak-button ak-button--action btn-primary" onClick={importPacks} disabled={busy !== ""}>
                 {busy === "import" ? "导入中…" : "导入剧本包…"}
               </button>
-              <button className="nav-btn" onClick={openFolder} disabled={busy !== ""}>
+              <button className="ak-button ak-button--outline nav-btn" onClick={openFolder} disabled={busy !== ""}>
                 <WindowsIcon />
                 打开文件夹
               </button>
@@ -322,11 +322,11 @@ export default function FanficLibraryPage() {
                   <p className="fl-card-desc">{pack.description || "（这个剧本包没有写简介）"}</p>
                 </div>
                 <div className="fl-card-actions">
-                  <button className="btn-primary" onClick={() => play(pack)}>
+                  <button className="ak-button ak-button--action btn-primary" onClick={() => play(pack)}>
                     ▶ 播放
                   </button>
                   <button
-                    className="nav-btn"
+                    className="ak-button ak-button--outline nav-btn"
                     onClick={() => edit(pack)}
                     disabled={busy !== ""}
                     title="在应用内编辑这个剧本包"

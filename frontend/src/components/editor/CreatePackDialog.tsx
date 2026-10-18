@@ -131,7 +131,7 @@ export default function CreatePackDialog({
       <div className="create-pack">
         <div className="create-pack-head">
           <h2>{tr("editor.create.title", undefined, "新建剧本")}</h2>
-          <button className="create-pack-x" type="button" onClick={cancel} aria-label={tr("editor.create.cancel", undefined, "取消")}>
+          <button className="ak-button create-pack-x" type="button" onClick={cancel} aria-label={tr("editor.create.cancel", undefined, "取消")}>
             ✕
           </button>
         </div>

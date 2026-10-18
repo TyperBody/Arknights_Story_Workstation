@@ -48,20 +48,46 @@
 - `src/akstage/engineCatalog.js` + `catalog-data.json`：引擎 25 条（css/js/font/src/data）、素材 19,861 条；`frontend/src/lib/engineCatalog.ts` 是 TS 包装。
 - Rust：`download::DEFAULT_CONCURRENCY = 30`、`MAX_CONCURRENCY = 32`；`setDownloadSettings` 由设置页写入。
 
-## 3.4 UI 皮肤（明日方舟风，2026-10-17）
+## 3.4 UI 风格（**ak-ui**，2026-10-18）
 
-主题层 = `frontend/src/styles/theme-arknights.css`（入口，`@import` 两个分片）：
+风格**不是自调的**，而是接 **`@yunyoujun/ak-ui@1.1.0`** —— <https://ak-ui.yyj.moe/components/>
+（Unofficial ak-ui design language，MIT，npm 依赖已在 `package.json`）。它是一套
+"CSS Core + token"：`.ak-*` 组件类 + `--ak-*` 语义 token，**不含任何全局 reset**
+（实测没有 `html` / `body` / `*` 规则），所以可以安全地垫在自有样式下面。
+
+加载顺序（`frontend/src/main.tsx`）：`global.css` → **`@yunyoujun/ak-ui/style.css`** →
+`browser.css` → `theme-arknights.css`（适配层，最后加载）。
 
 | 文件 | 职责 |
 |---|---|
-| `theme-arknights.tokens.css` | 全部 token（`--ak-*`）+ **旧名重绑**（`--bg-primary`/`--accent`/`--border`/`--text-*`）→ 全仓数百处旧 CSS 一行不改就换肤；`--hl-*`（编辑器语法着色）在深蓝底上重挑 |
-| `theme-arknights.pages.css` | 首页 / 书架 / 详情 / 设置 / 播放器 / 下载条 / 调试台 |
-| `theme-arknights.editor.css` | 编辑器工作台（页头 / rail / 面板 / 正文 / 状态栏 / HUD / 素材库 / 竖排工作流） |
+| `theme-arknights.tokens.css` | 旧名重绑（`--bg-*`/`--accent`/`--border`/`--text-*`/`--hl-*` → ak-ui 语义 token）+ 组件级 `--ak-*-signal` 填值；**颜色/描边/切角/动效全部取自 ak-ui**，只有密度与纹理由本应用补 |
+| `theme-arknights.pages.css` | 页面骨架 / 书架卡片 / 表单 / 下载条 / 浮层（映射到 ak-ui 的几何与排版） |
+| `theme-arknights.editor.css` | 编辑器工作台（页头 / rail / 窗口壳 / 正文 / HUD / 素材库 / 竖排工作流 / 弹层） |
 
-风格要点（**按自己的口径做，不照抄素材**）：近黑蓝底 + 亮度分层（不用阴影）；金色主色 `#f4c430`
-+ 高光 `#ffe08a`；4px 圆角 + **45° 左上切角**（`--ak-notch`）；中文标题**拉字距** +0.02…0.14em；
-6px 网格 / 45° 斜条纹（极低对比）；120ms `cubic-bezier(.2,.8,.2,1)`，并**尊重
-`prefers-reduced-motion`**。**DOM 契约零改动**（`data-*` 与类名都不动，harness 因此照跑）。
+**JSX 里直接使用 ak-ui 的组件类**（不是"照着画一遍"）：`ak-button`（+`--action` /
+`--outline` / `--danger`）、`ak-segmented`（素材库类型栏）。应用原有类名
+（`nav-btn` / `btn-primary` / `ed-btn`…）**全部保留**，harness 的按类/按文案选择器不用改。
+
+取值口径（全部来自 ak-ui，见[Token 契约](https://ak-ui.yyj.moe/guide/tokens.html)与
+[设计语言](https://ak-ui.yyj.moe/guide/design-language.html)）：
+中性近黑画布 `--ak-surface-canvas #111315`；石墨表面 `#222`/`#313131`/`--ak-surface-inverse #17191b`；
+`--ak-color-blue #2bf`（= `ak-button--action` 的实色，**主操作**）、`--ak-color-advanced #f1c644`
+（= 操作/警告信号）、`--ak-color-primary #4aabea`（= 信息信号）、`--ak-color-accent #f6540e`（= 局部强调）；
+hairline **1px** + strong **4px**（左侧信号条）、`--ak-radius-subtle 2px` / 0 圆角；
+标题走 `--ak-font-serif`（900 重衬线）、运行数据走 `--ak-font-mono` + `--ak-type-wide`；
+动效 `--ak-motion-fast/base` + `--ak-ease-standard`；焦点 `--ak-focus-*`。
+反馈按 ak-ui 要求**至少改两项**（信号色 + 表面/线条），`prefers-reduced-motion` 全压到 1ms。
+
+应用私有的只有**密度与纹理**：`--ak-ctrl-h{,-sm,-lg}` = 28/34/38px（ak-ui 的
+`--ak-density-control-height` 是 44px 触控目标，桌面工具条太胖）、`--ak-grid` / `--ak-stripes`。
+⚠️ ak-ui 的 `.ak-button` 是**固定** 150×50，覆盖时必须同时写 `width/height: auto`
+（只给 `min-height` 压不住，实测工具条里全是 150×50 的方块）。
+
+覆盖了 ak-ui 组件的**尺寸**之外，也在 `theme-arknights.pages.css` §2b/2c 里重述了按钮配色
+（`--action` 实色蓝 / `--outline` 2px 白描边 / `--danger` 红），因为自有 CSS 的
+`.nav-btn` / `.btn-primary` 与 `.ak-button--*` 同权重、靠加载顺序决胜。
+
+**DOM 契约零改动**：`data-*` 锚点、既有类名、布局结构都没动（只**追加** `.ak-*`）。
 
 回归：`node build/harness/ui-skin.mjs`（10 断言：加载顺序 / token 实测 / 五页截图 /
 契约数量 / reduced-motion / 零报错）；截图 `build/harness/shots/ui-*.png`。

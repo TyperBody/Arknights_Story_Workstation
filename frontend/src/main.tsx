@@ -4,8 +4,13 @@ import App from "./App";
 import { installGlobalCapture } from "./lib/debugLog";
 import { flush, hydrate } from "./lib/stateStore";
 import "./styles/global.css";
+// **ak-ui（`@yunyoujun/ak-ui`）**：明日方舟风格的 CSS Core。它只提供
+// `.ak-*` 组件类 + `--ak-*` token（**没有全局 reset**，实测无 `html/body/*` 规则），
+// 所以放在自有样式**之前**，由 `theme-arknights.css` 做"把 app 类映射到 ak-ui token"
+// 的适配层 —— 观感统一来自 ak-ui，DOM/类名契约不动。
+import "@yunyoujun/ak-ui/style.css";
 import "./styles/browser.css";
-// 皮肤层：**最后**加载（同名规则以它为准），只改观感、不动 DOM 契约。
+// 适配层：**最后**加载（同名规则以它为准），只把旧变量名接到 ak-ui token 上。
 import "./styles/theme-arknights.css";
 
 // Capture main-window errors/warnings before anything else runs.

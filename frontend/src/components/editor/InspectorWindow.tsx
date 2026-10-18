@@ -461,7 +461,7 @@ export default function InspectorWindow({
         {onPark ? (
           <button
             type="button"
-            className="ed-win-btn ed-win-park"
+            className="ak-button ed-win-btn ed-win-park"
             data-win-action="park"
             onClick={onPark}
             title={tr("editor.window.park", undefined, "收进侧边栏")}
@@ -473,7 +473,7 @@ export default function InspectorWindow({
         {foldHandler ? (
           <button
             type="button"
-            className="ed-win-btn ed-win-fold ed-win-collapse"
+            className="ak-button ed-win-btn ed-win-fold ed-win-collapse"
             data-win-action="fold"
             onClick={foldHandler}
             title={folded ? tr("editor.toolbar.foldShow", undefined, "展开") : tr("editor.toolbar.foldHide", undefined, "收起")}
@@ -486,7 +486,7 @@ export default function InspectorWindow({
         {showFloatButton ? (
           <button
             type="button"
-            className="ed-win-btn ed-win-float"
+            className="ak-button ed-win-btn ed-win-float"
             data-win-action="float"
             onClick={toggle}
             title={floating ? tr("editor.window.dockBack", undefined, "停靠回工作台") : tr("editor.window.floatWindow", undefined, "浮动窗口")}
@@ -498,7 +498,7 @@ export default function InspectorWindow({
         {showClose ? (
           <button
             type="button"
-            className="ed-win-btn ed-win-close"
+            className="ak-button ed-win-btn ed-win-close"
             data-win-action="close"
             onClick={onClose}
             title={tr("editor.window.closeEsc", undefined, "关闭（Esc）")}

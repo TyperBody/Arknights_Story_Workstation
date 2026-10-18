@@ -96,7 +96,7 @@ export default function EditorRail({ items, collapsed, onRestorePanel, onToggleR
     >
       <button
         type="button"
-        className="ed-rail-toggle"
+        className="ak-button ed-rail-toggle"
         data-rail-toggle="1"
         onClick={onToggleRail}
         aria-expanded={!collapsed}

@@ -195,7 +195,7 @@
   flex: 0 0 auto;
   padding: 4px 8px;
   font-size: 11px;
-  color: #ffd75e;
+  color: var(--ak-color-yellow);
   background: rgba(244, 196, 48, 0.12);
   border: 1px solid rgba(244, 196, 48, 0.45);
   border-radius: 6px;
@@ -360,7 +360,7 @@
   margin: 0;
   padding: 2px 6px;
   font-size: 10.5px;
-  color: #ffd75e;
+  color: var(--ak-color-yellow);
   background: rgba(12, 15, 20, 0.8);
   border: 1px solid rgba(244, 196, 48, 0.35);
   border-radius: 5px;
@@ -388,9 +388,9 @@
   flex: 0 0 auto;
   padding: 3px 10px;
   font-size: 11.5px;
-  color: #14161c;
+  color: var(--ak-text-inverse);
   background: var(--accent, #f4c430);
-  border: 1px solid #d6a900;
+  border: var(--ak-line-hairline) solid var(--ak-signal-action);
   border-radius: 6px;
   cursor: pointer;
 }
@@ -464,9 +464,9 @@
 }
 
 .ed-graph-forkok {
-  color: #14161c !important;
+  color: var(--ak-text-inverse) !important;
   background: var(--accent, #f4c430) !important;
-  border-color: #d6a900 !important;
+  border-color: var(--ak-signal-action) !important;
 }
 
 .ed-graph-forkgap {
@@ -479,7 +479,7 @@
    读数条贴画布左下角，`role="status"` 给读屏。 */
 .bg-direction[aria-pressed="true"] {
   border-color: rgba(244, 196, 48, 0.55);
-  color: #ffd75e;
+  color: var(--ak-color-yellow);
 }
 
 .bg-keys {
@@ -489,7 +489,7 @@
   margin: 0;
   padding: 2px 6px;
   font-size: 10.5px;
-  color: #b9c2d0;
+  color: var(--ak-text-secondary);
   background: rgba(12, 15, 20, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 5px;
@@ -501,7 +501,7 @@
 }
 
 .bg-keys-hint {
-  color: #7f8899;
+  color: var(--ak-color-low);
 }
 
 /* 键盘焦点环：`.ed-graph-pan` 收方向键，必须看得见焦点在哪。 */

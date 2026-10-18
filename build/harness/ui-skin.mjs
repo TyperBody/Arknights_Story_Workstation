@@ -43,20 +43,38 @@ ok("(a) 三个主题文件都在", () => {
 const { chromium } = await import("playwright-core");
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || "/snap/bin/chromium",
-  args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  // 与其它 harness 同一套加固：本机负载高（load 50+）时 chromium 会明显变慢。
+  args: [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--renderer-process-limit=1",
+    "--js-flags=--max-old-space-size=1024",
+  ],
 });
 const errors = [];
 const KNOWN = /transformCallback|ERR_FAILED|Failed to load resource|CORS|Access-Control/;
-const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
-page.on("pageerror", (e) => { const s = String(e.message ?? e); if (!KNOWN.test(s)) errors.push(s.slice(0, 140)); });
-page.on("console", (m) => { if (m.type() === "error" && !KNOWN.test(m.text())) errors.push(`console:${m.text().slice(0, 140)}`); });
+/** 每一张截图**换一个 page**：本机可用内存只有 ~1 GB（load 常年 20~70），同一个
+ *  renderer 连开 6 条路由（编辑器 + 素材库最重）会 OOM 崩掉，报
+ *  `Target page, context or browser has been closed`。开新页前先关旧页。 */
+let page = null;
+const newPage = async (viewport) => {
+  await page?.close().catch(() => {});
+  page = await browser.newPage({ viewport });
+  page.on("pageerror", (e) => { const s = String(e.message ?? e); if (!KNOWN.test(s)) errors.push(s.slice(0, 140)); });
+  page.on("console", (m) => { if (m.type() === "error" && !KNOWN.test(m.text())) errors.push(`console:${m.text().slice(0, 140)}`); });
+  return page;
+};
+await newPage({ width: 1500, height: 950 });
 
 const shot = async (route, name, prep) => {
-  await page.goto(`${DEV}${route}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await page.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar,[data-asset-banner]{display:none!important}" }).catch(() => {});
-  await page.waitForTimeout(2600);
-  if (prep) await prep(page);
-  await page.screenshot({ path: `${OUT}/ui-${name}.png` });
+  const target = await newPage({ width: 1500, height: 950 });
+  await target.goto(`${DEV}${route}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await target.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar,[data-asset-banner]{display:none!important}" }).catch(() => {});
+  await target.waitForTimeout(2600);
+  if (prep) await prep(target);
+  // 截图给 60s：负载高时 30s 默认值会偶发超时（**环境**抖动，不是断言失败）。
+  await target.screenshot({ path: `${OUT}/ui-${name}.png`, timeout: 60_000 });
 };
 
 await shot("/", "home");

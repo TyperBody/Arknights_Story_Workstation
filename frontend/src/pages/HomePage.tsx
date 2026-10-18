@@ -24,18 +24,18 @@ export default function HomePage() {
       <h1 className="home-title">方舟剧场</h1>
       <p className="home-tagline">明日方舟剧情 · 离线演出回放</p>
 
-      <button className="home-help" onClick={() => navigate("/help")}>
+      <button className="ak-button nav-btn home-help" onClick={() => navigate("/help")}>
         使用说明
       </button>
 
       <div className="home-actions">
-        <button className="btn-primary" onClick={() => navigate("/browse")}>
+        <button className="ak-button ak-button--action btn-primary" onClick={() => navigate("/browse")}>
           浏览剧情
         </button>
-        <button className="nav-btn" onClick={() => navigate("/settings")}>
+        <button className="ak-button ak-button--outline nav-btn" onClick={() => navigate("/settings")}>
           设置
         </button>
-        <button className="nav-btn" onClick={() => navigate("/fanfic")}>
+        <button className="ak-button ak-button--outline nav-btn" onClick={() => navigate("/fanfic")}>
           同人剧本
         </button>
       </div>

@@ -40,8 +40,8 @@
   gap: 6px;
   height: 28px;
   padding: 0 6px 0 10px;
-  background: #1f1f1f;
-  border-bottom: 1px solid var(--border);
+  background: var(--ak-color-dark);
+  border-bottom: var(--ak-line-hairline) solid var(--ak-color-gray);
   cursor: move;
   touch-action: none;
   user-select: none;
@@ -52,7 +52,7 @@
 }
 
 .ed-win-bar:hover {
-  background: #242424;
+  background: color-mix(in srgb, var(--ak-color-gray));
 }
 
 .ed-win-icon {

@@ -292,8 +292,9 @@ const browser = await chromium.launch({
     "--no-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
-    "--renderer-process-limit=1",
-    "--js-flags=--max-old-space-size=512",
+    // 不再限制单 renderer：sections (1)(2)(3) 各开一页，挤一个进程时
+    // 一崩全崩（`Target page ... has been closed`）。
+    "--js-flags=--max-old-space-size=384",
   ],
 });
 
@@ -311,11 +312,13 @@ const demoErrors = [];
 let unclippedAr = null;
 try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: DSF });
-  page.setDefaultTimeout(30_000);
+  // 90s：本机 load 常年 20~90，dev server 首次编译 `/editor/demo`（近 4k 行页面
+  // + ak-ui 112 KB CSS）偶尔会超过 30s —— 那是**环境**抖动，不是断言失败。
+  page.setDefaultTimeout(90_000);
   page.on("pageerror", (error) => demoErrors.push(String(error.stack ?? error).split("\n")[0]));
   if (alive) {
     console.log("## (1) /stage-demo.html?scene=two —— 五档缩放");
-    await page.goto(`${DEV}/stage-demo.html?scene=two`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${DEV}/stage-demo.html?scene=two`, { waitUntil: "domcontentloaded", timeout: 90_000 });
     await page.waitForSelector("[data-stage-pane] [data-stage-svg]", { timeout: 20_000 });
     await page.waitForTimeout(1800);
     const pane = page.locator("[data-stage-pane]").first();
@@ -443,6 +446,10 @@ try {
     await pane.locator('[data-stage-action="zoom-1"]').click();
     await page.waitForTimeout(300);
     await page.locator('[data-stage-frame="1"]').screenshot({ path: "build/harness/shots/stage-clip-100.png" }).catch(() => {});
+    // ⚠️ 先关掉这一页再开编辑器页：`--renderer-process-limit=1` 下同一 renderer
+    // 连开「stage-demo + 近 4k 行的编辑器」会把本机（可用内存 ~1 GB）压爆，
+    // 表现是 `Target page, context or browser has been closed`（**环境**抖动）。
+    await page.close().catch(() => {});
   }
 
   // ── (2) 编辑器：舞台面板拖多大，舞台就多大 ──────────────────────────
@@ -466,7 +473,7 @@ try {
     });
     let mounted = false;
     for (let attempt = 1; attempt <= 3 && !mounted; attempt += 1) {
-      await editor.goto(`${DEV}/editor/demo?pack=fanfic_demo&text=${encodeURIComponent(SCRIPT)}`, { waitUntil: "domcontentloaded" });
+      await editor.goto(`${DEV}/editor/demo?pack=fanfic_demo&text=${encodeURIComponent(SCRIPT)}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
       await editor.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none!important}" }).catch(() => {});
       mounted = await editor
         .waitForSelector('[data-wb-panel="stage"] [data-stage-svg]', { timeout: 20_000 })
@@ -541,9 +548,9 @@ try {
   console.log("\n## (3) / —— 调试日志可调大小 + 记忆");
   const home = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   try {
-    await home.goto(`${DEV}/`, { waitUntil: "domcontentloaded" });
+    await home.goto(`${DEV}/`, { waitUntil: "domcontentloaded", timeout: 90_000 });
     await home.evaluate(() => localStorage.removeItem("prts-debug-console-size")).catch(() => {});
-    await home.reload({ waitUntil: "domcontentloaded" });
+    await home.reload({ waitUntil: "domcontentloaded", timeout: 90_000 });
     await home.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none!important}" }).catch(() => {});
     await home.waitForTimeout(1200);
     const toggle = home.locator('button[title="查看调试日志"]');
@@ -598,7 +605,7 @@ try {
       assert.ok(Math.abs(Number(parsed.h) - after.panel.h) <= 2, `h ${parsed.h} vs ${after.panel.h}`);
     });
 
-    await home.reload({ waitUntil: "domcontentloaded" });
+    await home.reload({ waitUntil: "domcontentloaded", timeout: 90_000 });
     await home.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none!important}" }).catch(() => {});
     await home.waitForTimeout(1200);
     await home.locator('button[title="查看调试日志"]').first().click();
@@ -612,7 +619,7 @@ try {
     });
     void after;
     await home.evaluate(() => localStorage.setItem("prts-debug-console-size", "not-json"));
-    await home.reload({ waitUntil: "domcontentloaded" });
+    await home.reload({ waitUntil: "domcontentloaded", timeout: 90_000 });
     await home.addStyleTag({ content: ".bookshelf-sync-warning,.dl-bar{display:none!important}" }).catch(() => {});
     await home.waitForTimeout(1200);
     await home.locator('button[title="查看调试日志"]').first().click();

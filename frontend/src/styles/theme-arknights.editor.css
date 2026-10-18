@@ -1,215 +1,276 @@
 /**
- * `theme-arknights.editor.css` —— **编辑器工作台**的明日方舟风皮肤。
+ * `theme-arknights.editor.css` —— **编辑器工作台适配层**：把 `.ed-*` / `.wb-*` / `.bg-*`
+ * 映射到 ak-ui 的几何与排版（风格来源 = `@yunyoujun/ak-ui`，见 `main.tsx`）。
  *
- * 范围：`.editor-page` `.ed-*`（页头/rail/面板/正文/状态栏/HUD/素材库）`.wb-*`
- *       `.bg-*`（竖排工作流）`.create-pack*`（新建剧本）。
- * 只改观感；`data-*` 契约与类名不动。token 见 `theme-arknights.tokens.css`。
+ * 口径（ak-ui 设计语言，<https://ak-ui.yyj.moe/guide/design-language.html>）：
+ * - **层级靠亮度 + haircut 描边**，不靠阴影；`--ak-surface-canvas` 打底，
+ *   面板 `--ak-surface-inverse` / `--ak-color-dark` 分层；
+ * - **左侧 `--ak-line-strong`（4px）信号条**分节；hairline 1px 勾边；
+ * - **标题用衬线重字**（`--ak-font-serif`，900），控件与正文用无衬线，
+ *   计数 / 行列 / 百分比等"运行数据"用等宽（`--ak-font-mono`）+ `--ak-type-wide`；
+ * - **反馈改两项**（ak-ui 要求）：hover/选中同时改**信号色**与**表面**（或描边），
+ *   过渡 `--ak-motion-fast` / `--ak-motion-base` + `--ak-ease-standard`；
+ * - 焦点环取 `--ak-focus-*`（`outline` 永远可见）。
+ *
+ * 覆盖的只是**尺寸**（桌面工具条 `--ak-ctrl-*` 三档）与"哪些类用哪档"，
+ * 颜色 / 描边 / 动效**一律引用 ak-ui token**。
  */
 
-/* ── 4. 编辑器工作台 ───────────────────────────────────────── */
+/* ── 1. 页头 + 工具条 ─────────────────────────────────────────── */
 
-/* 4.1 页头 + 工具条：网格底 + 细描边；分组之间一条竖分隔。 */
 .editor-page {
-  background: var(--ak-bg-0);
+  background: var(--ak-surface-canvas);
 }
 .ed-header {
-  background: var(--ak-grid) var(--ak-bg-1);
+  background: var(--ak-color-dark);
+  border-bottom: var(--ak-line-hairline) solid var(--ak-color-gray);
 }
 .ed-title h1 {
-  letter-spacing: 0.08em;
+  font-family: var(--ak-font-serif);
+  font-weight: 900;
+  letter-spacing: var(--ak-type-tight);
 }
 .ed-crumb,
 .ed-sub {
-  color: var(--ak-text-3);
-  letter-spacing: 0.02em;
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  letter-spacing: var(--ak-type-wide);
+  color: var(--ak-text-secondary);
 }
-.ed-rail-group,
-.ed-toolgroup {
-  gap: 4px;
+.ed-crumb code {
+  color: var(--ak-color-light-blue);
 }
-.ed-rail-group + .ed-rail-group,
-.ed-toolgroup + .ed-toolgroup {
-  border-left: 1px solid var(--ak-line-1);
-  padding-left: 8px;
-  margin-left: 4px;
+/* 分组之间一条竖分隔（ak-ui 的 hairline 分隔，不做卡片堆叠）。 */
+.ed-toolgroup + .ed-toolgroup,
+.ed-rail-group + .ed-rail-group {
+  border-left: var(--ak-line-hairline) solid var(--ak-color-gray);
+  padding-left: var(--ak-space-2);
+  margin-left: var(--ak-space-2);
 }
 
-/* 4.2 rail（收起窗口的托盘）：竖排文字 + 金色选中条。 */
+/* ── 2. rail（收起窗口的托盘）：石墨面 + 选中项 4px 左信号条 ─────── */
+
 .ed-rail {
-  background: var(--ak-bg-1);
-  border-right: 1px solid var(--ak-line-1);
+  background: var(--ak-surface-inverse);
+  border-right: var(--ak-line-hairline) solid var(--ak-color-gray);
+}
+.ed-rail-label {
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  letter-spacing: var(--ak-type-wide);
 }
 .ed-rail-btn.on {
-  color: var(--ak-accent-hi);
-  border-color: var(--ak-line-accent);
-  background: color-mix(in srgb, var(--ak-accent) 12%, transparent);
+  color: var(--ak-text-primary);
+  border-inline-start: var(--ak-line-strong) solid var(--ak-signal-action);
+  background: color-mix(in srgb, var(--ak-signal-action) 12%, var(--ak-surface-inverse));
 }
 
-/* 4.3 面板窗口壳：标题条一条 1px 底线 + 面板底色。 */
+/* ── 3. 面板窗口壳：hairline 勾边 + 标题条一条底线 ─────────────── */
+
 .ed-win {
-  background: var(--ak-bg-2);
-  border: 1px solid var(--ak-line-1);
-  border-radius: var(--ak-radius);
+  background: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid var(--ak-color-gray);
+  border-radius: 0;
 }
 .ed-win-bar {
-  background: var(--ak-grid) var(--ak-bg-3);
-  border-bottom: 1px solid var(--ak-line-1);
+  background: var(--ak-color-dark);
+  border-bottom: var(--ak-line-hairline) solid var(--ak-color-gray);
 }
 .ed-win-title {
-  letter-spacing: 0.06em;
-  color: var(--ak-text-1);
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  font-weight: 800;
+  letter-spacing: var(--ak-type-wide);
+  text-transform: uppercase;
+  color: var(--ak-text-primary);
+}
+.ed-win.float,
+.wb-float-item {
+  box-shadow: var(--ak-shadow-panel);
 }
 
-/* 4.4 正文（编辑器）：等宽 + tabular 数字；当前行用金色细线不用整行高亮块。 */
+/* ── 4. 正文：行号条 + 当前行标记（ak-ui：金色=操作/当前位置）───── */
+
 .ed-textarea,
 .ed-hl,
-.ed-anchor {
+.ed-anchor,
+.ed-gutter {
   font-variant-numeric: tabular-nums;
 }
 .ed-gutter {
-  background: var(--ak-bg-1);
-  border-right: 1px solid var(--ak-line-1);
+  background: var(--ak-surface-inverse);
+  border-right: var(--ak-line-hairline) solid var(--ak-color-gray);
+  font-family: var(--ak-font-mono);
 }
 .ed-gutter-line.current {
-  color: var(--ak-accent-hi);
+  color: var(--ak-signal-action);
 }
 .ed-linebar {
-  background: color-mix(in srgb, var(--ak-accent) 10%, transparent);
-  border-top: 1px solid var(--ak-line-accent);
-  border-bottom: 1px solid var(--ak-line-accent);
+  background: color-mix(in srgb, var(--ak-signal-action) 10%, transparent);
+  box-shadow: inset 0 1px 0 var(--ak-line-strong) var(--ak-signal-action),
+    inset 0 -1px 0 var(--ak-signal-action);
 }
 
-/* 4.5 HUD（舞台 / 分支图）：小圆角按钮 + 金色激活；`1:1`、百分比用等宽数字。 */
+/* ── 5. HUD（舞台 / 分支图）：石墨浮条 + 选中金 ───────────────── */
+
 [data-stage-hud],
 .bg-zoom-bar {
-  background: color-mix(in srgb, var(--ak-bg-1) 82%, transparent);
-  border: 1px solid var(--ak-line-1);
-  border-radius: var(--ak-radius);
+  background: color-mix(in srgb, var(--ak-surface-inverse) 88%, transparent);
+  border: var(--ak-line-hairline) solid #626a70;
+  border-radius: 0;
   backdrop-filter: blur(4px);
-}
-[data-stage-hud] button,
-.bg-zoom-bar button {
-  border-radius: 3px;
 }
 [data-stage-hud] button.on,
 [data-stage-hud] button[aria-pressed="true"],
-[data-branch-action="direction"][aria-pressed="true"] {
-  background: color-mix(in srgb, var(--ak-accent) 18%, transparent);
-  border-color: var(--ak-line-accent);
-  color: var(--ak-accent-hi);
+[data-branch-action="direction"][aria-pressed="true"],
+.ed-btn.on {
+  background: color-mix(in srgb, var(--ak-signal-action) 16%, transparent);
+  border-color: var(--ak-signal-action);
+  color: var(--ak-color-yellow);
 }
 
-/* 4.6 工作流（竖排）：卡片切角 + 线路色条；选中卡片金色描边。 */
+/* ── 6. 竖排工作流：卡片 = ak-ui 的"切角 + 1px 亮边"，选中金描边 ── */
+
 .bg-node rect {
-  rx: 3;
+  rx: var(--ak-radius-subtle);
 }
 .bg-node.is-picked rect {
-  stroke: var(--ak-accent);
+  stroke: var(--ak-signal-action);
   stroke-width: 2;
 }
-.bg-keys {
-  color: var(--ak-text-3);
-  font-variant-numeric: tabular-nums;
+.bg-key,
+.bg-keys,
+.bg-hint {
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  letter-spacing: var(--ak-type-wide);
+  color: var(--ak-text-secondary);
 }
 
-/* 4.7 素材库：格子 hover 提亮、选中金色描边、★ 用金色。 */
+/* ── 7. 素材库：格子 hairline + 选中金描边；★ 用信号金 ────────── */
+
 .ed-asset-cell {
-  background: var(--ak-bg-2);
-  border: 1px solid var(--ak-line-1);
-  border-radius: 3px;
-  transition: border-color var(--ak-dur) var(--ak-ease), background var(--ak-dur) var(--ak-ease);
+  background: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid var(--ak-color-gray);
+  border-radius: 0;
+  transition: border-color var(--ak-motion-fast) var(--ak-ease-standard),
+    background var(--ak-motion-fast) var(--ak-ease-standard);
 }
 .ed-asset-cell:hover {
-  background: var(--ak-bg-3);
-  border-color: var(--ak-line-2);
+  background: var(--ak-color-dark);
+  border-color: var(--ak-text-secondary);
 }
 .ed-asset-cell[data-asset-selected="1"] {
-  border-color: var(--ak-accent);
-  background: color-mix(in srgb, var(--ak-accent) 8%, transparent);
+  border-color: var(--ak-signal-action);
+  background: color-mix(in srgb, var(--ak-signal-action) 10%, transparent);
 }
 .ed-assets-bar {
-  background: var(--ak-bg-1);
-  border-bottom: 1px solid var(--ak-line-1);
+  background: var(--ak-surface-inverse);
+  border-bottom: var(--ak-line-hairline) solid var(--ak-color-gray);
 }
 .ed-asset-mark {
-  color: var(--ak-accent);
+  color: var(--ak-signal-action);
 }
 
-/* 4.8 状态栏：等宽数字 + 脏标记金色。 */
+/* ── 8. 状态栏：等宽运行数据（ak-ui「数据用 mono」）───────────── */
+
 .ed-status {
-  background: var(--ak-bg-1);
-  border-top: 1px solid var(--ak-line-1);
+  background: var(--ak-surface-inverse);
+  border-top: var(--ak-line-hairline) solid var(--ak-color-gray);
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
 }
 .ed-status .dirty {
-  color: var(--ak-accent);
+  color: var(--ak-color-yellow);
 }
 .ed-status .saved {
-  color: var(--ak-ok);
+  color: var(--ak-signal-success);
+}
+.ed-status .error {
+  color: var(--ak-signal-danger);
 }
 
-/* ── 5. 通用：下载条 / 调试台 / 弹层 ───────────────────────── */
+/* ── 9. 控件尺寸基线（形状/反馈来自 ak-ui 的 `.ak-button`）────── */
 
-.dl-bar {
-  background: color-mix(in srgb, var(--ak-bg-1) 94%, transparent);
-  border-top: 1px solid var(--ak-line-1);
-}
-.dl-progress-fill,
-.dl-fill {
-  background: linear-gradient(90deg, var(--ak-accent), var(--ak-accent-hi)) var(--ak-stripes);
-}
-
-.dbg-panel {
-  background: color-mix(in srgb, var(--ak-bg-1) 96%, transparent);
-  border: 1px solid var(--ak-line-1);
-  border-radius: var(--ak-radius);
-}
-
-.ed-popup,
-.ed-wizard-card,
-.create-pack {
-  background: var(--ak-bg-2);
-  border: 1px solid var(--ak-line-2);
-  border-radius: var(--ak-radius-lg);
-}
-.ed-popup-item.on,
-.ed-popup-item:hover {
-  background: color-mix(in srgb, var(--ak-accent) 14%, transparent);
-  color: var(--ak-accent-hi);
-}
-
-/* ── 7. 编辑器控件统一（与 pages 分片同一套基线）────────────────
-   `.ed-btn`（工具栏 / HUD）= 28px 小档；`.ed-rail-btn` = 30px；
-   `.ed-tab` = 30px。三者此前各写各的 `padding/font-size`，"按钮忽大忽小"。 */
-.ed-btn {
+.ed-btn,
+.ed-scrub-btn,
+.ed-win-btn,
+.ed-assets-btn,
+.ed-alette,
+.ed-status-btn,
+.ed-rail-btn {
   box-sizing: border-box;
-  min-height: var(--ak-ctrl-h-sm);
-  padding: 0 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-family: var(--ak-font-sans);
   line-height: 1;
+}
+.ed-btn,
+.ed-scrub-btn,
+.ed-assets-btn {
+  min-height: var(--ak-ctrl-h-sm);
+  padding: var(--ak-ctrl-pad-sm);
+}
+.ed-win-btn,
+.ed-status-btn,
+.ed-rail-btn {
+  min-height: 22px;
+  padding: 0 6px;
 }
 .ed-tab {
   min-height: 30px;
   display: inline-flex;
   align-items: center;
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  font-weight: 800;
+  letter-spacing: var(--ak-type-wide);
+  text-transform: uppercase;
 }
-.ed-rail-btn,
-.ed-rail-toggle {
-  min-height: 30px;
+
+/* ── 10. 弹层（补全 / 悬停 / 向导 / 新建剧本）：ak-ui 石墨面口径 ── */
+
+.ed-popup,
+.ed-wizard,
+.ed-wizard-card,
+.create-pack {
+  background: var(--ak-surface-inverse);
+  border: var(--ak-line-hairline) solid #626a70;
+  border-left: var(--ak-line-strong) solid var(--ak-signal-action);
+  border-radius: 0;
+  box-shadow: var(--ak-shadow-panel);
 }
-.ed-status-btn {
-  min-height: 22px;
-  display: inline-flex;
-  align-items: center;
+.create-pack-head h2 {
+  font-family: var(--ak-font-serif);
+  font-weight: 900;
+  letter-spacing: var(--ak-type-tight);
 }
-/* 焦点环统一（ak-ui `--ak-focus-*`）。 */
+.ed-popup-item.on,
+.ed-popup-item:hover {
+  background: color-mix(in srgb, var(--ak-signal-action) 14%, transparent);
+  color: var(--ak-color-yellow);
+}
+
+/* ── 11. 焦点（`--ak-focus-*`）：键盘焦点必须可见 ─────────────── */
+
 .ed-btn:focus-visible,
-.ed-rail-btn:focus-visible,
 .ed-tab:focus-visible,
-.btn-primary:focus-visible,
-.nav-btn:focus-visible {
+.ed-rail-btn:focus-visible,
+.ed-win-btn:focus-visible,
+.ed-status-btn:focus-visible,
+.ed-scrub-btn:focus-visible,
+.ed-asset-cell:focus-visible {
   outline: var(--ak-focus-width) solid var(--ak-focus-color);
-  outline-offset: 2px;
+  outline-offset: var(--ak-focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ed-asset-cell,
+  .ed-win,
+  .ed-btn {
+    transition-duration: 1ms;
+  }
 }

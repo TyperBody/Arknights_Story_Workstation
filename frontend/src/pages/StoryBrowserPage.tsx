@@ -237,7 +237,7 @@ export default function StoryBrowserPage() {
     return (
       <div className="error-msg">
         <p>加载剧情目录失败: {error}</p>
-        <button className="btn-primary" onClick={refresh} style={{ marginTop: "12px" }}>
+        <button className="ak-button ak-button--action btn-primary" onClick={refresh} style={{ marginTop: "12px" }}>
           重试
         </button>
       </div>

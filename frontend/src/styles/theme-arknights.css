@@ -1,47 +1,42 @@
 /**
- * `theme-arknights.css` —— **明日方舟同款风格**的一层皮肤（task-AK）。
+ * `theme-arknights.css` —— 皮肤入口 / **ak-ui 适配层**（`@import` 三个分片）。
  *
- * 口径（用户要求「全面优化 UI 要明日方舟同款风格」）：
- * - 只动**观感**：颜色 / 字型 / 边角 / 高光 / 纹理 / 动效；**不动**任何 DOM 契约
- *   （`data-*` 锚点、类名、布局结构都保留），所以 harness 与既有页面逻辑零改动。
- * - 全套 token 收在 `:root`（`--ak-*` 前缀），原 `--bg-*` / `--accent` / `--border`
- *   等**沿用旧名**并在这里重新取值 —— 旧 CSS 一行不改就整体换肤。
- * - 截图证据：`build/harness/shots/ui-*.png`；回归 `node build/harness/ui-skin.mjs`。
+ * 风格来源 = **`@yunyoujun/ak-ui@1.1.0`**（<https://ak-ui.yyj.moe/components/>）：
+ * `frontend/src/main.tsx` 里 `import "@yunyoujun/ak-ui/style.css"` 引入 ak-ui 的
+ * CSS Core（`.ak-*` 组件类 + `--ak-*` token；**不含全局 reset**）。本层只做适配：
  *
- * 风格要点（PRTS/明日方舟 UI 的可见特征，按自己的实现口径做，不照抄素材）：
- * 1. **底色**：近黑蓝（`#101418`）而非纯灰；层级靠**亮度 + 1px 细描边**，
- *    不用大阴影；面板之间用 428 一侧的**竖/横向细分隔条**（3px，与 rail 一致）。
- * 2. **主色**：#f4c430 金（已在用）+ 高光 `#ffe08a`；点缀色只在"选中/进行中"。
- * 3. **几何**：4px 小圆角 + 45°「切角」（`--ak-notch`）用在卡片/按钮的左上角，
- *    是系列 UI 最醒目的识别点；标签/进度条用 2px。
- * 4. **字型**：Noto Sans SC；小字 12px/1.45、标题 15px/600 **字距 +0.02em**
- *    （中文标题拉字距 = 系列味）；数字用 `ui-monospace` 带 tabular。
- * 5. **纹理**：`--ak-grid` = 6px 网格 + 30° 斜纹（极低对比，仅面板/页头），
- *    以及进度/加载的 45° 斜条纹。
- * 6. **动效**：120ms `cubic-bezier(.2,.8,.2,1)`；**尊重 `prefers-reduced-motion`**。
+ * 1. `theme-arknights.tokens.css` —— 旧变量名（`--bg-*` / `--accent` / `--border`
+ *    / `--text-*` / `--hl-*`）→ ak-ui 语义 token；组件级 `--ak-*-signal` 填值；
+ *    **颜色 / 描边 / 切角 / 动效全部来自 ak-ui**，只有密度与纹理由本应用补充。
+ * 2. `theme-arknights.pages.css` —— 首页 / 书架 / 详情 / 设置 / 播放器 chrome。
+ * 3. `theme-arknights.editor.css` —— 编辑器工作台（rail / 窗口壳 / 正文 / HUD /
+ *    素材库 / 竖排工作流 / 弹层）。
  *
- * 与既有皮肤的优先级：本文件在 `global.css` **之后**、`browser.css` **之后**加载
- * （`main.tsx` 的顺序），所以同名规则以本文件为准；`browser.css` 里更"具体"的
- * 选择器（`.xx .yy`）仍可能赢 —— 需要覆盖时用 `--ak-force` 段的 `!important`。
+ * JSX 侧直接使用 ak-ui 组件类（`ak-button` / `ak-button--action` /
+ * `ak-button--outline` / `ak-button--card`…），本层只覆盖**尺寸**与"哪些类用哪档"。
+ *
+ * 加载顺序（`main.tsx`）：`global.css` → **`@yunyoujun/ak-ui/style.css`** →
+ * `browser.css` → 本文件（最后，同名规则以本层为准）。
+ * 回归：`node build/harness/ui-skin.mjs`；截图 `build/harness/shots/ui-*.png`。
  */
 
 @import "./theme-arknights.tokens.css";
 @import "./theme-arknights.pages.css";
 @import "./theme-arknights.editor.css";
 
-/* ── 基础：底色 / 字型 / 滚动条 ───────────────────────────────── */
+/* ── 基础：画布 / 字型 / 滚动条 ─────────────────────────────── */
 
 body {
-  background: var(--ak-bg-0);
-  color: var(--ak-text-1);
-  font-family: var(--ak-font);
-  letter-spacing: 0.005em;
+  background: var(--ak-surface-canvas);
+  color: var(--ak-text-primary);
+  /* 正文/控件 = 无衬线（ak-ui）；标题的衬线在分片里按需指定。 */
+  font-family: var(--ak-font-sans);
 }
 
-/* 全 app 的滚动条（WebKit）：细、近无色，hover 才亮 —— 系列 UI 不抢视线。 */
+/* 全 app 滚动条（WebKit）：细、近无色，hover 才亮。 */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--ak-line-2) transparent;
+  scrollbar-color: var(--ak-color-gray) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
@@ -51,81 +46,45 @@ body {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--ak-line-2);
-  border-radius: 2px;
+  background: var(--ak-color-gray);
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--ak-line-3);
+  background: var(--ak-color-low);
 }
 
-/* ── 通用件：页头 / 卡片 / 按钮 / 徽标 ───────────────────────── */
-
-/* 页头：一条细描边 + 极低对比网格（`--ak-grid`），标题拉字距。 */
-.browser-header {
-  background:
-    var(--ak-grid) var(--ak-bg-1);
-  border-bottom: 1px solid var(--ak-line-1);
+/* 链接 = ak-ui 的"信息"信号（蓝），与"操作"（金）分工。 */
+a {
+  color: var(--ak-signal-info);
 }
-.browser-header h1 {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+a:hover {
+  color: var(--ak-color-light-blue);
 }
 
-/* 卡片：4px 圆角 + 左上切角 + hover 时描边提亮（不用位移，避免抖）。 */
-.fl-card,
-.cover-card,
-.story-card {
-  background: var(--ak-bg-2);
-  border: 1px solid var(--ak-line-1);
-  border-radius: var(--ak-radius);
-  clip-path: var(--ak-notch);
-  transition: border-color var(--ak-dur) var(--ak-ease), background var(--ak-dur) var(--ak-ease);
-}
-.fl-card:hover,
-.cover-card:hover,
-.story-card:hover {
-  background: var(--ak-bg-3);
-  border-color: var(--ak-line-accent);
+/* ── 通用卡片：hairline 勾边（层级靠亮度，不靠阴影）────────────── */
+
+.story-card,
+.card {
+  background: var(--ak-color-dark);
+  border: var(--ak-line-hairline) solid var(--ak-color-gray);
+  border-bottom: var(--ak-line-strong) solid var(--ak-line-3);
 }
 
-/* 主按钮：金色实心 + 深色字；次按钮：金色描边 + 透明底（系列 UI 的双档）。 */
-.btn-primary,
-.nav-btn,
-.ed-btn {
-  border-radius: var(--ak-radius);
-  transition: background var(--ak-dur) var(--ak-ease), border-color var(--ak-dur) var(--ak-ease),
-    color var(--ak-dur) var(--ak-ease);
-}
-.btn-primary {
-  background: linear-gradient(180deg, var(--ak-accent-hi), var(--ak-accent));
-  border: 1px solid var(--ak-accent);
-  color: #14161a;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.btn-primary:hover {
-  background: linear-gradient(180deg, #fff0bf, var(--ak-accent-hi));
-}
-.nav-btn {
-  background: transparent;
-  border: 1px solid var(--ak-line-2);
-  color: var(--ak-text-1);
-}
-.nav-btn:hover {
-  border-color: var(--ak-accent);
-  color: var(--ak-accent-hi);
-  background: color-mix(in srgb, var(--ak-accent) 8%, transparent);
-}
+/* ── 徽标 / 分类签：ak-ui `.ak-tag` 的口径（左 0.3rem 信号条 + 石墨底）── */
 
-/* 徽标 / 分类签：竖起一条 2px 金线 = 系列 UI 的"标签条"。 */
 .fl-badge,
 .ed-badge {
-  border-radius: 2px;
-  border-left: 2px solid var(--ak-accent);
-  background: color-mix(in srgb, var(--ak-accent) 10%, transparent);
-  color: var(--ak-accent-hi);
-  letter-spacing: 0.02em;
+  background: var(--ak-surface-inverse);
+  border-left: 0.3rem solid var(--ak-signal-info);
+  color: var(--ak-text-primary);
+  font-family: var(--ak-font-mono);
+  font-size: var(--ak-type-label-size);
+  font-weight: 800;
+  letter-spacing: var(--ak-type-wide);
+  text-transform: uppercase;
+}
+.fl-badge.advanced,
+.ed-badge.danger {
+  border-left-color: var(--ak-signal-action);
 }
 
 @media (prefers-reduced-motion: reduce) {
