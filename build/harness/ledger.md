@@ -52,6 +52,15 @@ node build/ctx/… tools/mirror/mirror-selftest.mjs   # 94/94
 | 19 | 「编译三包 全量素材和音频补丁包 主程序只 200MB 基础素材…一共起码 5–6GB」 | `build/artifacts/` 实测 | ✅ 主程序 263 MB（含 250 MB 起步素材）/ 素材补丁 2.4 GB（立绘全差分 + CG 1,476 张）/ 音频补丁 823 MB；三包合计 **3.5 GB** |
 | 20 | 「补丁包是安装包的形式 安装到 arkstage 的文件夹里 如果没有 arkstage 则提示没有本体」 | `scripts/fanfic/build-patch-installer.mjs`（+ `--win`） | ✅ `.run`（Linux/macOS 自解压：`--data-root`→`PRTS_DATA_DIR`→`config.json`→`~/.local/share`→exe 同级；**找不到 → exit 2**）。NSIS `.exe`（注册表→LOCALAPPDATA→Program Files→同级；**找不到 → MessageBox + Abort**；`SetOverwrite off`）；**>2 GiB 自动分卷**（NSIS 32 位偏移） |
 
+## 第五轮（换风格：改用 ak-ui 设计系统）
+
+| # | 需求（用户原话） | 证据（命令） | 结果 |
+|---|---|---|---|
+| 21 | 「风格改成 https://ak-ui.yyj.moe/components/ 吧 不要用现有的这一套有点难看的 ui 了」 | `node build/harness/ui-skin.mjs`（10） | ✅ 引入 npm **`@yunyoujun/ak-ui@1.1.0`**（MIT）作为设计系统：`main.tsx` 里 `@yunyoujun/ak-ui/style.css` 垫在自有样式之前（实测它**没有全局 reset**）；JSX 直接用 `ak-button`（+`--action`/`--outline`/`--danger`）与 `ak-segmented`；旧类名全部保留 → harness 选择器不动 |
+| 21a | （上一版是自调金/蓝，"有点难看"） | `build/harness/shots/ui-*.png` | ✅ 适配层只做两件事：**旧变量名 → ak-ui 语义 token** 重绑 + 组件级 `--ak-*-signal` 填值；颜色/描边/切角/动效全取 ak-ui（画布 `#111315`、`--ak-color-blue #2bf` 主操作、`--ak-color-advanced #f1c644` 操作/警告、hairline 1px + 左侧 4px 信号条、衬线重标题 + 等宽运行数据）；应用只补**密度**（28/34/38px）与纹理 |
+| 21b | — | 实测 | ⚠️ ak-ui `.ak-button` 是**固定 150×50** → 适配层必须先 `width/height:auto` 再套密度；`--bg-secondary` 接到 `--ak-surface-muted` 会变**亮纸面**（`.fl-empty` 整片发白）→ 改接深色抬升面 |
+| 21c | — | `run.mjs`（35/35） | ✅ 组件自带 CSS（`inspectorWindow/workbench/branchGraph`）硬编码色也换成 ak-ui token；harness 侧加固：`ui-skin` 每张截图换 page（本机 8 GB、load 高，同 renderer 连开 6 页会被 OOM killer 杀），`_stage-clip-check` 去掉 `--renderer-process-limit=1` 并在开编辑器页前关掉舞台页 |
+
 ## 需要人工（非代码）动作
 - 建 `djkcyl/arkstage-mirror` 空仓 + 配 `MIRROR_TOKEN`，跑一次 `.github/workflows/publish-mirror.yml` → jsd/fastly/ghproxy 才真正可用（当前自动回退 prts）。
 - 真机验证：Windows WebView2 / Android 上的 `snapshot.json`（`include_bytes!`）与 CSP。
